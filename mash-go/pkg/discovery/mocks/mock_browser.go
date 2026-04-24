@@ -89,64 +89,6 @@ func (_c *MockBrowser_BrowseCommissionable_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// BrowseCommissioners provides a mock function with given fields: ctx
-func (_m *MockBrowser) BrowseCommissioners(ctx context.Context) (<-chan *discovery.CommissionerService, error) {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for BrowseCommissioners")
-	}
-
-	var r0 <-chan *discovery.CommissionerService
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (<-chan *discovery.CommissionerService, error)); ok {
-		return rf(ctx)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context) <-chan *discovery.CommissionerService); ok {
-		r0 = rf(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(<-chan *discovery.CommissionerService)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBrowser_BrowseCommissioners_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BrowseCommissioners'
-type MockBrowser_BrowseCommissioners_Call struct {
-	*mock.Call
-}
-
-// BrowseCommissioners is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockBrowser_Expecter) BrowseCommissioners(ctx interface{}) *MockBrowser_BrowseCommissioners_Call {
-	return &MockBrowser_BrowseCommissioners_Call{Call: _e.mock.On("BrowseCommissioners", ctx)}
-}
-
-func (_c *MockBrowser_BrowseCommissioners_Call) Run(run func(ctx context.Context)) *MockBrowser_BrowseCommissioners_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockBrowser_BrowseCommissioners_Call) Return(_a0 <-chan *discovery.CommissionerService, _a1 error) *MockBrowser_BrowseCommissioners_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockBrowser_BrowseCommissioners_Call) RunAndReturn(run func(context.Context) (<-chan *discovery.CommissionerService, error)) *MockBrowser_BrowseCommissioners_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // BrowseOperational provides a mock function with given fields: ctx, zoneID
 func (_m *MockBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-chan *discovery.OperationalService, error) {
 	ret := _m.Called(ctx, zoneID)

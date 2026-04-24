@@ -28,15 +28,6 @@ type Advertiser interface {
 	// StopOperational stops advertising operational service for a specific zone.
 	StopOperational(zoneID string) error
 
-	// AdvertiseCommissioner starts advertising a commissioner service.
-	AdvertiseCommissioner(ctx context.Context, info *CommissionerInfo) error
-
-	// UpdateCommissioner updates TXT records for a commissioner service.
-	UpdateCommissioner(zoneID string, info *CommissionerInfo) error
-
-	// StopCommissioner stops advertising commissioner service for a specific zone.
-	StopCommissioner(zoneID string) error
-
 	// AnnouncePairingRequest starts advertising a pairing request.
 	// Controllers use this to signal devices that they want to commission them.
 	// The discriminator identifies the target device.
@@ -100,9 +91,6 @@ type DiscoveryManager struct {
 	// Operational zones
 	operationalZones map[string]*OperationalInfo
 
-	// Commissioner zones (for zone controllers)
-	commissionerZones map[string]*CommissionerInfo
-
 	// Pairing requests (for zone controllers)
 	// Keyed by discriminator to support multiple concurrent requests
 	pairingRequests map[uint16]*PairingRequestInfo
@@ -123,11 +111,10 @@ type DiscoveryManager struct {
 // NewDiscoveryManager creates a new discovery manager.
 func NewDiscoveryManager(advertiser Advertiser) *DiscoveryManager {
 	return &DiscoveryManager{
-		state:             StateUnregistered,
-		advertiser:        advertiser,
-		operationalZones:  make(map[string]*OperationalInfo),
-		commissionerZones: make(map[string]*CommissionerInfo),
-		pairingRequests:   make(map[uint16]*PairingRequestInfo),
+		state:            StateUnregistered,
+		advertiser:       advertiser,
+		operationalZones: make(map[string]*OperationalInfo),
+		pairingRequests:  make(map[uint16]*PairingRequestInfo),
 	}
 }
 
@@ -394,57 +381,6 @@ func (m *DiscoveryManager) ZoneCount() int {
 	return len(m.operationalZones)
 }
 
-// AddCommissionerZone adds a commissioner zone (for zone controllers).
-func (m *DiscoveryManager) AddCommissionerZone(ctx context.Context, info *CommissionerInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if info.ZoneID == "" || info.ZoneName == "" {
-		return ErrMissingRequired
-	}
-
-	if err := m.advertiser.AdvertiseCommissioner(ctx, info); err != nil {
-		return err
-	}
-
-	m.commissionerZones[info.ZoneID] = info
-	return nil
-}
-
-// UpdateCommissionerZone updates a commissioner zone's TXT records.
-func (m *DiscoveryManager) UpdateCommissionerZone(info *CommissionerInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, exists := m.commissionerZones[info.ZoneID]; !exists {
-		return ErrNotFound
-	}
-
-	if err := m.advertiser.UpdateCommissioner(info.ZoneID, info); err != nil {
-		return err
-	}
-
-	m.commissionerZones[info.ZoneID] = info
-	return nil
-}
-
-// RemoveCommissionerZone stops advertising a commissioner zone.
-func (m *DiscoveryManager) RemoveCommissionerZone(zoneID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, exists := m.commissionerZones[zoneID]; !exists {
-		return ErrNotFound
-	}
-
-	if err := m.advertiser.StopCommissioner(zoneID); err != nil {
-		return err
-	}
-
-	delete(m.commissionerZones, zoneID)
-	return nil
-}
-
 // Stop stops all advertising.
 func (m *DiscoveryManager) Stop() {
 	m.mu.Lock()
@@ -461,7 +397,6 @@ func (m *DiscoveryManager) Stop() {
 
 	// Clear state
 	m.operationalZones = make(map[string]*OperationalInfo)
-	m.commissionerZones = make(map[string]*CommissionerInfo)
 	m.pairingRequests = make(map[uint16]*PairingRequestInfo)
 
 	oldState := m.state

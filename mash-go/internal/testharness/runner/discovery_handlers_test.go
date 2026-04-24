@@ -423,26 +423,18 @@ func TestBrowseMDNS_MinCountFields(t *testing.T) {
 	ds := getDiscoveryState(state)
 	ds.services = []discoveredService{
 		{ServiceType: discovery.ServiceTypeCommissionable, TXTRecords: map[string]string{}},
-		{ServiceType: discovery.ServiceTypeCommissioner, TXTRecords: map[string]string{}},
+		{ServiceType: discovery.ServiceTypeOperational, TXTRecords: map[string]string{}},
 	}
 
-	// The handleBrowseMDNS would produce these. Verify by reading the last service list.
 	devicesFound := 0
-	controllersFound := 0
 	for _, svc := range ds.services {
-		switch svc.ServiceType {
-		case discovery.ServiceTypeCommissionable, discovery.ServiceTypeOperational:
+		if svc.ServiceType == discovery.ServiceTypeCommissionable || svc.ServiceType == discovery.ServiceTypeOperational {
 			devicesFound++
-		case discovery.ServiceTypeCommissioner:
-			controllersFound++
 		}
 	}
 
-	if devicesFound != 1 {
-		t.Errorf("expected 1 device, got %d", devicesFound)
-	}
-	if controllersFound != 1 {
-		t.Errorf("expected 1 controller, got %d", controllersFound)
+	if devicesFound != 2 {
+		t.Errorf("expected 2 devices, got %d", devicesFound)
 	}
 }
 
@@ -1073,12 +1065,6 @@ func (b *freshWindowBrowser) BrowseOperational(context.Context, string) (<-chan 
 	for _, svc := range b.operationalByCall[b.opCalls] {
 		ch <- svc
 	}
-	close(ch)
-	return ch, nil
-}
-
-func (b *freshWindowBrowser) BrowseCommissioners(context.Context) (<-chan *discovery.CommissionerService, error) {
-	ch := make(chan *discovery.CommissionerService)
 	close(ch)
 	return ch, nil
 }

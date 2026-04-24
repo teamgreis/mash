@@ -13,9 +13,6 @@ const (
 	// ServiceTypeOperational is the service type for commissioned devices.
 	ServiceTypeOperational = "_mash._tcp"
 
-	// ServiceTypeCommissioner is the service type for zone controllers.
-	ServiceTypeCommissioner = "_mashd._udp"
-
 	// ServiceTypePairingRequest is the service type for pairing requests.
 	// Controllers announce this to signal a specific device to open its commissioning window.
 	ServiceTypePairingRequest = "_mashp._udp"
@@ -41,13 +38,11 @@ const (
 	TXTKeyZoneID     = "ZI" // Zone ID (first 64 bits of SHA-256)
 	TXTKeyDeviceID   = "DI" // Device ID (first 64 bits of SHA-256)
 	TXTKeyVendorProd = "VP" // Vendor:Product ID (optional)
-	TXTKeyFirmware  = "FW" // Firmware version (optional)
-	TXTKeyEndpoints = "EP" // Endpoint count (optional)
+	TXTKeyFirmware   = "FW" // Firmware version (optional)
+	TXTKeyEndpoints  = "EP" // Endpoint count (optional)
 
-	// Commissioner TXT keys
-	TXTKeyZoneName    = "ZN" // Zone name (user-friendly)
-	TXTKeyDeviceCount = "DC" // Device count in zone (optional)
-	// Also uses: ZI (zone ID), VP (vendor:product), DN (controller name)
+	// Pairing request TXT keys (also uses TXTKeyDiscriminator and TXTKeyZoneID)
+	TXTKeyZoneName = "ZN" // Zone name (optional, user-friendly)
 )
 
 // Timing constants.
@@ -283,36 +278,6 @@ type OperationalService struct {
 	EndpointCount uint8
 }
 
-// CommissionerService represents a zone controller found via mDNS.
-type CommissionerService struct {
-	// InstanceName is the mDNS instance name (zone name).
-	InstanceName string
-
-	// Host is the hostname.
-	Host string
-
-	// Port is the service port.
-	Port uint16
-
-	// Addresses contains resolved IP addresses.
-	Addresses []string
-
-	// ZoneName is the user-friendly zone name (from TXT "ZN").
-	ZoneName string
-
-	// ZoneID is the zone ID (from TXT "ZI", 16 hex chars).
-	ZoneID string
-
-	// VendorProduct is optional vendor:product ID (from TXT "VP").
-	VendorProduct string
-
-	// ControllerName is optional controller name (from TXT "DN").
-	ControllerName string
-
-	// DeviceCount is optional device count in zone (from TXT "DC").
-	DeviceCount uint8
-}
-
 // CommissionableInfo contains information for advertising a commissionable device.
 type CommissionableInfo struct {
 	// Discriminator identifies this device (0-4095).
@@ -356,30 +321,6 @@ type OperationalInfo struct {
 
 	// EndpointCount is optional endpoint count.
 	EndpointCount uint8
-
-	// Port is the service port.
-	Port uint16
-
-	// Host is the hostname to advertise.
-	Host string
-}
-
-// CommissionerInfo contains information for advertising a commissioner.
-type CommissionerInfo struct {
-	// ZoneName is the user-friendly zone name.
-	ZoneName string
-
-	// ZoneID is the zone ID (16 hex chars).
-	ZoneID string
-
-	// VendorProduct is optional vendor:product ID.
-	VendorProduct string
-
-	// ControllerName is optional controller name.
-	ControllerName string
-
-	// DeviceCount is the number of devices in the zone.
-	DeviceCount uint8
 
 	// Port is the service port.
 	Port uint16

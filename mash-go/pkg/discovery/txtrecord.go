@@ -136,62 +136,6 @@ func DecodeOperationalTXT(txt TXTRecordMap) (*OperationalInfo, error) {
 	return info, nil
 }
 
-// EncodeCommissionerTXT creates TXT records for commissioner discovery.
-func EncodeCommissionerTXT(info *CommissionerInfo) TXTRecordMap {
-	txt := make(TXTRecordMap)
-
-	// Required fields
-	txt[TXTKeyZoneName] = info.ZoneName
-	txt[TXTKeyZoneID] = info.ZoneID
-
-	// Optional fields
-	if info.VendorProduct != "" {
-		txt[TXTKeyVendorProd] = info.VendorProduct
-	}
-	if info.ControllerName != "" {
-		txt[TXTKeyDeviceName] = info.ControllerName
-	}
-	if info.DeviceCount > 0 {
-		txt[TXTKeyDeviceCount] = strconv.FormatUint(uint64(info.DeviceCount), 10)
-	}
-
-	return txt
-}
-
-// DecodeCommissionerTXT parses TXT records from commissioner discovery.
-func DecodeCommissionerTXT(txt TXTRecordMap) (*CommissionerInfo, error) {
-	info := &CommissionerInfo{}
-
-	// Parse zone name (required)
-	var ok bool
-	info.ZoneName, ok = txt[TXTKeyZoneName]
-	if !ok || info.ZoneName == "" {
-		return nil, fmt.Errorf("%w: %s", ErrMissingRequired, TXTKeyZoneName)
-	}
-
-	// Parse zone ID (required)
-	info.ZoneID, ok = txt[TXTKeyZoneID]
-	if !ok || len(info.ZoneID) != IDLength {
-		return nil, fmt.Errorf("%w: %s", ErrMissingRequired, TXTKeyZoneID)
-	}
-	if !isHexString(info.ZoneID) {
-		return nil, fmt.Errorf("%w: invalid zone ID format", ErrInvalidTXTRecord)
-	}
-
-	// Optional fields
-	info.VendorProduct = txt[TXTKeyVendorProd]
-	info.ControllerName = txt[TXTKeyDeviceName]
-
-	if dcStr, ok := txt[TXTKeyDeviceCount]; ok {
-		dc, err := strconv.ParseUint(dcStr, 10, 8)
-		if err == nil {
-			info.DeviceCount = uint8(dc)
-		}
-	}
-
-	return info, nil
-}
-
 // encodeCategories converts categories to comma-separated string.
 func encodeCategories(cats []DeviceCategory) string {
 	if len(cats) == 0 {

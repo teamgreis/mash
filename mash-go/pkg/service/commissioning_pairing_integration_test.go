@@ -203,12 +203,6 @@ func (b *pairingRequestMockBrowser) BrowseOperational(ctx context.Context, zoneI
 	return ch, nil
 }
 
-func (b *pairingRequestMockBrowser) BrowseCommissioners(ctx context.Context) (<-chan *discovery.CommissionerService, error) {
-	ch := make(chan *discovery.CommissionerService)
-	close(ch)
-	return ch, nil
-}
-
 func (b *pairingRequestMockBrowser) BrowsePairingRequests(ctx context.Context, callback func(discovery.PairingRequestService)) error {
 	b.mu.Lock()
 	b.pairingRequestCallback = callback

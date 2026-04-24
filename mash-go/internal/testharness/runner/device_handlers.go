@@ -139,8 +139,6 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 		result, err = r.handleAdjustClock(ctx, subStep, state)
 
 	// Discovery sub-actions.
-	case "browse_commissioners":
-		result, err = r.handleBrowseCommissioners(ctx, subStep, state)
 	case "get_qr_payload", "get_qr":
 		result, err = r.handleGetQRPayload(ctx, subStep, state)
 		// Enrich with format validation fields.

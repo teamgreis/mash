@@ -167,7 +167,7 @@ func (o *mdnsObserver) ensureSession(serviceType string) {
 		// "" means all -- start all known session types
 		o.ensureSession(discovery.ServiceTypeCommissionable)
 		o.ensureSession(discovery.ServiceTypeOperational)
-		o.ensureSession(discovery.ServiceTypeCommissioner)
+		o.ensureSession(discovery.ServiceTypePairingRequest)
 		return
 	}
 
@@ -190,8 +190,6 @@ func (o *mdnsObserver) ensureSession(serviceType string) {
 		o.startCommissionableBrowse(ctx)
 	case discovery.ServiceTypeOperational:
 		o.startOperationalBrowse(ctx)
-	case discovery.ServiceTypeCommissioner:
-		o.startCommissionerBrowse(ctx)
 	case discovery.ServiceTypePairingRequest:
 		o.startPairingRequestBrowse(ctx)
 	}
@@ -232,21 +230,6 @@ func (o *mdnsObserver) startOperationalBrowse(ctx context.Context) {
 	go func() {
 		for svc := range ch {
 			o.addService(operationalToDiscovered(svc))
-		}
-	}()
-}
-
-// startCommissionerBrowse starts a persistent commissioner browse session.
-func (o *mdnsObserver) startCommissionerBrowse(ctx context.Context) {
-	ch, err := o.browser.BrowseCommissioners(ctx)
-	if err != nil {
-		o.debugf("mdnsObserver: commissioner browse error: %v", err)
-		return
-	}
-
-	go func() {
-		for svc := range ch {
-			o.addService(commissionerToDiscovered(svc))
 		}
 	}()
 }
@@ -328,21 +311,6 @@ func operationalToDiscovered(svc *discovery.OperationalService) discoveredServic
 	}
 }
 
-func commissionerToDiscovered(svc *discovery.CommissionerService) discoveredService {
-	return discoveredService{
-		InstanceName: svc.InstanceName,
-		Host:         svc.Host,
-		Port:         svc.Port,
-		Addresses:    svc.Addresses,
-		ServiceType:  discovery.ServiceTypeCommissioner,
-		TXTRecords: map[string]string{
-			"ZN": svc.ZoneName,
-			"ZI": svc.ZoneID,
-			"DC": strconv.Itoa(int(svc.DeviceCount)),
-		},
-	}
-}
-
 func pairingRequestToDiscovered(svc *discovery.PairingRequestService) discoveredService {
 	return discoveredService{
 		InstanceName:  svc.InstanceName,
@@ -393,8 +361,6 @@ func resolveServiceType(serviceType string) string {
 		return discovery.ServiceTypeCommissionable
 	case discovery.ServiceTypeOperational, ServiceAliasOperational:
 		return discovery.ServiceTypeOperational
-	case discovery.ServiceTypeCommissioner, ServiceAliasCommissioner:
-		return discovery.ServiceTypeCommissioner
 	case discovery.ServiceTypePairingRequest, ServiceAliasPairingRequest:
 		return discovery.ServiceTypePairingRequest
 	case "":

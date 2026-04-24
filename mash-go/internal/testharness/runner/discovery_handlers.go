@@ -22,7 +22,6 @@ func (r *Runner) registerDiscoveryHandlers() {
 	r.engine.RegisterChecker(KeyAAAACountMin, r.checkAAAACountMin)
 
 	r.engine.RegisterHandler(ActionBrowseMDNS, r.handleBrowseMDNS)
-	r.engine.RegisterHandler(ActionBrowseCommissioners, r.handleBrowseCommissioners)
 	r.engine.RegisterHandler(ActionReadMDNSTXT, r.handleReadMDNSTXT)
 	r.engine.RegisterHandler(ActionVerifyMDNSAdvertising, r.handleVerifyMDNSAdvertising)
 	r.engine.RegisterHandler(ActionVerifyMDNSBrowsing, r.handleVerifyMDNSBrowsing)
@@ -338,25 +337,6 @@ func (r *Runner) browseFreshWindow(ctx context.Context, serviceType string, time
 				return services, nil
 			}
 		}
-	case discovery.ServiceTypeCommissioner:
-		added, err := obs.browser.BrowseCommissioners(browseCtx)
-		if err != nil {
-			return nil, err
-		}
-		services := make([]discoveredService, 0)
-		for {
-			select {
-			case svc, ok := <-added:
-				if !ok {
-					return services, nil
-				}
-				if svc != nil {
-					services = append(services, commissionerToDiscovered(svc))
-				}
-			case <-browseCtx.Done():
-				return services, nil
-			}
-		}
 	default:
 		return nil, fmt.Errorf("unsupported service type: %q", serviceType)
 	}
@@ -487,13 +467,9 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState, hints browseSelectionHint
 
 	// Compute per-service-type counts.
 	devicesFound := 0
-	controllersFound := 0
 	for _, svc := range ds.services {
-		switch svc.ServiceType {
-		case discovery.ServiceTypeCommissionable, discovery.ServiceTypeOperational:
+		if svc.ServiceType == discovery.ServiceTypeCommissionable || svc.ServiceType == discovery.ServiceTypeOperational {
 			devicesFound++
-		case discovery.ServiceTypeCommissioner:
-			controllersFound++
 		}
 	}
 
@@ -591,12 +567,7 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState, hints browseSelectionHint
 		KeyServiceCount:             len(ds.services),
 		KeyServices:                 ds.services,
 		KeyDevicesFound:             devicesFound,
-		KeyControllersFound:         controllersFound,
-		KeyCommissionersFound:       controllersFound > 0,
 		KeyDevicesFoundMin:          devicesFound,
-		KeyControllersFoundMin:      controllersFound,
-		KeyCommissionerCountMin:     controllersFound,
-		KeyControllerFound:          controllersFound > 0,
 		KeyRetriesPerformedMin:      0,
 		KeyInstanceConflictResolved: !instanceConflict,
 		KeyInstancesForDevice:       len(ds.services),
@@ -667,11 +638,6 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState, hints browseSelectionHint
 			} else {
 				outputs[KeyInstanceNameFormat] = selected.InstanceName
 			}
-
-		case discovery.ServiceTypeCommissioner:
-			// Commissioner-specific fields.
-			zi := selected.TXTRecords["ZI"]
-			outputs[KeyTXTZILength] = len(zi)
 		}
 	}
 
@@ -704,12 +670,6 @@ func isValidHex(s string) bool {
 	}
 	_, err := hex.DecodeString(s)
 	return err == nil
-}
-
-// handleBrowseCommissioners browses for commissioner services.
-func (r *Runner) handleBrowseCommissioners(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	step.Params[KeyServiceType] = ServiceAliasCommissioner
-	return r.handleBrowseMDNS(ctx, step, state)
 }
 
 // handleReadMDNSTXT reads TXT records for a discovered service.

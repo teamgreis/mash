@@ -18,10 +18,9 @@ type MDNSAdvertiser struct {
 	mu sync.Mutex
 
 	// Active services
-	commissionableServer   *zeroconf.Server
-	operationalServers     map[string]*zeroconf.Server // keyed by zoneID
-	commissionerServers    map[string]*zeroconf.Server // keyed by zoneID
-	pairingRequestServers  map[uint16]*zeroconf.Server // keyed by discriminator
+	commissionableServer  *zeroconf.Server
+	operationalServers    map[string]*zeroconf.Server // keyed by zoneID
+	pairingRequestServers map[uint16]*zeroconf.Server // keyed by discriminator
 }
 
 // NewMDNSAdvertiser creates a new mDNS advertiser.
@@ -29,7 +28,6 @@ func NewMDNSAdvertiser(config AdvertiserConfig) (*MDNSAdvertiser, error) {
 	return &MDNSAdvertiser{
 		config:                config,
 		operationalServers:    make(map[string]*zeroconf.Server),
-		commissionerServers:   make(map[string]*zeroconf.Server),
 		pairingRequestServers: make(map[uint16]*zeroconf.Server),
 	}, nil
 }
@@ -232,104 +230,6 @@ func (a *MDNSAdvertiser) StopOperational(zoneID string) error {
 	return nil
 }
 
-// AdvertiseCommissioner starts advertising a commissioner service.
-func (a *MDNSAdvertiser) AdvertiseCommissioner(ctx context.Context, info *CommissionerInfo) error {
-	if a.config.Quiet {
-		return nil
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Stop existing for this zone if any
-	if server, exists := a.commissionerServers[info.ZoneID]; exists {
-		server.Shutdown()
-		delete(a.commissionerServers, info.ZoneID)
-	}
-
-	// Build instance name using zone name
-	instanceName := info.ZoneName
-	if len(instanceName) > MaxInstanceNameLen {
-		instanceName = instanceName[:MaxInstanceNameLen]
-	}
-
-	// Build TXT records
-	txtRecords := EncodeCommissionerTXT(info)
-	txtStrings := TXTRecordsToStrings(txtRecords)
-
-	// Determine port
-	port := int(info.Port)
-	if port == 0 {
-		port = DefaultPort
-	}
-
-	// Get interfaces and options
-	ifaces := a.getInterfaces()
-	opts := a.serverOptions()
-
-	host := resolvedHost(info.Host)
-	ips := interfaceIPs(ifaces)
-
-	server, err := zeroconf.RegisterProxy(
-		instanceName,
-		ServiceTypeCommissioner,
-		Domain,
-		port,
-		host,
-		ips,
-		txtStrings,
-		ifaces,
-		opts...,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to register commissioner service: %w", err)
-	}
-
-	a.commissionerServers[info.ZoneID] = server
-	return nil
-}
-
-// UpdateCommissioner updates TXT records for a commissioner service.
-func (a *MDNSAdvertiser) UpdateCommissioner(zoneID string, info *CommissionerInfo) error {
-	if a.config.Quiet {
-		return nil
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	server, exists := a.commissionerServers[zoneID]
-	if !exists {
-		return ErrNotFound
-	}
-
-	// Update TXT records
-	txtRecords := EncodeCommissionerTXT(info)
-	txtStrings := TXTRecordsToStrings(txtRecords)
-	server.SetText(txtStrings)
-
-	return nil
-}
-
-// StopCommissioner stops advertising commissioner service for a specific zone.
-func (a *MDNSAdvertiser) StopCommissioner(zoneID string) error {
-	if a.config.Quiet {
-		return nil
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	server, exists := a.commissionerServers[zoneID]
-	if !exists {
-		return ErrNotFound
-	}
-
-	server.Shutdown()
-	delete(a.commissionerServers, zoneID)
-	return nil
-}
-
 // normalizeHostname strips the ".local" suffix and trailing dot from a
 // hostname so that zeroconf.RegisterProxy can correctly produce a fully
 // qualified domain name (FQDN) with trailing dot. Without this, macOS
@@ -481,11 +381,6 @@ func (a *MDNSAdvertiser) StopAll() {
 	for zoneID, server := range a.operationalServers {
 		server.Shutdown()
 		delete(a.operationalServers, zoneID)
-	}
-
-	for zoneID, server := range a.commissionerServers {
-		server.Shutdown()
-		delete(a.commissionerServers, zoneID)
 	}
 
 	for discriminator, server := range a.pairingRequestServers {
@@ -669,85 +564,6 @@ func (b *MDNSBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-c
 	// Start browsing in background
 	go func() {
 		_ = zeroconf.Browse(ctx, ServiceTypeOperational, Domain, entries, removed, opts...)
-	}()
-
-	return out, nil
-}
-
-// BrowseCommissioners searches for zone controllers.
-// Services are aggregated by instance name - addresses from multiple interfaces
-// are combined into a single entry.
-func (b *MDNSBrowser) BrowseCommissioners(ctx context.Context) (<-chan *CommissionerService, error) {
-	out := make(chan *CommissionerService)
-
-	entries := make(chan *zeroconf.ServiceEntry)
-	removed := make(chan *zeroconf.ServiceEntry)
-
-	// Set up browser options
-	opts := b.browserOptions()
-
-	// Process entries with aggregation
-	go func() {
-		defer close(out)
-
-		// Track services by instance name, aggregating addresses
-		services := make(map[string]*CommissionerService)
-
-		for {
-			select {
-			case entry, ok := <-entries:
-				if !ok {
-					return
-				}
-				svc := b.entryToCommissioner(entry)
-				if svc == nil {
-					continue
-				}
-
-				existing, found := services[svc.InstanceName]
-				if found {
-					// Check if this is a reconnection (had no addresses before)
-					hadNoAddresses := len(existing.Addresses) == 0
-					// Merge addresses into existing entry
-					existing.Addresses = mergeAddresses(existing.Addresses, svc.Addresses)
-					// Re-emit if this is a reconnection
-					if hadNoAddresses && len(existing.Addresses) > 0 {
-						select {
-						case out <- existing:
-						case <-ctx.Done():
-							return
-						}
-					}
-				} else {
-					// New service - store and emit
-					services[svc.InstanceName] = svc
-					select {
-					case out <- svc:
-					case <-ctx.Done():
-						return
-					}
-				}
-
-			case entry, ok := <-removed:
-				if !ok {
-					continue
-				}
-				if existing, found := services[entry.Instance]; found {
-					existing.Addresses = removeAddresses(existing.Addresses, entry)
-					if len(existing.Addresses) == 0 {
-						delete(services, entry.Instance)
-					}
-				}
-
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	// Start browsing in background
-	go func() {
-		_ = zeroconf.Browse(ctx, ServiceTypeCommissioner, Domain, entries, removed, opts...)
 	}()
 
 	return out, nil
@@ -963,36 +779,6 @@ func (b *MDNSBrowser) entryToOperational(entry *zeroconf.ServiceEntry) *Operatio
 		VendorProduct: info.VendorProduct,
 		Firmware:      info.Firmware,
 		EndpointCount: info.EndpointCount,
-	}
-}
-
-// entryToCommissioner converts a zeroconf entry to CommissionerService.
-func (b *MDNSBrowser) entryToCommissioner(entry *zeroconf.ServiceEntry) *CommissionerService {
-	txt := StringsToTXTRecords(entry.Text)
-	info, err := DecodeCommissionerTXT(txt)
-	if err != nil {
-		return nil
-	}
-
-	// Collect addresses
-	addrs := make([]string, 0, len(entry.AddrIPv4)+len(entry.AddrIPv6))
-	for _, ip := range entry.AddrIPv4 {
-		addrs = append(addrs, ip.String())
-	}
-	for _, ip := range entry.AddrIPv6 {
-		addrs = append(addrs, ip.String())
-	}
-
-	return &CommissionerService{
-		InstanceName:   entry.Instance,
-		Host:           entry.HostName,
-		Port:           uint16(entry.Port),
-		Addresses:      addrs,
-		ZoneName:       info.ZoneName,
-		ZoneID:         info.ZoneID,
-		VendorProduct:  info.VendorProduct,
-		ControllerName: info.ControllerName,
-		DeviceCount:    info.DeviceCount,
 	}
 }
 

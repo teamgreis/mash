@@ -1,6 +1,7 @@
 // Package discovery implements mDNS/DNS-SD discovery for MASH devices.
 //
-// MASH uses three separate mDNS service types (following the Matter model):
+// MASH uses two mDNS service types plus a pairing-request signaling service
+// (following the Matter model):
 //
 // # Commissionable Discovery (_mash-comm._tcp)
 //
@@ -16,11 +17,14 @@
 // where both IDs are fingerprint-derived from certificates (first 64 bits of SHA-256).
 // TXT records include: ZI (zone ID), DI (device ID), and optionally VP, FW, FM.
 //
-// # Commissioner Discovery (_mashd._udp)
+// # Pairing Request (_mashp._udp)
 //
-// Zone controllers advertise this service to allow device-initiated pairing.
-// Instance name is the user-friendly zone name.
-// TXT records include: ZN (zone name), ZI (zone ID), and optionally VP, DN, DC.
+// Controllers announce this service to signal a specific device to open its
+// commissioning window (e.g., for delegated SMGW commissioning or deferred
+// pairing scenarios). Port is always 0 -- this is a signaling-only service.
+// Instance name format: <zone-id>-<discriminator>
+// TXT records include: D (target discriminator), ZI (requesting zone ID),
+// and optionally ZN (zone name for display).
 //
 // # QR Code
 //

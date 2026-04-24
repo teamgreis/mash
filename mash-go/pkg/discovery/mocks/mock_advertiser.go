@@ -69,53 +69,6 @@ func (_c *MockAdvertiser_AdvertiseCommissionable_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// AdvertiseCommissioner provides a mock function with given fields: ctx, info
-func (_m *MockAdvertiser) AdvertiseCommissioner(ctx context.Context, info *discovery.CommissionerInfo) error {
-	ret := _m.Called(ctx, info)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AdvertiseCommissioner")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *discovery.CommissionerInfo) error); ok {
-		r0 = rf(ctx, info)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockAdvertiser_AdvertiseCommissioner_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AdvertiseCommissioner'
-type MockAdvertiser_AdvertiseCommissioner_Call struct {
-	*mock.Call
-}
-
-// AdvertiseCommissioner is a helper method to define mock.On call
-//   - ctx context.Context
-//   - info *discovery.CommissionerInfo
-func (_e *MockAdvertiser_Expecter) AdvertiseCommissioner(ctx interface{}, info interface{}) *MockAdvertiser_AdvertiseCommissioner_Call {
-	return &MockAdvertiser_AdvertiseCommissioner_Call{Call: _e.mock.On("AdvertiseCommissioner", ctx, info)}
-}
-
-func (_c *MockAdvertiser_AdvertiseCommissioner_Call) Run(run func(ctx context.Context, info *discovery.CommissionerInfo)) *MockAdvertiser_AdvertiseCommissioner_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*discovery.CommissionerInfo))
-	})
-	return _c
-}
-
-func (_c *MockAdvertiser_AdvertiseCommissioner_Call) Return(_a0 error) *MockAdvertiser_AdvertiseCommissioner_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockAdvertiser_AdvertiseCommissioner_Call) RunAndReturn(run func(context.Context, *discovery.CommissionerInfo) error) *MockAdvertiser_AdvertiseCommissioner_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // AdvertiseOperational provides a mock function with given fields: ctx, info
 func (_m *MockAdvertiser) AdvertiseOperational(ctx context.Context, info *discovery.OperationalInfo) error {
 	ret := _m.Called(ctx, info)
@@ -287,52 +240,6 @@ func (_c *MockAdvertiser_StopCommissionable_Call) RunAndReturn(run func() error)
 	return _c
 }
 
-// StopCommissioner provides a mock function with given fields: zoneID
-func (_m *MockAdvertiser) StopCommissioner(zoneID string) error {
-	ret := _m.Called(zoneID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for StopCommissioner")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(zoneID)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockAdvertiser_StopCommissioner_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StopCommissioner'
-type MockAdvertiser_StopCommissioner_Call struct {
-	*mock.Call
-}
-
-// StopCommissioner is a helper method to define mock.On call
-//   - zoneID string
-func (_e *MockAdvertiser_Expecter) StopCommissioner(zoneID interface{}) *MockAdvertiser_StopCommissioner_Call {
-	return &MockAdvertiser_StopCommissioner_Call{Call: _e.mock.On("StopCommissioner", zoneID)}
-}
-
-func (_c *MockAdvertiser_StopCommissioner_Call) Run(run func(zoneID string)) *MockAdvertiser_StopCommissioner_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *MockAdvertiser_StopCommissioner_Call) Return(_a0 error) *MockAdvertiser_StopCommissioner_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockAdvertiser_StopCommissioner_Call) RunAndReturn(run func(string) error) *MockAdvertiser_StopCommissioner_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // StopOperational provides a mock function with given fields: zoneID
 func (_m *MockAdvertiser) StopOperational(zoneID string) error {
 	ret := _m.Called(zoneID)
@@ -421,53 +328,6 @@ func (_c *MockAdvertiser_StopPairingRequest_Call) Return(_a0 error) *MockAdverti
 }
 
 func (_c *MockAdvertiser_StopPairingRequest_Call) RunAndReturn(run func(uint16) error) *MockAdvertiser_StopPairingRequest_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// UpdateCommissioner provides a mock function with given fields: zoneID, info
-func (_m *MockAdvertiser) UpdateCommissioner(zoneID string, info *discovery.CommissionerInfo) error {
-	ret := _m.Called(zoneID, info)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdateCommissioner")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *discovery.CommissionerInfo) error); ok {
-		r0 = rf(zoneID, info)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockAdvertiser_UpdateCommissioner_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateCommissioner'
-type MockAdvertiser_UpdateCommissioner_Call struct {
-	*mock.Call
-}
-
-// UpdateCommissioner is a helper method to define mock.On call
-//   - zoneID string
-//   - info *discovery.CommissionerInfo
-func (_e *MockAdvertiser_Expecter) UpdateCommissioner(zoneID interface{}, info interface{}) *MockAdvertiser_UpdateCommissioner_Call {
-	return &MockAdvertiser_UpdateCommissioner_Call{Call: _e.mock.On("UpdateCommissioner", zoneID, info)}
-}
-
-func (_c *MockAdvertiser_UpdateCommissioner_Call) Run(run func(zoneID string, info *discovery.CommissionerInfo)) *MockAdvertiser_UpdateCommissioner_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*discovery.CommissionerInfo))
-	})
-	return _c
-}
-
-func (_c *MockAdvertiser_UpdateCommissioner_Call) Return(_a0 error) *MockAdvertiser_UpdateCommissioner_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockAdvertiser_UpdateCommissioner_Call) RunAndReturn(run func(string, *discovery.CommissionerInfo) error) *MockAdvertiser_UpdateCommissioner_Call {
 	_c.Call.Return(run)
 	return _c
 }

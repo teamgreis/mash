@@ -425,11 +425,10 @@ For each feature, in order:
 | TC-CERT | 4 | Certificate handling |
 | TC-MASHC | 6 | Commissionable discovery (`_mash-comm._tcp`) |
 | TC-MASHO | 6 | Operational discovery (`_mash._tcp`) |
-| TC-MASHD | 6 | Commissioner discovery (`_mashd._udp`) |
 | TC-QR | 6 | QR code parsing |
 | TC-DISC | 4 | Discriminator handling |
 | TC-DSTATE | 6 | Discovery state transitions |
-| TC-BROWSE | 6 | Service browsing (all three types) |
+| TC-BROWSE | 6 | Service browsing |
 | TC-ZONE-CREATE | 3 | Zone creation |
 | TC-ZONE-ADD | 5 | Adding devices to zone |
 | TC-CERT-RENEW | 5 | Certificate renewal |

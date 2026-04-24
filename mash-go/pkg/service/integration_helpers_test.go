@@ -165,12 +165,6 @@ func (m *mockBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-c
 	return ch, nil
 }
 
-func (m *mockBrowser) BrowseCommissioners(ctx context.Context) (<-chan *discovery.CommissionerService, error) {
-	ch := make(chan *discovery.CommissionerService)
-	close(ch)
-	return ch, nil
-}
-
 func (m *mockBrowser) BrowsePairingRequests(ctx context.Context, callback func(discovery.PairingRequestService)) error {
 	// Default implementation: block until cancelled
 	<-ctx.Done()

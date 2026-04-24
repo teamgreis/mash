@@ -19,13 +19,12 @@
 
 ## 1. Discovery Overview
 
-MASH uses mDNS/DNS-SD for network discovery with four service types:
+MASH uses mDNS/DNS-SD for network discovery with three service types:
 
 | Service Type | Purpose | Advertised By |
 |--------------|---------|---------------|
 | `_mash-comm._tcp` | Commissionable device | Device in commissioning mode |
 | `_mash._tcp` | Operational device | Commissioned device |
-| `_mashd._udp` | Commissioner/controller | Zone controller |
 | `_mashp._udp` | Pairing request | Controller seeking specific device |
 
 After network discovery, controllers use capability discovery to learn device features.
@@ -40,7 +39,6 @@ After network discovery, controllers use capability discovery to learn device fe
 |---------|----------|-------------|
 | `_mash-comm._tcp.local` | TCP | Device ready for commissioning (DEC-067) |
 | `_mash._tcp.local` | TCP | Operational device accepting connections |
-| `_mashd._udp.local` | UDP | Zone controller announcing presence |
 | `_mashp._udp.local` | UDP | Pairing request for specific device |
 
 ### 2.2 Commissionable Device (`_mash-comm._tcp`)

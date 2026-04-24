@@ -4255,6 +4255,74 @@ This DEC supersedes the `eventList` reservation made in DEC-035. DEC-035's reser
 
 ---
 
+### DEC-081: Remove `_mashd._udp` Commissioner-Discovery Service
+
+**Date:** 2026-04-24
+**Status:** Accepted
+
+**Context:**
+The discovery layer defined four mDNS service types:
+
+- `_mash-comm._tcp` — commissionable devices (device → controller)
+- `_mash._tcp` — operational devices (device → controller)
+- `_mashp._udp` — pairing request (controller → device)
+- `_mashd._udp` — commissioner/controller announcement
+
+`_mashd._udp` was specified (`docs/discovery.md §2.3` — removed in this change; `docs/testing/behavior/discovery.md §2.3`) as an affordance for "device-initiated pairing": a device with a display would browse `_mashd._udp`, show the user a list of controllers ("Home Energy", "Office EMS"), and "initiate commissioning" with the selected one.
+
+**The architectural problem:**
+In MASH the device is a pure TLS server. Every commissioning and operational connection is initiated by the controller (commissioner-side of PASE; client-side of TLS). The device cannot open a socket outward. Therefore:
+
+1. After the user "picks Home Energy" on the device's display, the device's only action is to open its commissioning window and advertise `_mash-comm._tcp`.
+2. Any controller that holds the setup code can now complete PASE — there is no field in `_mash-comm._tcp` TXT that restricts the window to a specific zone.
+3. The device's "choice" therefore has no protocol-enforceable effect; authentication is keyed on the setup code (QR-derived), not on the controller's zone identity.
+
+Matter reaches the same conclusion and has no equivalent service type: controller-initiated commissioning plus passcode-gated PASE makes "device browses for controllers" unnecessary. MASH inherits this asymmetry but had retained the extra service type for UX reasons.
+
+**Evidence of vestigial status in the reference implementation:**
+- `pkg/service/` never calls `discovery.AddCommissionerZone`, `UpdateCommissionerZone`, `RemoveCommissionerZone`, or `AdvertiseCommissioner`. No controller process advertises `_mashd._udp`.
+- `pkg/service/` never calls `BrowseCommissioners`. No device process consumes it.
+- All references to `_mashd._udp` in the Go tree are inside `pkg/discovery/` itself (plumbing), the test harness (`internal/testharness/runner/`) for conformance-test scaffolding, and mock stubs in test files.
+- The `TC-MASHD-*` conformance suite exists only to validate the scaffolding — no higher-level test depends on `_mashd._udp` to exercise a protocol flow.
+
+**Options Evaluated:**
+1. **Remove entirely** — delete `_mashd._udp` from the service-type registry, remove supporting Go code, remove TC-MASHD conformance cases.
+2. **Keep as an informational/optional service** — rewrite the docs to drop the "device picks controller" flow and retain the service type for installer-tool topology browsing.
+3. **Retain as specified** — accept that the flow described in the spec is aspirational.
+
+**Decision:**
+Adopt **Option 1: remove `_mashd._udp` from the protocol surface.**
+
+**Actions:**
+- Delete `§2.3 Commissioner Discovery` from `docs/discovery.md` and `docs/testing/behavior/discovery.md`.
+- Remove the `_mashd._udp` row from every service-type table (`docs/discovery.md §2.1`, `docs/protocol-overview.md`, `docs/stack-architecture.md`, `docs/protocol-comparison.md`, `docs/testing/behavior/connection-establishment.md`, `mash-go/ARCHITECTURE-STACK.md`).
+- Delete the `TC-MASHD-*` conformance suite (`docs/testing/README.md`, `docs/testing/behavior/discovery.md §4.1`, `mash-go/testdata/cases/discovery-behavior-tests.yaml`).
+- Remove `MASH.S.DISC.SVC_COMMISSIONER` from `mash-go/testdata/pics/protocol-common.yaml`.
+- Remove Go API: `ServiceTypeCommissioner`, `CommissionerService`, `CommissionerInfo`, `ServiceCommissioner`, `TXTKeyZoneName`, `TXTKeyDeviceCount`, `BrowseCommissioners`, `AdvertiseCommissioner`/`UpdateCommissioner`/`StopCommissioner`, `AddCommissionerZone`/`UpdateCommissionerZone`/`RemoveCommissionerZone`, `EncodeCommissionerTXT`/`DecodeCommissionerTXT`, `ToCommissionerService`/`entryToCommissioner`.
+- Regenerate `pkg/discovery/mocks/` (mockery).
+- Remove test-harness scaffolding: `ActionBrowseCommissioners`, `handleBrowseCommissioners`, the commissioner branches in `mdns_observer.go` / `discovery_handlers.go`.
+- Update `mash-deepdive.html` mDNS service-type table.
+
+**Rationale:**
+- **The device's "pick" is not enforceable.** In a pure server-device model, "device browses for controller" cannot drive a protocol state change that distinguishes the picked controller from any other passcode-holding controller. Documenting it as such misleads readers.
+- **Every legitimate trigger for opening a commissioning window already exists without `_mashd._udp`:** user action (button, QR scan, UI), controller-initiated `_mashp._udp`, and factory-default (DEC-059 — window open when no zones).
+- **One fewer service type in constrained implementations.** ESP32-class devices implement mDNS from scratch; every service removed saves flash, RAM, and an advertise/browse path.
+- **Convergence with Matter.** Matter uses the same "passcode + controller-initiated PASE" model and has no commissioner-announce service; removing `_mashd._udp` aligns MASH with a proven simpler model.
+- **Re-adding is cheap.** If a future use case (e.g., zero-touch onboarding with cryptographic controller identity) needs it, a new DEC can reinstate the service type.
+
+**Supersession:**
+None. `_mashd._udp` was not a formally decided service type in an earlier DEC — it existed from the initial discovery design. This DEC formalizes its removal.
+
+**Declined Alternatives:**
+- **Option 2 (keep as informational):** preserves a service type whose only protocol-layer purpose is "help installer tools draw topology diagrams." That is a tooling concern, not a protocol concern, and can be re-introduced later if justified. Keeping it now perpetuates the misleading "device picks controller" pattern in existing docs.
+- **Option 3 (retain as specified):** explicitly rejected — the flow as specified does not work, per the architectural argument above.
+
+**Follow-up:** If a future feature requires device-side awareness of controllers (e.g., zero-touch provisioning with controller-side cryptographic identity), a new DEC should re-introduce the service type with a concrete protocol-state-change semantics, not just a UX affordance.
+
+**Related:** DEC-048 (commissioning window duration), DEC-059 (auto re-enter commissioning on last zone removal), DEC-067 (ALPN-routed single port), DEC-078 (commissionable TXT schema).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -4393,3 +4461,4 @@ Key learnings:
 | 2026-02-04 | Added DEC-065: Connection cooldown starts at release. Moves lastCommissioningAttempt timestamp from acceptCommissioningConnection to releaseCommissioningConnection so cooldown prevents rapid re-attempts after completion, not during in-progress connections. |
 | 2026-02-11 | Added DEC-067: Single-port ALPN-based commissioning routing and stable commissioning certificate. Uses `GetConfigForClient` with ALPN `mash-comm/1` (commissioning) and `mash/1` (operational) on a single port. Commissioning cert generated once (at first startup or factory provisioning) instead of per-window. |
 | 2026-02-14 | Added DEC-068: Invalid passcode validation. Devices reject 12 prohibited low-entropy setup codes (Matter 5.1.7.1). Valid range narrowed to 1-99999998. Standard test passcode changed from 12345678 to 20202021. |
+| 2026-04-24 | Added DEC-081: Remove `_mashd._udp` commissioner-discovery service. "Device picks controller" flow is architecturally incoherent in a pure server-device model; no production code path used it. Delete service type from specs, Go API, test harness, and TC-MASHD conformance cases. |

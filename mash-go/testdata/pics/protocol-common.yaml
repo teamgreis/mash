@@ -74,7 +74,7 @@ items:
 
   MASH.S.DISC.SVC_COMMISSION: _mash-comm._tcp  # Commissioning service type (DEC-067)
   MASH.S.DISC.SVC_OPERATIONAL: _mash._tcp      # Operational service type
-  MASH.S.DISC.SVC_COMMISSIONER: _mashd._udp    # Commissioner service type
+  MASH.S.DISC.SVC_PAIRING: _mashp._udp         # Pairing-request signaling service type (DEC-081)
   MASH.S.DISC.BROWSE_TIMEOUT: 10               # Browse timeout (seconds)
   MASH.S.DISC.COMMISSION_WINDOW: 120           # Commission window (seconds)
   MASH.S.DISC.DISCRIMINATOR_BITS: 12           # Discriminator bit length
@@ -231,9 +231,6 @@ items:
   # ==========================================================================
 
   MASH.C.DISC.PAIRING_REQUEST: true        # Controller can announce pairing requests
-  MASH.C.DISC.COMMR_TXT_DC: 1             # Commissioner TXT: discriminator
-  MASH.C.DISC.COMMR_TXT_ZI: 1             # Commissioner TXT: zone ID
-  MASH.C.DISC.COMMR_TXT_ZN: 1             # Commissioner TXT: zone name
   MASH.C.ZONE.CREATE: true                # Controller can create zones
   MASH.C.PROTO.RECONNECT: true            # Controller reconnection support
   MASH.C.CERT.AUTO: true                  # Auto certificate management

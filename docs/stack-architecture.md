@@ -90,7 +90,7 @@ graph TB
 
     subgraph Discovery["Discovery & Commissioning"]
         MDNS["mDNS<br/>(zeroconf)"]
-        ADV["Advertiser<br/>(_mashc/_mash/_mashd/_mashp)"]
+        ADV["Advertiser<br/>(_mash-comm/_mash/_mashp)"]
         BRW["Browser<br/>(commissionable/operational)"]
         PASE["SPAKE2+<br/>(P-256)"]
         CERT["Certificate Exchange"]
@@ -622,7 +622,6 @@ classDiagram
 |-------------|-------------|---------|---------------|
 | Commissionable | `_mash-comm._tcp` | Devices in commissioning mode | `MASH-<discriminator>` |
 | Operational | `_mash._tcp` | Commissioned devices | `<ZoneID>-<DeviceID>` |
-| Commissioner | `_mashd._udp` | Zone controllers | `<ZoneName>` |
 | PairingRequest | `_mashp._udp` | Pairing request signals | `<ZoneID>-<Discriminator>` |
 
 ### 8.2 TXT Record Fields

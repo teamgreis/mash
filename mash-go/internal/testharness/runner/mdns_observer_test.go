@@ -29,17 +29,13 @@ type testBrowser struct {
 	// Operational browse channel
 	opAdded chan *discovery.OperationalService
 
-	// Commissioner browse channel
-	commrAdded chan *discovery.CommissionerService
-
 	// Pairing request callback (set by BrowsePairingRequests)
 	pairingCallback func(discovery.PairingRequestService)
 
 	// Tracking which sessions were started
-	commStarted  atomic.Bool
-	opStarted    atomic.Bool
-	commrStarted atomic.Bool
-	stopCalled   atomic.Bool
+	commStarted atomic.Bool
+	opStarted   atomic.Bool
+	stopCalled  atomic.Bool
 }
 
 func newTestBrowser() *testBrowser {
@@ -47,7 +43,6 @@ func newTestBrowser() *testBrowser {
 		commAdded:   make(chan *discovery.CommissionableService, 100),
 		commRemoved: make(chan *discovery.CommissionableService, 100),
 		opAdded:     make(chan *discovery.OperationalService, 100),
-		commrAdded:  make(chan *discovery.CommissionerService, 100),
 	}
 }
 
@@ -105,30 +100,6 @@ func (b *testBrowser) BrowseOperational(ctx context.Context, _ string) (<-chan *
 			case <-ctx.Done():
 				return
 			case svc, ok := <-b.opAdded:
-				if !ok {
-					return
-				}
-				select {
-				case out <- svc:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return out, nil
-}
-
-func (b *testBrowser) BrowseCommissioners(ctx context.Context) (<-chan *discovery.CommissionerService, error) {
-	b.commrStarted.Store(true)
-	out := make(chan *discovery.CommissionerService)
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case svc, ok := <-b.commrAdded:
 				if !ok {
 					return
 				}
@@ -682,31 +653,6 @@ func TestObserver_StopThenSnapshot_ReturnsEmpty(t *testing.T) {
 	obs.Stop()
 	snap := obs.Snapshot("commissionable")
 	assert.Empty(t, snap)
-}
-
-func TestObserver_CommissionerServices(t *testing.T) {
-	tb := newTestBrowser()
-	obs := newMDNSObserver(tb, noopDebugf)
-	defer obs.Stop()
-
-	tb.commrAdded <- &discovery.CommissionerService{
-		InstanceName: "ctrl-1",
-		ZoneName:     "Home",
-		ZoneID:       "AABB",
-		DeviceCount:  3,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	snap, err := obs.WaitFor(ctx, "commissioner", func(svcs []discoveredService) bool {
-		return len(svcs) >= 1
-	})
-	require.NoError(t, err)
-	require.Len(t, snap, 1)
-	assert.Equal(t, "ctrl-1", snap[0].InstanceName)
-	assert.Equal(t, "Home", snap[0].TXTRecords["ZN"])
-	assert.Equal(t, "AABB", snap[0].TXTRecords["ZI"])
-	assert.Equal(t, "3", snap[0].TXTRecords["DC"])
 }
 
 func TestObserver_PairingRequestServices(t *testing.T) {

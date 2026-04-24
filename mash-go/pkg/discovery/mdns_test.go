@@ -161,35 +161,6 @@ func TestMDNSAdvertiserUpdateOperational(t *testing.T) {
 	}
 }
 
-// TestMDNSAdvertiserCommissioner verifies advertising a commissioner service.
-func TestMDNSAdvertiserCommissioner(t *testing.T) {
-	adv, err := discovery.NewMDNSAdvertiser(testAdvertiserConfig(t))
-	if err != nil {
-		t.Fatalf("Failed to create advertiser: %v", err)
-	}
-	defer adv.StopAll()
-
-	ctx := context.Background()
-	info := &discovery.CommissionerInfo{
-		ZoneName:       "My Home",
-		ZoneID:         "A1B2C3D4E5F6A7B8",
-		VendorProduct:  "TestCo:Controller1",
-		ControllerName: "Home Controller",
-		DeviceCount:    5,
-		Port:           8443,
-	}
-
-	err = adv.AdvertiseCommissioner(ctx, info)
-	if err != nil {
-		t.Fatalf("Failed to advertise commissioner: %v", err)
-	}
-
-	err = adv.StopCommissioner(info.ZoneID)
-	if err != nil {
-		t.Errorf("Failed to stop commissioner: %v", err)
-	}
-}
-
 // TestMDNSBrowserCreate verifies the browser can be created with default config.
 func TestMDNSBrowserCreate(t *testing.T) {
 	browser, err := discovery.NewMDNSBrowser(testBrowserConfig(t))
@@ -285,28 +256,6 @@ func TestMDNSBrowserFindByDiscriminatorTimeout(t *testing.T) {
 	}
 }
 
-// TestMDNSBrowserCommissioners verifies browsing for commissioner services starts without error.
-func TestMDNSBrowserCommissioners(t *testing.T) {
-	browser, err := discovery.NewMDNSBrowser(testBrowserConfig(t))
-	if err != nil {
-		t.Fatalf("Failed to create browser: %v", err)
-	}
-	defer browser.Stop()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	results, err := browser.BrowseCommissioners(ctx)
-	if err != nil {
-		t.Fatalf("Failed to browse: %v", err)
-	}
-
-	// With mocks, we won't find any commissioners - just verify the channel works
-	for range results {
-		// Drain channel
-	}
-}
-
 // TestMDNSAdvertiserStopNonexistent verifies stopping a non-existent service returns error.
 func TestMDNSAdvertiserStopNonexistent(t *testing.T) {
 	adv, err := discovery.NewMDNSAdvertiser(testAdvertiserConfig(t))
@@ -319,11 +268,6 @@ func TestMDNSAdvertiserStopNonexistent(t *testing.T) {
 	err = adv.StopOperational("nonexistent-zone")
 	if err == nil {
 		t.Error("Expected error when stopping non-existent service")
-	}
-
-	err = adv.StopCommissioner("nonexistent-zone")
-	if err == nil {
-		t.Error("Expected error when stopping non-existent commissioner")
 	}
 }
 

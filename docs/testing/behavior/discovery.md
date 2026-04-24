@@ -10,11 +10,11 @@
 
 ## 1. Overview
 
-MASH discovery uses **three separate mDNS service types** (following the Matter model):
+MASH discovery uses **two mDNS service types** plus a pairing-request signaling service (following the Matter model):
 
 1. **Commissionable Discovery (`_mash-comm._tcp`)** - Find devices ready for pairing
 2. **Operational Discovery (`_mash._tcp`)** - Find commissioned devices in zones
-3. **Commissioner Discovery (`_mashd._udp`)** - Find zone controllers (EMSs)
+3. **Pairing Request (`_mashp._udp`)** - Controller signals a specific device to open its commissioning window (see `discovery.md §2.4`)
 
 **Key principles:**
 - DNS-SD compliant (RFC 6763)
@@ -84,46 +84,15 @@ A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.               TXT   "ZI=A1B2
 1234567890ABCDEF-FEDCBA0987654321._mash._tcp.local.               TXT   "ZI=1234567890ABCDEF" "DI=FEDCBA0987654321"
 ```
 
-### 2.3 Commissioner Discovery (`_mashd._udp`)
-
-**Purpose:** Allow devices to discover zone controllers (EMSs) on the network.
-
-```
-Service Type:  _mashd._udp
-Domain:        local
-Port:          8443
-```
-
-**When advertised:**
-- Zone controller is ready to accept commissioning requests
-- Used for device-initiated pairing (device with screen finds EMSs)
-
-**Instance name:** `<zone-name>` (user-friendly name, max 63 chars)
-
-**Example:**
-```
-_mashd._udp.local.                   PTR   Home Energy._mashd._udp.local.
-Home Energy._mashd._udp.local.       SRV   0 0 8443 ems-controller.local.
-Home Energy._mashd._udp.local.       TXT   "ZN=Home Energy" "ZI=A1B2C3D4E5F6A7B8"
-ems-controller.local.                AAAA  2001:db8::1
-```
-
-**Use case flow:**
-1. Device with display enters "find controller" mode
-2. Device browses `_mashd._udp.local`
-3. Device shows list: "Home Energy", "Office EMS", etc.
-4. User selects a controller
-5. Device initiates commissioning with that controller
-
-### 2.4 Service Type Summary
+### 2.3 Service Type Summary
 
 | Service Type | Purpose | When Present | Instance Name |
 |--------------|---------|--------------|---------------|
 | `_mash-comm._tcp` | Find devices to commission | Commissioning window open | `MASH-<discriminator>` |
 | `_mash._tcp` | Find operational devices | Device has zone(s) | `<zone-id>-<device-id>` |
-| `_mashd._udp` | Find commissioners | Controller ready | `<zone-name>` |
+| `_mashp._udp` | Pairing request signal | Controller seeks specific device | `<zone-id>-<discriminator>` |
 
-### 2.5 Instance Naming Constraints
+### 2.4 Instance Naming Constraints
 
 **All instance names:**
 - Maximum length: 63 characters (DNS label limit)
@@ -187,7 +156,7 @@ key=value
 
 **Note:** Category numbers align with EEBUS "SHIP Requirements for Installation Process" v1.1.0. Numbers are stable - new categories will be added at the end, existing numbers will not change.
 
-**Zone controllers:** Category 2 (EMS) devices are typically zone controllers - they create zones, commission other devices, and coordinate energy management. An EMS advertises `_mashd._udp` (commissioner discovery) and browses `_mash-comm._tcp` to find devices to commission. Category 1 (GCPH) may also act as a zone controller in grid operator scenarios.
+**Zone controllers:** Category 2 (EMS) devices are typically zone controllers - they create zones, commission other devices, and coordinate energy management. An EMS browses `_mash-comm._tcp` to find devices to commission; it does not itself advertise an operational mDNS service (commissioning and operational TLS are always controller-initiated). Category 1 (GCPH) may also act as a zone controller in grid operator scenarios.
 
 **Multiple categories:** A device may belong to multiple categories. For example, a hybrid inverter with integrated EMS functionality uses `cat=2,5`. If functionality changes (e.g., user deactivates EMS because a separate EMS is used), the device updates its `cat` value dynamically.
 
@@ -238,27 +207,7 @@ FW=1.2.3
 
 **Note:** Both ZI and DI are fingerprint-derived. VP is optional (useful for debugging but not required for open source implementations).
 
-### 3.4 Commissioner TXT Records (`_mashd._udp`)
-
-| Key | Type | Required | Max Len | Description |
-|-----|------|----------|---------|-------------|
-| `ZN` | string | Yes | 32 | Zone name (user-friendly) |
-| `ZI` | string | Yes | 16 | Zone ID (first 64 bits of Zone CA fingerprint) |
-| `VP` | string | No | 11 | Vendor:Product ID of controller (optional) |
-| `DN` | string | No | 32 | Controller name (user-friendly) |
-| `DC` | uint8 | No | 3 | Device count in zone |
-
-**Example:**
-```
-ZN=Home Energy
-ZI=A1B2C3D4E5F6A7B8
-DN=Smart EMS Pro
-DC=5
-```
-
-**Total size:** ~80 bytes typical, 130 bytes maximum
-
-### 3.5 TXT Record Update Rules
+### 3.4 TXT Record Update Rules
 
 **When to update mDNS:**
 
@@ -272,14 +221,13 @@ DC=5
 | Zone removed | `_mash._tcp` | Deregister that instance |
 | All zones removed | `_mash._tcp` | Deregister all instances |
 | Firmware update | `_mash._tcp` | Update FW in all instances |
-| Device joins zone | `_mashd._udp` | Update DC |
 
 **Update timing:**
 - mDNS change within 1 second of state change
 - mDNS goodbye (TTL=0) before removing old record
 - mDNS announcement (3 times) for new record
 
-### 3.6 Character Encoding
+### 3.5 Character Encoding
 
 | Field | Encoding | Allowed Characters |
 |-------|----------|--------------------|
@@ -613,33 +561,11 @@ OPERATIONAL+COMMISSIONING → OPERATIONAL : Timeout or success
 | Remove zone (operational) | - | Remove that instance |
 | → UNREGISTERED | Deregister | Deregister all |
 
-### 6.4 Zone Controller (Commissioner) States
+### 6.4 Zone Controller Discovery Presence
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                   Zone Controller Discovery States                          │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   ┌─────────────────┐                                                       │
-│   │ INACTIVE        │  No mDNS services (powered off / no zone)             │
-│   └────────┬────────┘                                                       │
-│            │ Zone created                                                   │
-│            ▼                                                                │
-│   ┌─────────────────┐                                                       │
-│   │ ACTIVE          │  _mashd._udp: <zone-name>                             │
-│   │                 │  (Accepting commissioning requests)                   │
-│   └────────┬────────┘                                                       │
-│            │                                                                │
-│            │ Zone deleted                                                   │
-│            ▼                                                                │
-│   ┌─────────────────┐                                                       │
-│   │ INACTIVE        │  Deregister _mashd._udp                               │
-│   └─────────────────┘                                                       │
-│                                                                             │
-└────────────────────────────────────────────────────────────────────────────┘
-```
+Zone controllers do not advertise a dedicated mDNS service. All commissioning and operational connections are controller-initiated (see DEC-081). A controller that browses `_mash-comm._tcp` to find commissionable devices is itself invisible on mDNS; its presence on the network is inferred only by devices that successfully complete PASE and are then connected to from that controller.
 
-**Multiple zones:** Controller with multiple zones registers one `_mashd._udp` instance per zone.
+**Pairing-request signaling:** Where a controller holds device credentials (QR-derived) but the target device is not yet advertising, the controller announces `_mashp._udp` to trigger the device's commissioning window. This is the only controller-originated mDNS traffic. See `docs/discovery.md §2.4`.
 
 ---
 
@@ -692,17 +618,7 @@ OPERATIONAL+COMMISSIONING → OPERATIONAL : Timeout or success
 - Use randomized device ID (not serial number)
 - Zone ID is truncated (8 chars) - reduces fingerprinting
 
-### 8.3 Commissioner Discovery
-
-**Information in `_mashd._udp`:**
-- Zone name: User-chosen name (may reveal personal info)
-- Device count: Reveals number of devices in zone
-
-**Mitigation options:**
-- Use generic zone names ("Zone 1" instead of "John's Home")
-- Omit DC from TXT records (optional field)
-
-### 8.4 QR Code Security
+### 8.3 QR Code Security
 
 **Protect the QR code:**
 - Contains setup code (equivalent to password)
@@ -717,7 +633,7 @@ OPERATIONAL+COMMISSIONING → OPERATIONAL : Timeout or success
 # Service types
 MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp  # Commissionable discovery service
 MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp  # Operational discovery service
-MASH.S.DISC.SVC_COMMISSIONER=_mashd._udp # Commissioner discovery service (controllers only)
+MASH.S.DISC.SVC_PAIRING=_mashp._udp         # Pairing-request signaling service
 
 # General mDNS
 MASH.S.DISC.INSTANCE_MAX_LEN=63         # Maximum instance name length
@@ -737,13 +653,6 @@ MASH.S.DISC.OPER_TXT_DI=1               # Device ID in TXT
 MASH.S.DISC.OPER_TXT_VP=1               # Vendor:Product in TXT
 MASH.S.DISC.OPER_TXT_FW=1               # Firmware version in TXT (optional)
 MASH.S.DISC.OPER_TXT_FM=1               # Feature map in TXT (optional)
-
-# Commissioner (_mashd._udp) - controllers only
-MASH.C.DISC.COMMR_TXT_ZN=1              # Zone name in TXT
-MASH.C.DISC.COMMR_TXT_ZI=1              # Zone ID in TXT
-MASH.C.DISC.COMMR_TXT_VP=1              # Vendor:Product in TXT
-MASH.C.DISC.COMMR_TXT_DN=1              # Controller name in TXT (optional)
-MASH.C.DISC.COMMR_TXT_DC=1              # Device count in TXT (optional)
 
 # QR code
 MASH.S.DISC.QR_VERSION=1                # QR code version
@@ -782,17 +691,6 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 | TC-MASHO-5 | Zone removed | Remove from one zone | That instance removed, other kept |
 | TC-MASHO-6 | All zones removed | Remove from all zones | No `_mash._tcp` instances |
 
-### TC-MASHD-*: Commissioner Discovery (`_mashd._udp`)
-
-| ID | Description | Steps | Expected |
-|----|-------------|-------|----------|
-| TC-MASHD-1 | Register on zone create | Create zone | `_mashd._udp` zone-name instance appears |
-| TC-MASHD-2 | TXT record format | Inspect TXT | ZN, ZI fields present |
-| TC-MASHD-3 | Multiple zones | Controller has 2 zones | Two `_mashd._udp` instances |
-| TC-MASHD-4 | Device count update | Add device to zone | DC field updated |
-| TC-MASHD-5 | Deregister on zone delete | Delete zone | That instance removed |
-| TC-MASHD-6 | Device browses commissioners | Device enters find mode | Discovers `_mashd._udp` instances |
-
 ### TC-QR-*: QR Code Parsing
 
 | ID | Description | Input | Expected |
@@ -830,10 +728,9 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 |----|-------------|-------|----------|
 | TC-BROWSE-1 | Browse commissionable | Multiple commissioning devices | All `_mash-comm._tcp` found |
 | TC-BROWSE-2 | Browse operational | Multiple operational devices | All `_mash._tcp` found |
-| TC-BROWSE-3 | Browse commissioners | Multiple controllers | All `_mashd._udp` found |
-| TC-BROWSE-4 | Filter by discriminator | QR scan D=1234 | Only MASH-1234 in `_mash-comm._tcp` |
-| TC-BROWSE-5 | Filter by zone | Zone ID A1B2C3D4 | Only A1B2C3D4-* in `_mash._tcp` |
-| TC-BROWSE-6 | Browse timeout | No services | Error after 10s |
+| TC-BROWSE-3 | Filter by discriminator | QR scan D=1234 | Only MASH-1234 in `_mash-comm._tcp` |
+| TC-BROWSE-4 | Filter by zone | Zone ID A1B2C3D4 | Only A1B2C3D4-* in `_mash._tcp` |
+| TC-BROWSE-5 | Browse timeout | No services | Error after 10s |
 
 ---
 

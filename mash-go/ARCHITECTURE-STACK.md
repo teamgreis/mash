@@ -586,7 +586,6 @@ mDNS-based service discovery with 4 service types.
 |------|-----------|---------|-----------|
 | Commissionable | `_mashc._udp` | Devices in commissioning mode | UDP |
 | Operational | `_mash._tcp` | Commissioned devices | TCP |
-| Commissioner | `_mashd._udp` | Zone controllers | UDP |
 | Pairing Request | `_mashp._udp` | Controller-initiated pairing signal | UDP |
 
 ### TXT Records

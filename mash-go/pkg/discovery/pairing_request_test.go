@@ -344,18 +344,6 @@ func (a *capturingAdvertiser) StopOperational(_ string) error {
 	return nil
 }
 
-func (a *capturingAdvertiser) AdvertiseCommissioner(_ context.Context, _ *discovery.CommissionerInfo) error {
-	return nil
-}
-
-func (a *capturingAdvertiser) UpdateCommissioner(_ string, _ *discovery.CommissionerInfo) error {
-	return nil
-}
-
-func (a *capturingAdvertiser) StopCommissioner(_ string) error {
-	return nil
-}
-
 func (a *capturingAdvertiser) StopAll() {
 }
 

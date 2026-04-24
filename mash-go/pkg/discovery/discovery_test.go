@@ -415,60 +415,6 @@ func TestDecodeOperationalTXTMissingRequired(t *testing.T) {
 	}
 }
 
-func TestCommissionerTXTRoundtrip(t *testing.T) {
-	info := &CommissionerInfo{
-		ZoneName:       "Home Energy",
-		ZoneID:         "A1B2C3D4E5F6A7B8",
-		VendorProduct:  "1234:5678",
-		ControllerName: "Smart EMS Pro",
-		DeviceCount:    5,
-	}
-
-	txt := EncodeCommissionerTXT(info)
-
-	decoded, err := DecodeCommissionerTXT(txt)
-	if err != nil {
-		t.Fatalf("DecodeCommissionerTXT() error = %v", err)
-	}
-
-	if decoded.ZoneName != info.ZoneName {
-		t.Errorf("ZoneName = %q, want %q", decoded.ZoneName, info.ZoneName)
-	}
-	if decoded.ZoneID != info.ZoneID {
-		t.Errorf("ZoneID = %q, want %q", decoded.ZoneID, info.ZoneID)
-	}
-	if decoded.VendorProduct != info.VendorProduct {
-		t.Errorf("VendorProduct = %q, want %q", decoded.VendorProduct, info.VendorProduct)
-	}
-	if decoded.ControllerName != info.ControllerName {
-		t.Errorf("ControllerName = %q, want %q", decoded.ControllerName, info.ControllerName)
-	}
-	if decoded.DeviceCount != info.DeviceCount {
-		t.Errorf("DeviceCount = %d, want %d", decoded.DeviceCount, info.DeviceCount)
-	}
-}
-
-func TestDecodeCommissionerTXTMissingRequired(t *testing.T) {
-	tests := []struct {
-		name string
-		txt  TXTRecordMap
-	}{
-		{"MissingZN", TXTRecordMap{"ZI": "A1B2C3D4E5F6A7B8"}},
-		{"MissingZI", TXTRecordMap{"ZN": "Home Energy"}},
-		{"EmptyZN", TXTRecordMap{"ZN": "", "ZI": "A1B2C3D4E5F6A7B8"}},
-		{"ShortZI", TXTRecordMap{"ZN": "Home Energy", "ZI": "A1B2"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := DecodeCommissionerTXT(tt.txt)
-			if err == nil {
-				t.Error("DecodeCommissionerTXT() should fail with missing/invalid required field")
-			}
-		})
-	}
-}
-
 func TestTXTRecordsToStrings(t *testing.T) {
 	txt := TXTRecordMap{
 		"D":      "1234",

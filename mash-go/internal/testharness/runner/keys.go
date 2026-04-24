@@ -467,12 +467,7 @@ const (
 	KeyServices                 = "services"
 	KeyTXTRecords               = "txt_records"
 	KeyDevicesFound             = "devices_found"
-	KeyControllersFound         = "controllers_found"
-	KeyCommissionersFound       = "commissioners_found"
 	KeyDevicesFoundMin          = "devices_found_min"
-	KeyControllersFoundMin      = "controllers_found_min"
-	KeyCommissionerCountMin     = "commissioner_count_min"
-	KeyControllerFound          = "controller_found"
 	KeyRetriesPerformedMin      = "retries_performed_min"
 	KeyInstanceConflictResolved = "instance_conflict_resolved"
 	KeyInstanceName             = "instance_name"
@@ -729,10 +724,9 @@ const (
 
 // Service type short aliases -- used in YAML params alongside discovery.ServiceType* mDNS constants.
 const (
-	ServiceAliasCommissionable  = "commissionable"
-	ServiceAliasOperational     = "operational"
-	ServiceAliasCommissioner    = "commissioner"
-	ServiceAliasPairingRequest  = "pairing_request"
+	ServiceAliasCommissionable = "commissionable"
+	ServiceAliasOperational    = "operational"
+	ServiceAliasPairingRequest = "pairing_request"
 )
 
 // Connection state values.
@@ -1007,7 +1001,6 @@ const (
 // Discovery actions (discovery_handlers.go).
 const (
 	ActionBrowseMDNS              = "browse_mdns"
-	ActionBrowseCommissioners     = "browse_commissioners"
 	ActionReadMDNSTXT             = "read_mdns_txt"
 	ActionVerifyMDNSAdvertising   = "verify_mdns_advertising"
 	ActionVerifyMDNSBrowsing      = "verify_mdns_browsing"

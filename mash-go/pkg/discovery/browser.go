@@ -18,9 +18,6 @@ type Browser interface {
 	// Optionally filter by zone ID.
 	BrowseOperational(ctx context.Context, zoneID string) (<-chan *OperationalService, error)
 
-	// BrowseCommissioners searches for zone controllers.
-	BrowseCommissioners(ctx context.Context) (<-chan *CommissionerService, error)
-
 	// BrowsePairingRequests searches for pairing requests from controllers.
 	// Devices use this to discover controllers that want to commission them.
 	// The callback is invoked for each discovered pairing request.
@@ -79,9 +76,6 @@ type BrowseResult struct {
 	// Operational is set when Type is ServiceTypeOperational.
 	Operational *OperationalService
 
-	// Commissioner is set when Type is ServiceTypeCommissioner.
-	Commissioner *CommissionerService
-
 	// Error is set if an error occurred.
 	Error error
 }
@@ -95,9 +89,6 @@ const (
 
 	// ServiceOperational is an operational device service.
 	ServiceOperational
-
-	// ServiceCommissioner is a commissioner/controller service.
-	ServiceCommissioner
 )
 
 // FilterFunc is a function that filters browse results.
@@ -193,27 +184,6 @@ func (e *ServiceEntry) ToOperationalService() (*OperationalService, error) {
 		VendorProduct: info.VendorProduct,
 		Firmware:      info.Firmware,
 		EndpointCount: info.EndpointCount,
-	}, nil
-}
-
-// ToCommissionerService converts a ServiceEntry to CommissionerService.
-func (e *ServiceEntry) ToCommissionerService() (*CommissionerService, error) {
-	txt := StringsToTXTRecords(e.Text)
-	info, err := DecodeCommissionerTXT(txt)
-	if err != nil {
-		return nil, err
-	}
-
-	return &CommissionerService{
-		InstanceName:   e.Instance,
-		Host:           e.Host,
-		Port:           e.Port,
-		Addresses:      e.Addrs,
-		ZoneName:       info.ZoneName,
-		ZoneID:         info.ZoneID,
-		VendorProduct:  info.VendorProduct,
-		ControllerName: info.ControllerName,
-		DeviceCount:    info.DeviceCount,
 	}, nil
 }
 

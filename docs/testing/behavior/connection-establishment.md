@@ -23,13 +23,13 @@ This document specifies the complete connection establishment flow, bridging dis
 
 ## 2. mDNS Record Format
 
-MASH uses three separate service types (see `discovery.md` for full details):
+MASH uses two operational service types plus a pairing-request signaling service (see `discovery.md` for full details):
 
 | Service Type | Purpose | When Present |
 |--------------|---------|--------------|
 | `_mash-comm._tcp` | Commissionable discovery | Commissioning window open |
 | `_mash._tcp` | Operational discovery | Device has zone(s) |
-| `_mashd._udp` | Commissioner discovery | Controller has zone(s) |
+| `_mashp._udp` | Pairing request | Controller seeks specific device |
 
 ### 2.1 Commissionable Discovery Records (`_mash-comm._tcp`)
 

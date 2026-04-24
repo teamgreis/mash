@@ -327,7 +327,6 @@ MASH uses mDNS/DNS-SD for network discovery with four service types:
 |--------------|---------|---------------|
 | `_mash-comm._tcp` | Commissionable device | Device in commissioning mode |
 | `_mash._tcp` | Operational device | Commissioned device |
-| `_mashd._udp` | Commissioner/controller | Zone controller |
 | `_mashp._udp` | Pairing request | Controller seeking specific device |
 
 ### 7.3 QR Code Format

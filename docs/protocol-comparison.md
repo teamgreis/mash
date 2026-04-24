@@ -283,7 +283,6 @@ EEBUS:   Node A ◄──WebSocket/TLS──► Node B (either side can initiate
 | Protocol | mDNS/DNS-SD | mDNS/DNS-SD | mDNS/DNS-SD |
 | Commissionable | `_mash-comm._tcp` | `_matterc._udp` | `_ship._tcp` |
 | Operational | `_mash._tcp` | `_matter._tcp` | `_ship._tcp` |
-| Commissioner | `_mashd._udp` | `_matterd._udp` | N/A |
 | BLE discovery | Not supported | BLE advertising (commissioning) | Not supported |
 | Thread/mesh | Not supported | Thread Border Router SRP | Not supported |
 
