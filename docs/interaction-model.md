@@ -560,50 +560,7 @@ Devices SHOULD respond within 5 seconds for typical operations.
 
 ---
 
-## 9. Events
-
-### 9.1 Event Model
-
-Events are timestamped, monotonically-numbered records:
-
-```cbor
-{
-  1: eventNumber,      // uint64: monotonic counter
-  2: timestamp,        // uint64: Unix timestamp (ms)
-  3: endpointId,       // uint8
-  4: featureId,        // uint8
-  5: eventId,          // uint8
-  6: data              // event-specific payload
-}
-```
-
-### 9.2 Event Subscription
-
-Events are delivered through the same subscription mechanism:
-
-```cbor
-// Subscribe to events
-{
-  1: 12351,
-  2: 3,                // Subscribe
-  3: 1,                // endpointId
-  4: 4,                // featureId (Status)
-  5: {
-    4: [1, 2]          // eventIds to subscribe
-  }
-}
-```
-
-### 9.3 Event Properties
-
-- Events are append-only (never modified)
-- Event numbers are monotonically increasing
-- Missed events can be detected by gaps in numbers
-- Events are persisted across reconnections (limited buffer)
-
----
-
-## 10. Addressing
+## 9. Addressing
 
 ### 10.1 Address Format
 
@@ -618,7 +575,7 @@ Not supported. Each request targets specific endpoint/feature.
 
 ---
 
-## 11. Comparison with EEBUS SPINE
+## 10. Comparison with EEBUS SPINE
 
 | Aspect | EEBUS SPINE | MASH |
 |--------|-------------|------|
@@ -637,7 +594,7 @@ Not supported. Each request targets specific endpoint/feature.
 
 ---
 
-## 12. Bidirectional Communication
+## 11. Bidirectional Communication
 
 ### 12.1 Overview
 

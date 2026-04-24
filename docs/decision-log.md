@@ -4113,6 +4113,148 @@ Narrow `RenewalWindow` from 30 days to 7 days across both `pkg/cert/types.go` an
 
 ---
 
+### DEC-078: Commissionable mDNS TXT Schema (canonical)
+
+**Date:** 2026-04-24
+**Status:** Accepted
+
+**Context:**
+Two candidate schemas for the `_mash-comm._tcp` TXT record existed in the documentation:
+
+- `docs/discovery.md §2.2` listed `D`, `VP`, `CM`, `DT` (4 keys)
+- `docs/testing/behavior/discovery.md §3.2` listed `D`, `cat`, `serial`, `brand`, `model`, `DN` (6 keys)
+
+These are different models, not variants — they share only the `D` key. An implementer reading only one doc ships an incompatible advertisement. The reference implementation at `mash-go/pkg/discovery/txtrecord.go` implements the 6-key schema; all discovery conformance tests validate against it.
+
+**Options Evaluated:**
+1. Adopt the 4-key schema (`D, VP, CM, DT`) — would require rewriting the reference implementation and breaking conformance tests.
+2. Adopt the 6-key schema (`D, cat, serial, brand, model, DN`) — matches the implementation and behavior spec.
+3. Merge — cherry-pick fields from each.
+
+**Decision:**
+Adopt the 6-key schema from `docs/testing/behavior/discovery.md §3.2` as canonical. Update `docs/discovery.md §2.2` to match.
+
+**Rationale:**
+- **Implementation fidelity.** `mash-go/pkg/discovery/txtrecord.go` already ships the 6-key schema; all discovery conformance tests validate against it. Option 1 would break existing tooling.
+- **Standards alignment.** The `cat` field uses EEBUS SHIP v1.1.0 category codes (1 = GCPH, 2 = EMS, 3 = e-mobility, …), integrating MASH with an established energy-domain taxonomy.
+- **Expressiveness.** `cat` supports multi-category devices (e.g., `cat=2,5` for a hybrid EMS / inverter); single-string `DT` cannot.
+- **UI enablement.** `serial`, `brand`, `model` support label-match pairing fallback when a QR is unavailable; `DT` alone cannot.
+- **Simplicity.** Service presence already signals commissioning mode; a separate `CM` flag adds nothing.
+
+**Declined Alternatives:**
+- Option 1: would break implementation and conformance tests; `DT`/`CM` are also less expressive than the 6-key set.
+- Option 3: the 4-key set's fields are redundant with or subsumed by the 6-key set; no merge is necessary.
+
+**Implementation:** No code changes required; the reference already matches the canonical schema.
+
+**Related:** DEC-067 (single-port ALPN routing), DEC-074 (featureMap removed from mDNS TXT).
+
+---
+
+### DEC-079: Limit-Override Notification Mechanism
+
+**Date:** 2026-04-24
+**Status:** Accepted
+
+**Context:**
+When a lower-priority zone's limit is superseded by a higher-priority zone's more-restrictive limit (per DEC-024, "most restrictive wins"), the affected controller needs to know its limit isn't the active constraint. `docs/multi-zone.md §5.1` stated the controller "is notified" without defining a mechanism.
+
+DEC-024 implied the awareness channel was subscription-based ("Can infer: if effectiveLimit < myLimit, someone else is more restrictive"), but `multi-zone.md` did not make this explicit. The reference implementation exposes only the effective-value subscription path; no synchronous status code, dedicated notification, or `lastOverridingZone` attribute exists.
+
+**Options Evaluated:**
+1. **Synchronous Write response status** — add an `OVERRIDDEN` status code returned from Write when the committed effective value is stricter than the written value.
+2. **Dedicated async notification** — a new wire primitive specifically for override events.
+3. **Implicit via subscription divergence** — controllers subscribe to `effectiveConsumptionLimit` / `effectiveProductionLimit` and compare the effective value to their own `myConsumptionLimit` / `myProductionLimit`. Divergence = override.
+4. **Dedicated attribute** (e.g., `lastOverridingZone`) — subscribed to like any attribute.
+5. **Extend ControlStateEnum** — add a zone-override variant distinct from the existing safety / legal OVERRIDE state.
+
+**Decision:**
+Adopt Option 3: **implicit via subscription divergence.** Formalize the mechanism in `docs/multi-zone.md §5.1`.
+
+**Mechanism:**
+- Controllers subscribe to `effectiveConsumptionLimit` / `effectiveProductionLimit` as normal attributes.
+- Device recomputes the effective value on any zone's limit change (min across zones).
+- Subscription notification fires on effective-value change per normal coalescing (`minInterval`) / heartbeat (`maxInterval`) rules.
+- A controller detects override by comparing its own `myLimit` to the observed `effectiveLimit`: `myLimit > effectiveLimit ⇒ another zone imposed a stricter constraint`.
+
+**Rationale:**
+- **Zone isolation.** The device does not track or expose *which* zone overrode — only the effective value matters operationally. Divergence inference preserves this isolation.
+- **Reuses existing wire surface.** No new status codes, attributes, or notifications; the subscription path already carries this information.
+- **Symmetry with existing design discipline** (DEC-042, DEC-045): MASH's stance is "devices report state directly; controllers infer — no heartbeat-based inference." Divergence inference is the analogous pattern for override awareness.
+- **Cost of alternatives.** Options 1 (new status), 2 (new primitive), 4 (new attribute), 5 (enum change) all add protocol surface for information the subscription already conveys.
+
+**Limitations:**
+- Detection latency is bounded by subscription `maxInterval` (heartbeat), not instantaneous.
+- Controller cannot identify *which* zone imposed the override — only that some zone did.
+- Controllers that do not subscribe to `effective*` attributes will not detect override.
+
+**Declined Alternatives:**
+- Option 1: the override value isn't known at Write time in the general case — a higher-priority zone's *later* write can override an earlier accepted one.
+- Options 2 / 4 / 5: add wire or model surface for a signal already derivable from subscription state.
+
+**Implementation:** No changes required; the reference implementation already exposes this divergence pattern.
+
+**Related:** DEC-024 (Limit Resolution — Most Restrictive Wins), DEC-042 (Explicit state, no inferred heartbeat), DEC-052 (Feature-Level Subscription).
+
+---
+
+### DEC-080: Remove Events from the Protocol Surface
+
+**Date:** 2026-04-24
+**Status:** Accepted (supersedes the `eventList` reservation in DEC-035)
+
+**Context:**
+The interaction model (`docs/interaction-model.md §9`) documented a full event subsystem — timestamped, monotonically-numbered, append-only records delivered via Subscribe. The global-attribute slot `eventList` (0xFFF8) was reserved under DEC-035 (2025-01-25) to advertise supported event IDs per feature.
+
+Fifteen months later:
+- No feature YAML at `docs/features/*/1.0.yaml` defines any events.
+- The code generator at `mash-go/cmd/mash-featgen/` has no event support.
+- `SubscribePayload` in `mash-go/pkg/wire/message.go` has no `eventIds` field.
+- No reference-implementation code path serializes events on the wire.
+- The `emitEvent()` calls in `mash-go/pkg/service/` are Go in-process observability callbacks, unrelated to wire events.
+
+The spec described a capability the protocol did not implement; `eventList` claimed attribute slot 0xFFF8 without purpose. The plausible event use cases turn out to be already covered by MASH's attribute-subscription model:
+
+| Event use case one might expect | MASH's existing mechanism |
+|---------------------------------|---------------------------|
+| Fault reporting | `Status` feature attributes + subscription |
+| State transitions | `controlState` / `processState` subscription (DEC-034, DEC-042) |
+| Cert rotation | Dedicated MsgTypes 30–33 (DEC-076) |
+| Session lifecycle | `ChargingSession` attributes + subscription |
+
+**Options Evaluated:**
+1. **Remove entirely** — delete `interaction-model.md §9`; free the 0xFFF8 slot; strip `eventList` from docs.
+2. **Activate with a concrete use** — define events for a specific feature (e.g., `Status` faults).
+3. **Keep reserved, reframe prose** — mark §9 explicitly as "Reserved for Future Use."
+
+**Decision:**
+Adopt **Option 1: remove events from the protocol surface.**
+
+**Actions:**
+- Delete `docs/interaction-model.md §9`.
+- Remove the `eventList` (0xFFF8) row from `docs/discovery.md §4.1`.
+- Strip `0xFFF8` from all example `attributeList` values.
+- No code changes — the reference implementation already has no event path to remove.
+
+**Rationale:**
+- **YAGNI validated by evidence.** Fifteen months with zero consuming features is a strong signal that events are not currently needed. If a need had existed, some feature author would have reached for them.
+- **State-convergence model already covers the use cases.** MASH's attribute-subscription discipline (subscribe to state, infer events from state changes) is load-bearing for exactly the situations where another protocol would use events. Adding an event primitive on top would duplicate mechanism.
+- **Honesty to readers.** The "Reserved for Future Use" framing is documentation debt: readers of a large spec should not have to learn which sections are live and which are aspirational.
+- **Re-adding is cheap.** If a future feature genuinely needs events, a new DEC can (a) re-claim 0xFFF8 (still within the reserved 0xFFF0–0xFFFF range), (b) re-specify the wire format (≈ monotonic counter + timestamp + id + payload; trivial), (c) extend the feature YAML and code generator, (d) add `eventIds` to `SubscribePayload`. The design work is hours, not days.
+
+**Supersession:**
+This DEC supersedes the `eventList` reservation made in DEC-035. DEC-035's reservations of `featureMap`, `attributeList`, `acceptedCommandList`, and `generatedCommandList` remain in effect.
+
+**Declined Alternatives:**
+- **Option 2 (activate now):** no concrete driver requirement. Picking events to define without an operational need is speculative design.
+- **Option 3 (keep reserved):** preserves misleading prose and claims a slot without purpose. "Reserved for future use" that never arrives becomes permanent spec debt.
+
+**Follow-up:** If a feature ever needs events, write a new DEC that re-designs the subsystem with the concrete use case in mind.
+
+**Related:** DEC-035 (Global Attributes — partially superseded), DEC-042 (explicit state over inferred), DEC-052 (Feature-Level Subscription).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

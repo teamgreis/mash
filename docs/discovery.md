@@ -52,21 +52,46 @@ When a device has an open commissioning window:
 MASH-<discriminator>._mash-comm._tcp.local
 ```
 
-**TXT Records:**
+**TXT Records (canonical per DEC-078):**
 
-| Key | Description | Example |
-|-----|-------------|---------|
-| `D` | Discriminator (12-bit) | `1234` |
-| `VP` | Vendor:Product ID | `1234:5678` |
-| `CM` | Commissioning mode | `1` (open) |
-| `DT` | Device type | `EVSE` |
+| Key | Type | Required | Max Len | Description |
+|-----|------|----------|---------|-------------|
+| `D` | uint16 | Yes | 4 | Discriminator (0–4095 decimal) |
+| `cat` | string | Yes | 15 | Device categories — comma-separated EEBUS SHIP v1.1.0 numeric codes (see below) |
+| `serial` | string | Yes | 32 | Serial number printed on device label |
+| `brand` | string | Yes | 32 | Vendor / brand name, human-readable |
+| `model` | string | Yes | 32 | Model name, human-readable |
+| `DN` | string | No | 32 | Device name — user-configurable friendly name |
 
-**Example:**
+**Device categories (`cat` values):**
+
+| Value | Category |
+|-------|----------|
+| 1 | Grid Connection Point Hub (GCPH) |
+| 2 | Energy Management System (EMS) |
+| 3 | E-mobility (charging station, wallbox) |
+| 4 | HVAC (heat pump, air conditioner) |
+| 5 | Inverter (PV, battery, hybrid) |
+| 6 | Domestic appliance |
+| 7 | Metering (smart meter, sub-meter) |
+
+Multi-category devices use a comma-separated list (e.g., `cat=2,5` for a hybrid EMS + inverter).
+
+**Example (wallbox):**
 ```
 MASH-1234._mash-comm._tcp.local
   SRV 0 0 8443 evse-001.local
-  TXT D=1234 VP=1234:5678 CM=1 DT=EVSE
+  TXT D=1234 cat=3 serial=WB-2024-001234 brand=ChargePoint model="Home Flex" DN="Garage Charger"
 ```
+
+**Example (hybrid inverter with EMS):**
+```
+MASH-5678._mash-comm._tcp.local
+  SRV 0 0 8443 inverter-001.local
+  TXT D=5678 cat=2,5 serial=INV-2024-567890 brand=SolarEdge model="Home Hub"
+```
+
+**Note:** No `CM` flag is needed — the presence of `_mash-comm._tcp` itself signals commissioning mode.
 
 ### 2.3 Operational Device (`_mash._tcp`)
 
@@ -258,7 +283,6 @@ Every endpoint MUST implement these attributes (reserved IDs 0xFFF0-0xFFFF):
 | `attributeList` | 0xFFFB | array[uint16] | Implemented attribute IDs |
 | `acceptedCommandList` | 0xFFFA | array[uint8] | Accepted command IDs |
 | `generatedCommandList` | 0xFFF9 | array[uint8] | Response command IDs |
-| `eventList` | 0xFFF8 | array[uint8] | Supported event IDs |
 
 > **Protocol version** is not a per-feature attribute. It is provided once via `specVersion` in DeviceInfo (endpoint 0) using major.minor format (e.g., "1.0"). See DEC-050.
 
@@ -270,8 +294,7 @@ Every endpoint MUST implement these attributes (reserved IDs 0xFFF0-0xFFFF):
   0xFFFC: 0x001B,                      // featureMap: CORE|FLEX|EMOB|SIGNALS
   0xFFFB: [1, 2, 3, 10, 11, 14, 20, 21, 60, ...],  // attributeList
   0xFFFA: [1, 2, 5, 6, 10, 11],        // acceptedCommandList
-  0xFFF9: [1, 2, 5, 6, 10, 11],        // generatedCommandList
-  0xFFF8: [1, 2]                       // eventList
+  0xFFF9: [1, 2, 5, 6, 10, 11]         // generatedCommandList
 }
 ```
 
@@ -377,7 +400,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x0009,        // CORE | EMOB
-  attributeList: [1, 2, 3, 10, 11, 14, 20, 21, 0xFFF8, 0xFFF9, 0xFFFA, 0xFFFB, 0xFFFC],
+  attributeList: [1, 2, 3, 10, 11, 14, 20, 21, 0xFFF9, 0xFFFA, 0xFFFB, 0xFFFC],
   acceptedCommandList: [1, 2, 5, 6],     // SetLimit, ClearLimit, SetCurrentLimits, ClearCurrentLimits
   generatedCommandList: [1, 2, 5, 6]
 }
@@ -388,7 +411,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x060B,        // CORE | FLEX | EMOB | ASYMMETRIC | V2X
-  attributeList: [1, 2, 3, 10-16, 20-23, 30-33, 40-43, 50-53, 60, 0xFFF8-0xFFFC],
+  attributeList: [1, 2, 3, 10-16, 20-23, 30-33, 40-43, 50-53, 60, 0xFFF9-0xFFFC],
   acceptedCommandList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  // All limit/setpoint commands + Pause/Resume
   generatedCommandList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 }
@@ -399,7 +422,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x0083,        // CORE | FLEX | PROCESS
-  attributeList: [1, 2, 3, 10, 14, 16, 20, 21, 60, 70-72, 80, 81, 0xFFF8-0xFFFC],
+  attributeList: [1, 2, 3, 10, 14, 16, 20, 21, 60, 70-72, 80, 81, 0xFFF9-0xFFFC],
   acceptedCommandList: [1, 2, 9, 10, 11, 12, 13],  // SetLimit, ClearLimit, Pause, Resume, Stop, ScheduleProcess, CancelProcess
   generatedCommandList: [1, 2, 9, 10, 11, 12, 13]
 }
@@ -410,7 +433,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x0107,        // CORE | FLEX | BATTERY | FORECAST
-  attributeList: [1, 2, 3, 10-16, 20-23, 40-43, 50-53, 60, 61, 70-72, 0xFFF8-0xFFFC],
+  attributeList: [1, 2, 3, 10-16, 20-23, 40-43, 50-53, 60, 61, 70-72, 0xFFF9-0xFFFC],
   acceptedCommandList: [1, 2, 3, 4, 7, 8, 9, 10],  // Limits + Setpoints + Pause/Resume
   generatedCommandList: [1, 2, 3, 4, 7, 8, 9, 10]
 }

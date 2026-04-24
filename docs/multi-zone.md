@@ -163,8 +163,23 @@ All zone limits are applied simultaneously. The most restrictive (lowest) value 
 SMGW sets consumptionLimit = 6000W (priority 1)
 EMS sets consumptionLimit = 8000W (priority 3)
 → Effective limit: min(6000, 8000) = 6000W
-→ EMS is notified that its limit was overridden
+→ EMS can detect the override via subscription divergence (see below)
 ```
+
+**Override detection (DEC-079).** MASH does not emit a dedicated override-notification
+message. A controller detects that its written limit is not the active constraint by
+subscribing to `effectiveConsumptionLimit` / `effectiveProductionLimit` and comparing
+the effective value to the value it itself wrote (`myConsumptionLimit` /
+`myProductionLimit`):
+
+- `myLimit == effectiveLimit` → this controller's value is active
+- `myLimit > effectiveLimit` → another zone imposed a stricter constraint; the
+  effective value is that other zone's
+
+Detection latency is bounded by the subscription's `maxInterval` (heartbeat). The
+device does not expose *which* zone overrode — only the resolved effective value.
+A controller that wants to know whether it has been overridden must subscribe to
+the effective attributes; the protocol does not push this information otherwise.
 
 Phase current limits are resolved per-phase:
 
