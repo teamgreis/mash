@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mash-py"
+version = "0.0.1"
+description = "Python reference implementation of the MASH protocol (peer to mash-go)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Andreas Linde" }]
+
+dependencies = [
+    "cbor2>=5.6.0",
+    "cryptography>=42.0.0",
+    "zeroconf>=0.131.0",
+    "pyyaml>=6.0.1",
+    "jinja2>=3.1.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.2.0",
+    "hypothesis>=6.98.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+    "types-pyyaml",
+]
+
+[project.scripts]
+mash-py-device = "mash_py.cli.device:main"
+mash-py-controller = "mash_py.cli.controller:main"
+mash-py-test = "mash_py.cli.test:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mash_py"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "interop: tests that require a running mash-go binary",
+    "conformance: tests that run mash-go's mash-test against a Python device",
+    "slow: tests that take more than a few seconds",
+]
+timeout = 30
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line too long (formatter handles it)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B011"]  # allow assert False in tests
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["zeroconf.*", "cbor2.*"]
+ignore_missing_imports = true
