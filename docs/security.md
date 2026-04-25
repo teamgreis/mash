@@ -175,14 +175,14 @@ Example: MASH:1:1234:20202021:0x1234:0x5678
 | vendorid | Vendor ID (hex) |
 | productid | Product ID (hex) |
 
-### 4.3 Commissioning Flow (DEC-067)
+### 4.3 Commissioning Flow (DEC-067, DEC-082)
 
 ```
 Controller                         Device
      │                               │
-     │◄── mDNS: _mash-comm._tcp ────┤  Port 8443 (same as operational)
+     │◄── mDNS: _mash-comm._tcp ────┤  SRV port (single-port: 8443; two-port: implementation-chosen)
      │                               │
-     │── TLS (ALPN: mash-comm/1) ──►│  GetConfigForClient → NoClientCert
+     │── TLS (ALPN: mash-comm/1) ──►│  Commissioning TLS config: NoClientCert, self-signed cert
      │                               │
      │◄── TLS: self-signed cert ────┤  Stable cert (generated once)
      │                               │
@@ -197,10 +197,14 @@ Controller                         Device
      │                               │
      │   [Commissioning Conn Closed] │  Device closes commissioning connection
      │                               │
-     │── TLS (ALPN: mash/1) ───────►│  GetConfigForClient → mutual TLS
+     │── mDNS: _mash._tcp ──────────│  SRV port (single-port: 8443; two-port: 8443 by default)
+     │                               │
+     │── TLS (ALPN: mash/1) ───────►│  Operational TLS config: RequireAndVerifyClientCert, Zone CA-signed cert
      │◄── Mutual TLS ──────────────►│  Operational certificates
      │                               │
 ```
+
+The choice between single-port (DEC-067) and two-port (DEC-082) deployments is invisible to the controller above the TLS layer: each port advertised in mDNS serves exactly one ALPN, and the controller dials the SRV-advertised port for the relevant service. See `transport.md §5.3`.
 
 ### 4.4 SPAKE2+ Protocol
 
@@ -267,20 +271,26 @@ indefinitely:
 - No certificate rotation logic needed for commissioning
 - SPAKE2+ provides authentication; commissioning cert only enables TLS handshake
 
-### 4.7 ALPN-Based Connection Routing (DEC-067)
+### 4.7 Commissioning vs Operational TLS Separation (DEC-067, DEC-082)
 
-The device uses a single port (8443) with ALPN-based routing to isolate commissioning and operational TLS configurations:
+The device serves commissioning and operational connections with separate TLS configurations to prevent operational-cert leakage to unauthenticated commissioning peers:
 
 | ALPN Protocol | TLS ClientAuth | Certificate | When Available |
 |---------------|----------------|-------------|----------------|
 | `mash-comm/1` | `NoClientCert` | Self-signed (stable) | Commissioning window open |
 | `mash/1` | `RequireAndVerifyClientCert` | Zone CA-signed | At least one zone exists |
 
-- `GetConfigForClient` inspects the ALPN in `ClientHelloInfo.SupportedProtos` and returns
-  the appropriate `tls.Config` before the handshake completes.
-- When the commissioning window is closed, `mash-comm/1` connections are rejected at the
-  TLS layer (`GetConfigForClient` returns an error).
-- Operational certificates are never exposed to unauthenticated commissioning peers.
+Two conformant deployment patterns achieve this separation; both produce identical security guarantees:
+
+- **Single-port (DEC-067):** one TCP listener on port 8443 serving both ALPN values; the implementation's TLS library returns a different `tls.Config` per offered ALPN before the handshake completes (Go's `GetConfigForClient`). When the commissioning window is closed, `mash-comm/1` connections are rejected at the TLS layer.
+- **Two-port (DEC-082):** separate listeners on distinct ports, each serving one ALPN exclusively with its own TLS config. The commissioning listener is stopped (or rejects connections) when the commissioning window closes. Used by implementations whose TLS library lacks a dynamic-config callback (Python stdlib `ssl`, C/mbedTLS, Zig).
+
+**Security invariants (both patterns):**
+- Operational certificates are never exposed to unauthenticated commissioning peers — separate `tls.Config` objects guarantee this regardless of whether they are routed by callback or by listener.
+- Commissioning connections cannot bypass `RequireAndVerifyClientCert` to reach operational state — the ALPN is bound to the TLS config at handshake time.
+- Closing the commissioning window cleanly terminates new `mash-comm/1` connections — at the TLS layer in single-port, at the listener-accept layer in two-port.
+
+See `transport.md §5.3` for the canonical deployment-pattern description.
 
 ---
 

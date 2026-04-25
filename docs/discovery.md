@@ -41,6 +41,13 @@ After network discovery, controllers use capability discovery to learn device fe
 | `_mash._tcp.local` | TCP | Operational device accepting connections |
 | `_mashp._udp.local` | UDP | Pairing request for specific device |
 
+**Authoritative port: SRV record.** The port a controller connects to is the value in the SRV record's port field for the relevant service instance — never an assumed default. For TCP services this matters because MASH supports two conformant deployment patterns (DEC-067 single-port and DEC-082 two-port):
+
+- **Single-port deployment (DEC-067).** `_mash-comm._tcp` and `_mash._tcp` both advertise the same SRV port (default 8443); ALPN routing distinguishes the two flows.
+- **Two-port deployment (DEC-082).** `_mash-comm._tcp` and `_mash._tcp` advertise *different* SRV ports; each port serves a single ALPN exclusively. The operational port defaults to 8443; the commissioning port has no canonical default — implementations choose a free port and advertise it.
+
+Browsers and conformance tests treat both deployments identically: read the SRV port, dial it. No deployment-shape negotiation is needed.
+
 ### 2.2 Commissionable Device (`_mash-comm._tcp`)
 
 When a device has an open commissioning window:

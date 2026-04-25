@@ -67,6 +67,7 @@ When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick 
 - [DEC-076: Retain In-Session Certificate Renewal](#dec-076-retain-in-session-certificate-renewal)
 - [DEC-077: Shorten Renewal Window to 7 Days](#dec-077-shorten-renewal-window-to-7-days)
 - [DEC-078: Commissionable mDNS TXT Schema (canonical)](#dec-078-commissionable-mdns-txt-schema-canonical)
+- [DEC-082: Two-Port Deployment as Conformant Alternative to Single-Port ALPN Routing](#dec-082-two-port-deployment-as-conformant-alternative-to-single-port-alpn-routing)
 
 ### Multi-zone
 - [DEC-016: Multi-Zone Support](#dec-016-multi-zone-support)
@@ -3825,7 +3826,9 @@ Operational Connection (persistent):
 ### DEC-067: Single-Port ALPN-Based Commissioning Routing and Stable Certificate
 
 **Date:** 2026-02-11
-**Status:** Accepted
+**Status:** Accepted (recommended pattern; see DEC-082 for the conformant two-port alternative)
+
+> **Cross-reference (2026-04-25, DEC-082):** Single-port ALPN routing as described here remains the canonical pattern for implementations whose TLS library exposes a `GetConfigForClient`-equivalent primitive (Go, partially Rust). DEC-082 formalizes a conformant two-port alternative for languages without that primitive (Python stdlib `ssl`, C/mbedTLS, Zig). Both patterns produce identical wire behavior and inherit the same security properties. Implementations choose based on their TLS library's ergonomics; mDNS SRV `port` is authoritative per service.
 
 **Context:**
 The original implementation used a single TLS listener for both commissioning and operational connections. Routing was determined post-handshake by checking whether the peer presented a client certificate:
@@ -3877,7 +3880,7 @@ The device SHOULD generate its self-signed commissioning certificate once and re
 - Key material: Generated once, never changes
 
 **Declined Alternatives:**
-- **Separate commissioning and operational ports:** Works but adds ~150 lines of dual-listener infrastructure for no additional security benefit over ALPN routing.
+- **Separate commissioning and operational ports:** Initially declined here as adding ~150 lines of dual-listener infrastructure for no security benefit over ALPN routing in Go. Subsequently formalized as a conformant alternative pattern in **DEC-082** for implementations whose TLS library lacks a `GetConfigForClient`-equivalent primitive (Python stdlib `ssl`, C/mbedTLS, Zig). The "no security benefit" assessment still holds — both patterns produce identical security guarantees — but the "added infrastructure" assessment was Go-specific; in non-Go languages, two-port deployment is the *simpler* path.
 - **Single port with SNI-based routing:** TLS SNI could distinguish commissioning vs operational, but adds complexity without solving the cert-leakage issue.
 - **Post-handshake routing (pre-DEC-067):** The original approach. Leaked operational certs and couldn't enforce strict mutual TLS.
 - **No TLS for commissioning (Matter approach):** Matter runs PASE over raw TCP/UDP. This would require implementing a custom framing and encryption layer. MASH's TLS-based approach is simpler for implementors at the cost of requiring a commissioning certificate.
@@ -3889,7 +3892,7 @@ The device SHOULD generate its self-signed commissioning certificate once and re
 - `NewCommissioningTLSConfig()` returns `mash-comm/1` ALPN (used by controllers dialing commissioning).
 - `MajorFromALPN()` handles both `mash/N` and `mash-comm/N` prefixes.
 
-**Related:** DEC-047 (commissioning security), DEC-061 (message-gated locking), DEC-066 (close commissioning connection after cert exchange)
+**Related:** DEC-047 (commissioning security), DEC-061 (message-gated locking), DEC-066 (close commissioning connection after cert exchange), DEC-082 (two-port deployment alternative)
 
 ---
 
@@ -4421,6 +4424,69 @@ None. `_mashd._udp` was not a formally decided service type in an earlier DEC �
 
 ---
 
+### DEC-082: Two-Port Deployment as Conformant Alternative to Single-Port ALPN Routing
+
+**Date:** 2026-04-25
+**Status:** Accepted
+
+**Context:**
+DEC-067 specifies single-port ALPN-based routing using `GetConfigForClient` to return different `tls.Config` instances for commissioning (`mash-comm/1`) and operational (`mash/1`) connections. This is clean in Go because `tls.Config.GetConfigForClient` is a first-class primitive: it receives the parsed `ClientHelloInfo` (including ALPN list) before cert and `ClientAuth` decisions are locked, and can return an entirely different config.
+
+While porting MASH to Python (mash-py), this assumption surfaced as a concrete portability burden: Python's stdlib `ssl` module has no equivalent callback. `SSLContext.sni_callback` only fires on SNI, and `set_alpn_protocols` only chooses among offered protocols — neither can swap the entire TLS context based on the offered ALPN list. The same gap exists in C with mbedTLS, in Zig's `std.crypto.tls`, and to a lesser extent in Rust's rustls (where it is doable but awkward).
+
+The portability options for non-Go implementations are:
+
+1. Implement a pre-TLS dispatcher: read the ClientHello bytes, parse the ALPN extension, then drive the TLS handshake from `MemoryBIO` objects. ~400 LOC of TLS-protocol code per language, adds a bug-prone security-sensitive code path.
+2. Deploy two listeners on different ports — one per ALPN — each with its own TLS config. Trivial in any language; small wire-layout deviation (mDNS records advertise different ports per service).
+3. Spec out the first option as required in non-Go languages, leaving the burden permanent.
+
+This decision formalizes option 2 as conformant.
+
+**Decision:**
+Two-port deployment is conformant alongside single-port. Single-port (DEC-067) remains the recommended pattern for implementations with dynamic-TLS-config primitives; two-port is the canonical pattern for implementations without.
+
+**Two-Port Deployment Pattern:**
+- **Commissioning listener.** Separate TCP port (e.g., 8444). TLS config: self-signed stable cert (per DEC-067), `ClientAuth = NoClientCert`, ALPN `mash-comm/1` exclusively.
+- **Operational listener.** Separate TCP port (default 8443). TLS config: Zone CA-signed cert per zone (selected via SNI per multi-zone semantics), `ClientAuth = RequireAndVerifyClientCert`, ALPN `mash/1` exclusively.
+- **mDNS SRV records** advertise the actual port for each service (already canonical — the SRV `port` field is authoritative per service instance).
+- **Commissioning window closure** is enforced by stopping the commissioning listener entirely (or rejecting connections at accept time), equivalent in effect to single-port's `GetConfigForClient` rejection.
+
+**Single-Port Deployment Pattern (per DEC-067):**
+Unchanged. Implementations with `GetConfigForClient`-equivalents may serve both ALPN values on a single TCP port (default 8443). All DEC-067 properties (security isolation, strict mTLS, embedded-friendliness) hold.
+
+**Conformance Equivalence:**
+Both deployments produce identical wire behavior. Once a TLS connection is established, every CBOR message, every PASE message, every cert exchange, and every operational interaction is byte-identical regardless of deployment shape. Conformance tests (`mash-test`) discover the device via mDNS and connect to whatever port the SRV record advertises; no test changes are required.
+
+**Rationale:**
+- **Multi-language portability.** Removes the implicit assumption that the implementer's TLS library exposes a `GetConfigForClient`-equivalent primitive. C, Zig, Rust, and Python implementations may now use the deployment shape that best matches their TLS library without adding bespoke ClientHello-parsing code.
+- **Wire compatibility preserved.** No new message types, no new protocol states, no behavior change visible to peers. The deviation is purely in listener layout, observable only via mDNS port advertisements.
+- **Security model preserved.** Two-port deployments achieve identical security guarantees: separate listeners with independent TLS configs prevent operational cert leakage to commissioning peers (the original DEC-067 concern) by the same mechanism — different `tls.Config` objects, just bound to different sockets instead of selected by callback.
+- **Resource cost is small and bounded.** Two listeners cost an additional TCP socket and a small per-listener accept-loop overhead (~50-200 KB on full Python; smaller on embedded). Embedded implementations preferring the single-socket pattern can still use single-port.
+- **mDNS already supports it.** SRV records carry per-service port — no new TXT keys, no new service types.
+- **Reversible.** A single-port implementation never observes anything different about a two-port peer (it dials the port advertised by mDNS); a two-port implementation never observes anything different about a single-port peer. The two patterns interoperate without coordination.
+
+**Implementations:**
+- **mash-go (canonical reference):** continues to use single-port deployment (DEC-067 unchanged).
+- **mash-py (Python reference):** uses two-port deployment due to the absence of `GetConfigForClient` in Python's `ssl` module. See `mash-py-tdd-plan.md` Decision A.
+- **Future C/Zig/Rust ports:** may choose either pattern based on TLS library ergonomics.
+
+**Implementation notes:**
+- The mDNS SRV `port` field is authoritative per service. Implementations MUST consult it rather than assuming a default.
+- The default port 8443 remains the recommended port for the operational service (`_mash._tcp`). The commissioning service (`_mash-comm._tcp`) has no canonical default port in two-port deployments — implementations choose a free port and advertise it via SRV.
+- Single-port implementations advertise both `_mash._tcp` and `_mash-comm._tcp` SRV records pointing at the same port (8443). Two-port implementations advertise different ports per service. Browsers see a difference only in port number.
+- The connection cap (DEC-064: max_zones + 1) is per-device, not per-listener. Two-port deployments enforce it across both listeners.
+- DEC-061 (message-gated commissioning locking) applies regardless of deployment shape: in both patterns, the commissioning lock fires on first PASERequest, not on TCP accept.
+
+**Declined Alternatives:**
+- **"Mandate single-port for all implementations."** Rejected. Forces ~400 LOC of TLS-protocol parsing in every non-Go language, which is bug-prone and adds a security-sensitive code path duplicated across the ecosystem.
+- **"Mandate two-port for all implementations."** Rejected. Go's single-port pattern is genuinely simpler given `GetConfigForClient`, and forcing two listeners would regress the existing reference implementation for no benefit.
+- **"Drop TLS during commissioning (Matter style)."** Rejected. PASE-derived AES-CCM framing would replace TLS during commissioning, but this adds bespoke AEAD-channel implementation cost across all languages — worse for portability than the problem it solves. Custom-crypto framing is harder to get right than standard TLS configuration.
+- **"Implementation note in transport.md, no spec change."** Rejected. A note alone leaves two-port as a deviation from the spec letter; this DEC makes both patterns first-class conformant.
+
+**Related:** DEC-067 (single-port routing — alternative deployment, fully preserved), DEC-061 (message-gated commissioning locking — applies to both patterns), DEC-064 (connection cap — per-device, both patterns), DEC-078 (mDNS TXT schema — SRV port already authoritative)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -4560,3 +4626,4 @@ Key learnings:
 | 2026-02-11 | Added DEC-067: Single-port ALPN-based commissioning routing and stable commissioning certificate. Uses `GetConfigForClient` with ALPN `mash-comm/1` (commissioning) and `mash/1` (operational) on a single port. Commissioning cert generated once (at first startup or factory provisioning) instead of per-window. |
 | 2026-02-14 | Added DEC-068: Invalid passcode validation. Devices reject 12 prohibited low-entropy setup codes (Matter 5.1.7.1). Valid range narrowed to 1-99999998. Standard test passcode changed from 12345678 to 20202021. |
 | 2026-04-24 | Added DEC-081: Remove `_mashd._udp` commissioner-discovery service. "Device picks controller" flow is architecturally incoherent in a pure server-device model; no production code path used it. Delete service type from specs, Go API, test harness, and TC-MASHD conformance cases. |
+| 2026-04-25 | Added DEC-082: Two-port deployment as conformant alternative to single-port ALPN routing. Surfaced while porting MASH to Python (mash-py): DEC-067's single-port pattern assumed a `GetConfigForClient`-equivalent primitive that isn't available in Python's stdlib `ssl` (or in C/Zig/some Rust TLS stacks). DEC-082 makes both deployment shapes conformant — same wire behavior, observable only as different mDNS SRV ports. Single-port (DEC-067) remains canonical for Go; two-port is canonical for languages without dynamic TLS config callbacks. |

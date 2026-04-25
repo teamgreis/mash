@@ -139,20 +139,37 @@ MASH uses length-prefix for simplicity and efficiency on constrained devices.
 - Connection stays open for the session lifetime
 - Automatic reconnection on disconnect
 
-### 5.3 Port and ALPN Routing (DEC-067)
+### 5.3 Port and ALPN Routing (DEC-067, DEC-082)
 
-MASH uses a single TCP port (default 8443) with ALPN-based routing to distinguish commissioning from operational connections:
+MASH separates commissioning and operational TLS configurations. Two deployment patterns are conformant; both produce identical wire behavior.
+
+**Connection types:**
 
 | Connection Type | ALPN Protocol | TLS Config | Purpose |
 |-----------------|---------------|------------|---------|
 | Commissioning | `mash-comm/1` | Self-signed server cert, `NoClientCert` | PASE handshake + certificate exchange |
 | Operational | `mash/1` | Mutual TLS with operational certs | Zone connections (Read/Write/Subscribe/Invoke) |
 
-The server uses Go's `GetConfigForClient` callback to inspect the ALPN in `ClientHelloInfo.SupportedProtos` and return the appropriate `tls.Config` before the handshake completes. This prevents operational certificates from being exposed to unauthenticated commissioning peers.
+**Pattern A — Single-port ALPN routing (DEC-067).** Recommended for implementations whose TLS library exposes a `GetConfigForClient`-equivalent primitive (e.g., Go).
 
-- Both `_mash._tcp` and `_mash-comm._tcp` mDNS records advertise port 8443
-- When the commissioning window is closed, `mash-comm/1` connections are rejected at the TLS layer
-- The listener starts when first needed (commissioning or zones) and stops when both are inactive
+- Single TCP port (default **8443**) serves both ALPN protocols.
+- The server inspects the ALPN list in `ClientHello.SupportedProtos` *before* the handshake completes and returns the appropriate TLS config (different cert and `ClientAuth` per ALPN). This prevents operational certificates from being exposed to unauthenticated commissioning peers.
+- Both `_mash._tcp` and `_mash-comm._tcp` mDNS records advertise port 8443 (same SRV port).
+- When the commissioning window is closed, `mash-comm/1` connections are rejected at the TLS layer.
+- The listener starts when first needed (commissioning or zones) and stops when both are inactive.
+
+**Pattern B — Two-port deployment (DEC-082).** Recommended for implementations whose TLS library lacks a `GetConfigForClient`-equivalent primitive (e.g., Python stdlib `ssl`, C with mbedTLS, Zig).
+
+- Two TCP listeners on distinct ports, each advertising one ALPN exclusively:
+  - **Operational listener** — default **8443**, ALPN `mash/1` only, mutual TLS with operational certs.
+  - **Commissioning listener** — implementation-chosen free port (no canonical default), ALPN `mash-comm/1` only, self-signed server cert, `NoClientCert`.
+- mDNS SRV records advertise the actual port for each service: `_mash._tcp` SRV → operational port; `_mash-comm._tcp` SRV → commissioning port.
+- Commissioning window closure is enforced by stopping the commissioning listener (or rejecting at accept time). Equivalent in effect to single-port's TLS-layer rejection.
+- The operational listener is stopped when the device has zero zones; the commissioning listener is stopped when the commissioning window is closed.
+
+**Conformance equivalence.** Once the TLS handshake completes, all subsequent CBOR/PASE/cert/operational traffic is byte-identical regardless of deployment pattern. Peers and conformance tests (`mash-test`) discover the actual ports via mDNS SRV and connect accordingly; no peer or test logic depends on the deployment shape.
+
+**Authoritative port:** the mDNS SRV `port` field. Implementations MUST consult it rather than assume a default. The default port 8443 applies only to the operational service in pattern A and to the operational listener in pattern B.
 
 ### 5.4 Connection Limits (DEC-047)
 
@@ -166,7 +183,7 @@ Connection limits are derived from zone capacity to ensure predictable resource 
 | Commissioning | 1 | Single concurrent (ALPN: `mash-comm/1`) |
 | **Total** | max_zones + 1 | Maximum simultaneous |
 
-Connection caps are enforced per-ALPN: `mash-comm/1` allows 1 concurrent connection, `mash/1` allows up to max_zones.
+Connection caps are enforced per-ALPN: `mash-comm/1` allows 1 concurrent connection, `mash/1` allows up to max_zones. The cap is per-device, not per-listener — two-port deployments (DEC-082) enforce it across both listeners with shared counters.
 
 **Example (typical device, max_zones=2):**
 - 2 operational connections (GRID zone + LOCAL zone)
