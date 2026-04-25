@@ -165,7 +165,7 @@ attributes:
     type: bool
     access: readOnly
     default: false
-    description: "Accepts AdjustStartTime command"
+    description: "Process start time can be shifted by the controller via setSetpoint with cause=SCHEDULED"
 
   - id: 16
     name: isStoppable

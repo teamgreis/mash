@@ -16,6 +16,106 @@ Each decision is logged with:
 - **Rationale**: Why we chose it
 - **Declined Alternatives**: What we rejected and why
 
+When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick gist without scrolling, the [Index by topic](#index-by-topic) below groups entries by area.
+
+---
+
+## Index by topic
+
+### Foundations
+- [DEC-001: Protocol Naming](#dec-001-protocol-naming)
+- [DEC-002: Design Philosophy - Simplicity over Flexibility](#dec-002-design-philosophy-simplicity-over-flexibility)
+- [DEC-003: Target Hardware Constraints](#dec-003-target-hardware-constraints)
+- [DEC-004: Initial Use Case Scope](#dec-004-initial-use-case-scope)
+- [DEC-005: Commissioning Model](#dec-005-commissioning-model)
+- [DEC-050: Protocol Versioning Strategy](#dec-050-protocol-versioning-strategy)
+
+### Wire format & interaction model
+- [DEC-006: Serialization Format](#dec-006-serialization-format) (CBOR with integer keys)
+- [DEC-007: Device Model Hierarchy](#dec-007-device-model-hierarchy) (Device > Endpoint > Feature)
+- [DEC-008: Interaction Model](#dec-008-interaction-model) (Read / Write / Subscribe / Invoke)
+- [DEC-009: Connection Initiation](#dec-009-connection-initiation)
+- [DEC-035: Matter-Style Capability Discovery](#dec-035-matter-style-capability-discovery)
+- [DEC-037: Two-Level Capability Discovery Pattern](#dec-037-two-level-capability-discovery-pattern)
+- [DEC-038: Command Parameters vs Stored Attributes](#dec-038-command-parameters-vs-stored-attributes)
+- [DEC-051: Static attributeList Immutability](#dec-051-static-attributelist-immutability)
+- [DEC-052: Feature-Level Subscription Model](#dec-052-feature-level-subscription-model)
+- [DEC-069: Max Message Size 8 KB](#dec-069-max-message-size-8-kb)
+- [DEC-070: Attribute Range Validation via YAML min / max](#dec-070-attribute-range-validation-via-yaml-min-max)
+- [DEC-071: Subscription Notification Ordering Across Connections](#dec-071-subscription-notification-ordering-across-connections)
+- [DEC-072: AttributeList Must Fit in a Single Message](#dec-072-attributelist-must-fit-in-a-single-message)
+- [DEC-074: featureMap Bit Semantics](#dec-074-featuremap-bit-semantics)
+- [DEC-080: Remove Events from the Protocol Surface](#dec-080-remove-events-from-the-protocol-surface)
+
+### Security & commissioning
+- [DEC-010: Multi-Controller and Pairing Model](#dec-010-multi-controller-and-pairing-model)
+- [DEC-011: Transport Layer](#dec-011-transport-layer) (TLS 1.3)
+- [DEC-012: Device Attestation Model](#dec-012-device-attestation-model)
+- [DEC-013: Operational Certificates](#dec-013-operational-certificates)
+- [DEC-014: Pairing Protocol](#dec-014-pairing-protocol) (SPAKE2+ / PASE)
+- [DEC-015: Certificate Lifecycle](#dec-015-certificate-lifecycle)
+- [DEC-018: Setup Code Reusability](#dec-018-setup-code-reusability)
+- [DEC-019: Delegated Commissioning (Backend)](#dec-019-delegated-commissioning-backend)
+- [DEC-040: Device Identity via Certificate Fingerprint](#dec-040-device-identity-via-certificate-fingerprint)
+- [DEC-041: Bidirectional Feature Access and Topology-Based Permissions](#dec-041-bidirectional-feature-access-and-topology-based-permissions)
+- [DEC-042: Pairing Request Mechanism for Deferred Commissioning](#dec-042-pairing-request-mechanism-for-deferred-commissioning)
+- [DEC-047: Commissioning Security Hardening](#dec-047-commissioning-security-hardening)
+- [DEC-048: Commissioning Window Duration Alignment](#dec-048-commissioning-window-duration-alignment)
+- [DEC-061: Message-Gated Commissioning Locking](#dec-061-message-gated-commissioning-locking)
+- [DEC-067: Single-Port ALPN-Based Commissioning Routing and Stable Certificate](#dec-067-single-port-alpn-based-commissioning-routing-and-stable-certificate)
+- [DEC-068: Invalid Passcode Validation](#dec-068-invalid-passcode-validation)
+- [DEC-076: Retain In-Session Certificate Renewal](#dec-076-retain-in-session-certificate-renewal)
+- [DEC-077: Shorten Renewal Window to 7 Days](#dec-077-shorten-renewal-window-to-7-days)
+- [DEC-078: Commissionable mDNS TXT Schema (canonical)](#dec-078-commissionable-mdns-txt-schema-canonical)
+
+### Multi-zone
+- [DEC-016: Multi-Zone Support](#dec-016-multi-zone-support)
+- [DEC-017: Per-Feature Priority](#dec-017-per-feature-priority)
+- [DEC-020: Zone Roles (Owner vs Admin)](#dec-020-zone-roles-owner-vs-admin)
+- [DEC-021: App-EMS Admin Authorization](#dec-021-app-ems-admin-authorization)
+- [DEC-023: Terminology - "Zone" instead of "Fabric"](#dec-023-terminology-zone-instead-of-fabric)
+- [DEC-043: One Zone Per Zone Type Constraint](#dec-043-one-zone-per-zone-type-constraint)
+- [DEC-059: Auto Re-enter Commissioning on Last Zone Removal](#dec-059-auto-re-enter-commissioning-on-last-zone-removal)
+- [DEC-060: TEST Zone Type for Conformance Testing](#dec-060-test-zone-type-for-conformance-testing)
+
+### Features (energy, electrical, status, charging, signals/tariff/plan)
+- [DEC-024: Limit Resolution - Stacked Limits (Most Restrictive Wins)](#dec-024-limit-resolution-stacked-limits-most-restrictive-wins)
+- [DEC-025: Terminology - "Feature" instead of "Cluster"](#dec-025-terminology-feature-instead-of-cluster)
+- [DEC-026: EnergyControl Feature Design](#dec-026-energycontrol-feature-design-capability-first-forecast-optional)
+- [DEC-027: Feature Separation](#dec-027-feature-separation-electrical-measurement-energycontrol)
+- [DEC-028: Setpoints and V2H Phase Balancing](#dec-028-setpoints-and-v2h-phase-balancing)
+- [DEC-029: Measurement Feature and EndpointType](#dec-029-measurement-feature-and-endpointtype)
+- [DEC-030: Status Feature for Operating State](#dec-030-status-feature-for-operating-state)
+- [DEC-031: DeviceInfo Feature](#dec-031-deviceinfo-feature-with-complete-device-structure)
+- [DEC-032: ChargingSession Feature](#dec-032-chargingsession-feature-for-ev-charging)
+- [DEC-033: Signals, Tariff, and Plan Features](#dec-033-signals-tariff-and-plan-features)
+- [DEC-034: Explicit Control State and Optional Process Lifecycle](#dec-034-explicit-control-state-and-optional-process-lifecycle)
+- [DEC-036: Charging Mode and Responsibility Model](#dec-036-charging-mode-and-responsibility-model)
+- [DEC-039: State Machine Interaction Rules](#dec-039-state-machine-interaction-rules)
+- [DEC-049: Contractual Limits and Override Tracking](#dec-049-lpclpp-use-case-support-contractual-limits-and-override-tracking)
+- [DEC-073: Failsafe-Limit Attributes Gated on acceptsLimits](#dec-073-failsafe-limit-attributes-gated-on-acceptslimits)
+- [DEC-075: Process Lifecycle Is Opt-In](#dec-075-process-lifecycle-is-opt-in)
+- [DEC-079: Limit-Override Notification Mechanism](#dec-079-limit-override-notification-mechanism)
+
+### Conformance, use cases, PICS
+- [DEC-053: Endpoint Type Conformance Registry](#dec-053-endpoint-type-conformance-registry)
+- [DEC-054: Endpoint-Aware PICS Format](#dec-054-endpoint-aware-pics-format)
+- [DEC-055: Use Cases on the Wire](#dec-055-use-cases-on-the-wire)
+- [DEC-056: Controller-Side Use Case Declarations](#dec-056-controller-side-use-case-declarations)
+- [DEC-057: Integer Use Case IDs and Scenario Bitmaps](#dec-057-integer-use-case-ids-and-scenario-bitmaps)
+- [DEC-058: Capability Snapshots in Protocol Logs](#dec-058-capability-snapshots-in-protocol-logs)
+
+### Connection management & transport
+- [DEC-022: IPv6-Only Network Layer](#dec-022-ipv6-only-network-layer)
+- [DEC-044: Message Correlation and Request Timeouts](#dec-044-message-correlation-and-request-timeouts)
+- [DEC-045: Transport-Layer Heartbeat Sufficient for Failsafe](#dec-045-transport-layer-heartbeat-sufficient-for-failsafe)
+- [DEC-062: Transport-Level Connection Cap](#dec-062-transport-level-connection-cap)
+- [DEC-063: Busy Rejection Response](#dec-063-busy-rejection-response)
+- [DEC-064: Stale Connection Reaper](#dec-064-stale-connection-reaper)
+- [DEC-065: Connection Cooldown Starts at Release](#dec-065-connection-cooldown-starts-at-release)
+- [DEC-066: Close Commissioning Connection After Certificate Exchange](#dec-066-close-commissioning-connection-after-certificate-exchange)
+- [DEC-081: Remove `_mashd._udp` Commissioner-Discovery Service](#dec-081-remove-_mashd_udp-commissioner-discovery-service)
+
 ---
 
 ## Decisions

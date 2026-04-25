@@ -281,6 +281,12 @@ graph TB
 
 ## 5. Device Model Hierarchy
 
+> The class diagram below uses Go-style `PascalCase` for endpoint types
+> (`DeviceRoot`, `GridConnection`, …) because that is the implementation
+> binding shown. The canonical wire forms are `SCREAMING_SNAKE_CASE`
+> (`DEVICE_ROOT`, `GRID_CONNECTION`, …); see
+> [spec-conventions.md §6.1](spec-conventions.md#61-identifier-casing).
+
 ```mermaid
 classDiagram
     class Device {

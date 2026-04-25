@@ -1,14 +1,58 @@
 # MASH Protocol
 
-**Minimal Application-layer Smart Home Protocol**
+**Minimal Application-layer Smart Home Protocol** -- a lightweight, deterministic
+replacement for EEBUS SHIP/SPINE in residential energy management.
 
-MASH is a lightweight protocol designed for energy management of smart home devices. It targets constrained hardware (256 KB RAM MCUs like ESP32) while providing a simple, deterministic interaction model inspired by Matter.
+MASH borrows ideas from Matter (4-operation interaction model, FeatureMap
+capability discovery, SPAKE2+ commissioning) but stays small enough for
+256 KB RAM MCUs. Every device speaks the same wire format over TLS 1.3:
+**Read**, **Write**, **Subscribe**, and **Invoke** -- nothing more.
 
-## Quick Links
+---
 
-- [Protocol Overview](protocol-overview.md) -- architecture, message model, device hierarchy
-- [Feature Reference](generated/features/index.md) -- generated from YAML specifications
-- [Use Case Reference](generated/usecases/index.md) -- scenario breakdowns and feature requirements
-- [Endpoint Types](generated/endpoints/index.md) -- conformance matrices per device type
+## Quick start
+
+A working pairing in five steps using the Go reference implementation
+(see `mash-go/README.md` for full instructions):
+
+1. **Build** the reference binaries: `cd mash-go && make generate && go build ./...`.
+2. **Start a device** that exposes an EVSE: `./bin/mash-device --type EV_CHARGER --setup-code 12345678`.
+3. **Discover and pair** from a controller: `./bin/mash-controller pair --setup-code 12345678` -- this runs SPAKE2+ over `mash-comm/1` and signs the device into the controller's zone.
+4. **Read** the device's `attributeList`: `./bin/mash-controller read 1 5 0xFFFB` (endpoint 1, EnergyControl, attribute `attributeList`).
+5. **Subscribe** to the effective consumption limit: `./bin/mash-controller subscribe 1 5 20`.
+
+You should see a priming notification immediately, then delta notifications
+whenever the device's effective limit changes. The next page to read is the
+[Protocol Overview](protocol-overview.md), which explains every term in those
+five lines, and the [End-to-End Walkthrough](example-walkthrough.md), which
+traces a realistic six-step EVSE / EMS flow at the wire level.
+
+---
+
+## Reading paths by role
+
+| If you are... | Read in this order |
+|---|---|
+| **Implementing a device** | [Protocol Overview](protocol-overview.md) → [Transport](transport.md) → [Discovery](discovery.md) → [Security](security.md) → [Interaction Model](interaction-model.md) → [Endpoint Types](generated/endpoints/index.md) → the [Features](generated/features/index.md) you support |
+| **Implementing a controller** | [Protocol Overview](protocol-overview.md) → [Interaction Model](interaction-model.md) → [Multi-Zone](multi-zone.md) → [Use Cases](generated/usecases/index.md) → [Security](security.md) (for commissioning + cert renewal) |
+| **Writing a conformance test or harness** | [Testing Overview](testing/README.md) → [PICS Format](testing/pics-format.md) → [Behavior Specs](testing/behavior/protocol-behaviors.md) → [Test Matrix](testing/test-matrix.md) |
+| **Reviewing the spec** | [Spec Conventions](spec-conventions.md) → [Glossary](glossary.md) → [Decision Log](decision-log.md) → [Protocol Comparison](protocol-comparison.md) |
+| **Coming from EEBUS** | [Protocol Comparison](protocol-comparison.md) → [Feature Reference](generated/features/index.md) (each page maps to the corresponding EEBUS use cases) |
+| **Coming from Matter** | [Matter Comparison](matter-comparison.md) → [Multi-Zone](multi-zone.md) (zones replace fabrics) → [Security](security.md) |
+
+---
+
+## Where things live
+
+- `docs/` -- the normative specification (this site).
+- `docs/features/<name>/1.0.yaml` -- the **source of truth** for every feature's
+  attributes, enums, and commands. Both the rendered "Features" pages here and
+  the Go reference implementation are generated from these files.
+- `mash-go/` -- the Go reference implementation. Build, conformance harness,
+  and CLI tools (`mash-device`, `mash-controller`, `mash-test`).
+- `docs/decision-log.md` -- every design choice with the alternatives we
+  rejected and why; cited inline as `DEC-NNN`.
+
+---
 
 Protocol version: **{{ .Version }}** | {{ len .Features }} features | {{ len .UseCases }} use cases | {{ len .EndpointTypes }} endpoint types

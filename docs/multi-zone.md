@@ -33,10 +33,33 @@
 MASH devices can belong to multiple controller zones simultaneously. Each zone operates independently with its own certificates, connection, and priority level. This enables scenarios where a grid operator and a home energy manager both control the same device without conflicting.
 
 **Key properties:**
-- Maximum 5 zones per device
+- One zone per zone type (DEC-043) -- see [Zone limits](#11-zone-limits) below
 - Each zone has a dedicated TLS connection
 - Zone priority determines conflict resolution
 - Zones are independent -- adding or removing one zone does not affect others
+
+### 1.1 Zone limits
+
+Three zone types are defined: **GRID**, **LOCAL**, **TEST** (in priority order).
+A device admits at most one zone of each type (DEC-043), so the protocol-level
+ceiling is three concurrent zones. TEST is mutually exclusive with normal
+operational use during conformance runs (DEC-060), so a typical home device
+runs with at most two operational zones (GRID + LOCAL).
+
+The constant `max_zones` referenced elsewhere in this document and in
+[security.md](security.md) and [transport.md](transport.md) is the
+**device-configured** maximum. It is bounded by the protocol ceiling above:
+
+| Setting | Typical value | Notes |
+|---------|---------------|-------|
+| `max_zones` | 2 | One GRID + one LOCAL on a typical home device |
+| `max_zones` ceiling | 3 | Hard limit imposed by the type model (one per type) |
+| Total simultaneous TLS connections | `max_zones + 1` | Accounts for one concurrent commissioning connection |
+
+A device that does not expect grid-side control may set `max_zones = 1`. A
+device that does not expose itself to a TEST harness in the field still
+declares space for the TEST zone in its type model but does not need to
+provision a TLS slot for it.
 
 ---
 
@@ -243,7 +266,7 @@ Each zone gets one persistent TCP/TLS connection to the device. The total connec
 
 | Connection Type | Maximum | Description |
 |-----------------|---------|-------------|
-| Operational | max_zones (default: 5) | One persistent connection per paired zone |
+| Operational | max_zones (typical: 2, ceiling: 3) | One persistent connection per paired zone -- see [Zone limits](#11-zone-limits) |
 | Commissioning | 1 | Single concurrent commissioning attempt |
 | **Total** | max_zones + 1 | Maximum simultaneous connections |
 
@@ -263,7 +286,7 @@ When a zone's connection is lost, the device transitions to `FAILSAFE` state for
 1. Device detects connection loss (TCP/TLS layer)
 2. Device applies `failsafeConsumptionLimit` and `failsafeProductionLimit`
 3. Device reports `controlState = FAILSAFE`
-4. After `failsafeDuration` expires (2-24 hours), device transitions to `AUTONOMOUS`
+4. After `failsafeDuration` expires (`uint32` seconds; valid range 7200-86400, i.e. 2-24 hours), device transitions to `AUTONOMOUS`
 5. Device can resume normal operation without controller
 
 **Key design points:**

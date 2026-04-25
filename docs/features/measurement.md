@@ -7,6 +7,12 @@
 **Status:** Draft
 **Last Updated:** 2025-01-25
 
+!!! info "Normative reference"
+    The authoritative attribute and command tables for Measurement are
+    [generated from YAML](../generated/features/measurement.md). This page is
+    the design rationale and worked-example companion -- if anything here
+    disagrees with the generated table, the generated table wins.
+
 ---
 
 ## Purpose

@@ -7,6 +7,12 @@
 **Status:** Draft
 **Last Updated:** 2026-01-29
 
+!!! info "Normative reference"
+    The authoritative attribute and command tables for EnergyControl are
+    [generated from YAML](../generated/features/energy-control.md). This page
+    is the design rationale and worked-example companion -- if anything here
+    disagrees with the generated table, the generated table wins.
+
 ---
 
 ## Purpose
@@ -31,7 +37,7 @@ EnergyControl Feature Attributes:
   12: acceptsSetpoints,       // bool - accepts SetSetpoint (total power)
   13: acceptsCurrentSetpoints,// bool - accepts SetCurrentSetpoints (per-phase, for V2H)
   14: isPausable,             // bool - accepts Pause/Resume
-  15: isShiftable,            // bool - accepts AdjustStartTime
+  15: isShiftable,            // bool - accepts setSetpoint(cause=SCHEDULED) for start-time shift
   16: isStoppable,            // bool - accepts Stop (abort task completely)
 
   // Power LIMITS (hard constraint: "do not exceed")
@@ -88,7 +94,13 @@ EnergyControl Feature Attributes:
 
   // Optional process management (requires PROCESS feature flag)
   80: processState,               // ProcessStateEnum: current process lifecycle state
-  81: optionalProcess,            // OptionalProcess?: details of available/running process
+  81: optionalProcess,            // bool: true when a process is scheduled or running
+  82: minRunDuration,             // uint32 s: minimum time before process can pause/stop
+  83: minPauseDuration,           // uint32 s: minimum time between pause and resume
+  84: maxRunDuration,             // uint32 s?: maximum continuous run time before forced pause
+  85: maxPauseDuration,           // uint32 s?: maximum pause duration before forced resume
+  86: optionalProcessPower,       // int64 mW: nominal power draw while running (passive sign convention)
+  87: controlMode,                // ControlModeEnum: how the process responds to setpoints
 }
 ```
 
@@ -290,36 +302,29 @@ ForecastSlot:
 }
 ```
 
-### OptionalProcess (requires PROCESS feature flag)
+### Optional process attributes (requires PROCESS feature flag)
 
-```cbor
-{
-  // Process identification
-  1: processId,              // uint32: unique identifier for this process
-  2: description,            // string?: human-readable description
+The optional process is a single per-device construct represented as a set of
+flat attributes (ids 80-87), not a CBOR struct. A device exposes its current
+process via `processState` and `optionalProcess`; timing and power characteristics
+are individual readable attributes:
 
-  // Power characteristics
-  10: powerEstimate,         // int64 mW?: expected average power
-  11: powerMin,              // int64 mW?: minimum operating power
-  12: powerMax,              // int64 mW?: maximum operating power
+| ID | Name | Type | Notes |
+|----|------|------|-------|
+| 80 | `processState` | `ProcessStateEnum` | Lifecycle state (NONE / AVAILABLE / SCHEDULED / RUNNING / PAUSED / COMPLETED / ABORTED) |
+| 81 | `optionalProcess` | `bool` | True when a process is currently scheduled or running |
+| 82 | `minRunDuration` | `uint32 s` | Minimum continuous run time before pause/stop is allowed |
+| 83 | `minPauseDuration` | `uint32 s` | Minimum pause duration between pause and resume |
+| 84 | `maxRunDuration` | `uint32 s?` | Maximum continuous run time before forced pause (optional) |
+| 85 | `maxPauseDuration` | `uint32 s?` | Maximum pause duration before forced resume (optional) |
+| 86 | `optionalProcessPower` | `int64 mW` | Nominal power draw while running (passive sign convention) |
+| 87 | `controlMode` | `ControlModeEnum` | How the process responds to setpoints |
 
-  // Timing constraints
-  20: estimatedDuration,     // uint32 s?: expected total duration
-  21: minRunDuration,        // uint32 s: minimum time before can pause/stop
-  22: minPauseDuration,      // uint32 s?: minimum time between pause/resume
-
-  // Control constraints
-  30: isPausable,            // bool: can this process be paused?
-  31: isStoppable,           // bool: can this process be stopped/aborted?
-
-  // Energy characteristics
-  40: energyEstimate,        // int64 mWh?: expected total energy consumption
-  41: resumeEnergyPenalty,   // int64 mWh?: additional energy if resumed after pause
-
-  // Scheduling (set by controller)
-  50: scheduledStart,        // timestamp?: when controller scheduled this to start
-}
-```
+Devices with a single, persistent optional process do not need a process
+identifier on the wire — pause/resume/stop commands act on whichever process
+is currently `RUNNING` or `SCHEDULED`. See the normative table in
+[`generated/features/energy-control.md`](../generated/features/energy-control.md)
+for definitive types, defaults, and access modes.
 
 ---
 
@@ -528,60 +533,13 @@ Response:
 }
 ```
 
-### ScheduleProcess
-
-Schedule an optional process to start (OHPCF-style).
-
-```cbor
-Request:
-{
-  1: processId,              // uint32: which process to schedule
-  2: requestedStart,         // timestamp?: when to start (null = start now)
-  3: cause                   // SetpointCauseEnum: why scheduling
-}
-
-Response:
-{
-  1: success,                // bool
-  2: actualStart,            // timestamp: when it will actually start
-  3: newState                // ProcessStateEnum: SCHEDULED or RUNNING
-}
-```
-
-### CancelProcess
-
-Cancel a scheduled or running process.
-
-```cbor
-Request:
-{
-  1: processId               // uint32: which process to cancel
-}
-
-Response:
-{
-  1: success,                // bool
-  2: newState                // ProcessStateEnum: ABORTED or NONE
-}
-```
-
-### AdjustStartTime
-
-Request start time shift.
-
-```cbor
-Request:
-{
-  1: requestedStart,         // timestamp
-  2: cause                   // LimitCauseEnum
-}
-
-Response:
-{
-  1: success,                // bool
-  2: actualStart             // timestamp
-}
-```
+> **Process scheduling.** The current spec uses `pause` / `resume` / `stop`
+> against the single optional process exposed by the device. Earlier drafts
+> defined separate `ScheduleProcess`, `CancelProcess`, and `AdjustStartTime`
+> commands taking an explicit `processId`; those were folded into the simpler
+> single-process model and are no longer part of the protocol. To start a
+> process from `AVAILABLE`, controllers issue `setSetpoint` (or
+> `setCurrentSetpoints`) so the device transitions to `RUNNING`.
 
 ---
 
@@ -749,7 +707,8 @@ When in OVERRIDE state, `overrideDirection` indicates which direction triggered 
                     ┌──────────────┐
                     │  AVAILABLE   │◄──────────────────┐
                     └──────┬───────┘                   │
-                           │ ScheduleProcess()        │ CancelProcess()
+                           │ setSetpoint(cause=        │ Stop()
+                           │   SCHEDULED)             │
                            ▼                          │
                     ┌──────────────┐                   │
                     │  SCHEDULED   │───────────────────┤
@@ -766,7 +725,7 @@ When in OVERRIDE state, `overrideDirection` indicates which direction triggered 
      │ Resume()     └──────────────┘                   │
      │                                                │
      └────────────────────────────────────────────────┘
-                     Stop() / CancelProcess()
+                     Stop()
                            │
                            ▼
                     ┌──────────────┐
@@ -778,14 +737,14 @@ When in OVERRIDE state, `overrideDirection` indicates which direction triggered 
 
 ### ProcessStateEnum is Opt-In (DEC-075)
 
-Process lifecycle (the `processState` attribute plus the `Pause` / `Resume` / `Stop` / `AdjustStartTime` commands) is **not required** for an EnergyControl feature to be conformant. A device that only has a notion of "being limited" — an EVSE, a grid inverter, a sub-meter — simply leaves `isPausable = false`, `isShiftable = false`, `isStoppable = false`, and `processState = NONE`. The process lifecycle commands are ignored by such devices; the controller-facing response surfaces as `wire.StatusUnsupported`.
+Process lifecycle (the `processState` attribute plus the `Pause` / `Resume` / `Stop` commands and `setSetpoint(cause=SCHEDULED)`) is **not required** for an EnergyControl feature to be conformant. A device that only has a notion of "being limited" — an EVSE, a grid inverter, a sub-meter — simply leaves `isPausable = false`, `isShiftable = false`, `isStoppable = false`, and `processState = NONE`. The process lifecycle commands are ignored by such devices; the controller-facing response surfaces as `wire.StatusUnsupported`.
 
 The opt-in signals on the wire are the capability-flag attributes:
 
 | Flag | Default | When true |
 |------|---------|-----------|
 | `isPausable` (id 14) | false | Device accepts `Pause` / `Resume` |
-| `isShiftable` (id 15) | false | Device accepts `AdjustStartTime` |
+| `isShiftable` (id 15) | false | Device accepts `setSetpoint(cause=SCHEDULED)` for start-time shift |
 | `isStoppable` (id 16) | false | Device accepts `Stop` |
 | `processState` (id 80) | NONE | Device exposes a full process lifecycle (AVAILABLE / SCHEDULED / RUNNING / PAUSED / COMPLETED / ABORTED) |
 
@@ -806,7 +765,7 @@ Conformance suites include profiles for both "EnergyControl with process lifecyc
 | CEVC (Coordinated Charging) | ForecastStruct + FlexibilityStruct |
 | DBEVC (Bidirectional EV) | SetSetpoint(consumptionSetpoint, productionSetpoint) |
 | COB (Battery Control) | SetSetpoint + ControlStateEnum |
-| OHPCF (Heat Pump) | OptionalProcess + ProcessStateEnum + ScheduleProcess |
+| OHPCF (Heat Pump) | optionalProcess + ProcessStateEnum + setSetpoint(cause=SCHEDULED) |
 | POEN (Power Envelope) | Repeated SetLimit |
 
 ### Explicit State Reporting Improvements over EEBUS

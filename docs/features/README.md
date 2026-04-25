@@ -5,6 +5,22 @@
 **Status:** Draft
 **Last Updated:** 2025-01-25
 
+!!! info "Two doc trees, one source of truth"
+    Each MASH feature has two pages:
+
+    - The **Features** section in the site nav (e.g.
+      [`generated/features/electrical.md`](../generated/features/electrical.md))
+      is generated from the YAML definitions in this directory and is the
+      **normative source of truth** for attribute IDs, types, defaults, access
+      modes, and commands.
+    - The **Feature Design** section (these hand-written `.md` files alongside
+      the YAML, e.g. [`electrical.md`](electrical.md)) provides design
+      rationale, worked examples, multi-zone semantics, and EEBUS use-case
+      mapping that the generator does not emit.
+
+    When the two disagree, the generated page wins. Drift is reported by the
+    audit pipeline -- if you find a contradiction, file it as a doc bug.
+
 ---
 
 ## Feature Philosophy
@@ -143,9 +159,12 @@ features/
 ├── status.md
 ├── charging-session/1.0.yaml
 ├── charging-session.md
-├── signals.md                    # Not yet YAML-defined
-├── tariff.md                     # Not yet YAML-defined
-└── plan.md                       # Not yet YAML-defined
+├── signals/1.0.yaml
+├── signals.md
+├── tariff/1.0.yaml
+├── tariff.md
+├── plan/1.0.yaml
+└── plan.md
 ```
 
 ### Regenerating Code

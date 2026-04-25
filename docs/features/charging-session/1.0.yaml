@@ -61,6 +61,14 @@ attributes:
     default: NOT_PLUGGED_IN
     description: "Current charging state"
 
+  - id: 2
+    name: sessionId
+    type: uint32
+    access: readOnly
+    mandatory: true
+    default: 0
+    description: "Unique session identifier, monotonically increasing per device. 0 indicates no active session."
+
   - id: 3
     name: sessionStartTime
     type: uint64

@@ -12,6 +12,7 @@ import (
 // ChargingSession attribute IDs.
 const (
 	ChargingSessionAttrState                           uint16 = 1
+	ChargingSessionAttrSessionID                       uint16 = 2
 	ChargingSessionAttrSessionStartTime                uint16 = 3
 	ChargingSessionAttrSessionEndTime                  uint16 = 4
 	ChargingSessionAttrSessionEnergyCharged            uint16 = 10
@@ -197,6 +198,15 @@ func NewChargingSession() *ChargingSession {
 		Access:      model.AccessReadOnly,
 		Default:     uint8(ChargingStateNotPluggedIn),
 		Description: "Current charging state",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          ChargingSessionAttrSessionID,
+		Name:        "sessionId",
+		Type:        model.DataTypeUint32,
+		Access:      model.AccessReadOnly,
+		Default:     uint32(0),
+		Description: "Unique session identifier, monotonically increasing per device. 0 indicates no active session.",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -459,6 +469,15 @@ func (c *ChargingSession) State() ChargingState {
 		return ChargingState(v)
 	}
 	return ChargingStateNotPluggedIn
+}
+
+// SessionID returns the unique session identifier, monotonically increasing per device. 0 indicates no active session..
+func (c *ChargingSession) SessionID() uint32 {
+	val, _ := c.ReadAttribute(ChargingSessionAttrSessionID)
+	if v, ok := val.(uint32); ok {
+		return v
+	}
+	return uint32(0)
 }
 
 // SessionStartTime returns the timestamp when EV connected.
@@ -777,6 +796,15 @@ func (c *ChargingSession) SetState(state ChargingState) error {
 		return err
 	}
 	return attr.SetValueInternal(uint8(state))
+}
+
+// SetSessionID sets the unique session identifier, monotonically increasing per device. 0 indicates no active session..
+func (c *ChargingSession) SetSessionID(sessionId uint32) error {
+	attr, err := c.GetAttribute(ChargingSessionAttrSessionID)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(sessionId)
 }
 
 // SetSessionStartTime sets the timestamp when EV connected.

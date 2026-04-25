@@ -49,7 +49,7 @@ func writeFeatureHeader(b *strings.Builder, def *specparse.RawFeatureDef, m *Doc
 
 	// Link to hand-written design doc
 	slug := featureSlug(def.Name)
-	fmt.Fprintf(b, "> See also: [%s Design](../../features/%s.md)\n\n", def.Name, slug)
+	fmt.Fprintf(b, "> **Design context:** see [%s Design](../../features/%s.md) for rationale, worked examples, multi-zone semantics, and EEBUS use-case mapping. This page is the normative attribute/command reference; the linked page explains why the surface looks the way it does.\n\n", def.Name, slug)
 }
 
 func writeFeatureAttributes(b *strings.Builder, def *specparse.RawFeatureDef) {

@@ -306,7 +306,7 @@ EEBUS:   SKI-based (manufacturer-specific QR content)
 
 | Aspect | MASH | Matter 1.5 | EEBUS |
 |--------|------|------------|-------|
-| Concept | Multi-zone (up to 5 zones) | Multi-fabric (up to 5 fabrics typical) | Multi-connection (no explicit limit) |
+| Concept | Multi-zone (one per type: GRID, LOCAL, TEST) | Multi-fabric (up to 5 fabrics typical) | Multi-connection (no explicit limit) |
 | Priority model | Zone types with fixed priority (GRID > LOCAL > TEST) | No built-in priority; ACL per fabric | No built-in priority; application-level |
 | Conflict resolution | Per-feature: limits = most restrictive wins, setpoints = highest priority wins | Application-level (no framework) | Not defined in spec |
 | Independent certificates | Yes (separate Zone CA per zone) | Yes (separate RCAC per fabric) | Yes (separate SKI per connection) |

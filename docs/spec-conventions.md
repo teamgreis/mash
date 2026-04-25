@@ -118,6 +118,17 @@ The reader is expected to be familiar with these specifications. A conforming MA
 - Code blocks fenced with `cbor`, `mermaid`, or `go` identify the content type for renderers.
 - Hexadecimal values use the `0x` prefix (e.g. `0xFFFC`). Decimal values are unprefixed.
 
+### 6.1 Identifier casing
+
+| Symbol kind | Casing | Example |
+|---|---|---|
+| Endpoint type names (wire) | `SCREAMING_SNAKE_CASE` | `DEVICE_ROOT`, `GRID_CONNECTION`, `EV_CHARGER` |
+| Feature names (wire) | `PascalCase` | `Measurement`, `EnergyControl`, `ChargingSession` |
+| Attribute and command names (wire) | `camelCase` | `effectiveConsumptionLimit`, `setSetpoint` |
+| Enum value names (wire) | `SCREAMING_SNAKE_CASE` | `AUTONOMOUS`, `PV_SURPLUS_THRESHOLD` |
+
+The wire forms above are what appear in YAML definitions, generated tables, and prose. Implementation language bindings are free to translate to local conventions: Go uses `PascalCase` for exported identifiers (so `EVCharger` instead of `EV_CHARGER`), Python may use `snake_case`, and so on. When a class diagram or code listing uses a translated form, the canonical wire form is the one in the YAML definitions.
+
 ---
 
 ## 7. How to Read This Specification

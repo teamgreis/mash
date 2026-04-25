@@ -180,6 +180,7 @@ func initGeneratedNameTables() {
 
 	chargingSessionAttrs := map[string]uint16{
 		"state":                           features.ChargingSessionAttrState,
+		"sessionId":                       features.ChargingSessionAttrSessionID,
 		"sessionStartTime":                features.ChargingSessionAttrSessionStartTime,
 		"sessionEndTime":                  features.ChargingSessionAttrSessionEndTime,
 		"sessionEnergyCharged":            features.ChargingSessionAttrSessionEnergyCharged,

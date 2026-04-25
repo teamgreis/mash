@@ -8,6 +8,12 @@
 **Status:** Draft
 **Last Updated:** 2025-01-25
 
+!!! info "Normative reference"
+    The authoritative attribute and command tables for Signals are
+    [generated from YAML](../generated/features/signals.md). This page is the
+    design rationale and worked-example companion -- if anything here disagrees
+    with the generated table, the generated table wins.
+
 ---
 
 ## Purpose

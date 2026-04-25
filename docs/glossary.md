@@ -30,6 +30,8 @@
 
 **Delta notification** — A change notification sent on an active subscription that carries only the attributes whose values changed since the last report. An absent key means unchanged; an explicit `null` means the attribute was cleared. See [interaction-model.md §6.3](interaction-model.md#63-change-notification).
 
+**DEC-NNN** — Identifier for an entry in the [decision log](decision-log.md). The decision log records every design choice the protocol has made, including alternatives evaluated and reasons for rejecting them. See the [Index by topic](decision-log.md#index-by-topic) for a topic-grouped table of contents.
+
 **Device** — A MASH role whose responsibilities include advertising itself via mDNS, accepting connections from controllers, and exposing endpoints and features. Examples: EVSE, inverter, battery, heat pump, smart meter. See [protocol-overview.md §3](protocol-overview.md#3-devices-controllers).
 
 **Discriminator** — A value carried in the QR code and advertised in the `_mash-comm._tcp` mDNS TXT record (`D=` field) that allows controllers to filter commissionable devices before initiating SPAKE2+. See [discovery.md §2](discovery.md) and [DEC-078](decision-log.md#dec-078-commissionable-mdns-txt-schema-canonical).

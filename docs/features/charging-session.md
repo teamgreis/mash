@@ -8,6 +8,12 @@
 **Status:** Draft
 **Last Updated:** 2025-01-25
 
+!!! info "Normative reference"
+    The authoritative attribute and command tables for ChargingSession are
+    [generated from YAML](../generated/features/charging-session.md). This page
+    is the design rationale and worked-example companion -- if anything here
+    disagrees with the generated table, the generated table wins.
+
 ---
 
 ## Purpose
@@ -49,6 +55,8 @@ ChargingSession Feature:
   // EV BATTERY STATE (from ISO 15118)
   30: evStateOfCharge,         // uint8?: current SoC %
   31: evBatteryCapacity,       // uint64 mWh?: EV battery capacity
+  32: evMinStateOfCharge,      // uint8?: floor SoC for must-charge %
+  33: evTargetStateOfCharge,   // uint8?: user-defined target SoC %
 
   // EV ENERGY DEMANDS
   40: evDemandMode,            // EvDemandModeEnum

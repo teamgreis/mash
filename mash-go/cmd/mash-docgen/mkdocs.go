@@ -84,6 +84,7 @@ func GenerateMkDocsYAML(m *DocModel) string {
 func writeNavProtocol(b *strings.Builder) {
 	b.WriteString("  - Protocol:\n")
 	b.WriteString("      - Overview: protocol-overview.md\n")
+	b.WriteString("      - End-to-End Walkthrough: example-walkthrough.md\n")
 	b.WriteString("      - Transport: transport.md\n")
 	b.WriteString("      - Security: security.md\n")
 	b.WriteString("      - Discovery: discovery.md\n")

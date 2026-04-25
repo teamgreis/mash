@@ -435,7 +435,7 @@ func NewEnergyControl() *EnergyControl {
 		Type:        model.DataTypeBool,
 		Access:      model.AccessReadOnly,
 		Default:     false,
-		Description: "Accepts AdjustStartTime command",
+		Description: "Process start time can be shifted by the controller via setSetpoint with cause=SCHEDULED",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -824,7 +824,7 @@ func (e *EnergyControl) IsPausable() bool {
 	return false
 }
 
-// IsShiftable returns the accepts AdjustStartTime command.
+// IsShiftable returns the process start time can be shifted by the controller via setSetpoint with cause=SCHEDULED.
 func (e *EnergyControl) IsShiftable() bool {
 	val, _ := e.ReadAttribute(EnergyControlAttrIsShiftable)
 	if v, ok := val.(bool); ok {
@@ -1277,7 +1277,7 @@ func (e *EnergyControl) SetIsPausable(isPausable bool) error {
 	return attr.SetValueInternal(isPausable)
 }
 
-// SetIsShiftable sets the accepts AdjustStartTime command.
+// SetIsShiftable sets the process start time can be shifted by the controller via setSetpoint with cause=SCHEDULED.
 func (e *EnergyControl) SetIsShiftable(isShiftable bool) error {
 	attr, err := e.GetAttribute(EnergyControlAttrIsShiftable)
 	if err != nil {

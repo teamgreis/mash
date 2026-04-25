@@ -160,6 +160,7 @@ features:
     attributes:
       mandatory:
         - { id: 1, name: state }
+        - { id: 2, name: sessionId }
       optional:
         - { id: 3, name: sessionStartTime }
         - { id: 4, name: sessionEndTime }

@@ -24,6 +24,16 @@ Classification details:
 
 The three MsgType namespaces do not collide because each plane is identified by its connection context (commissioning ALPN, operational ALPN + in-session renewal framing).
 
+### Decoder routing recipe
+
+A receiver dispatches an incoming frame in three steps:
+
+1. **Pick the namespace from ALPN.** If the TLS connection negotiated `mash-comm/1`, every frame uses the **commissioning** MsgType space. If it negotiated `mash/1`, the frame is on the **operational** plane and step 2 applies.
+2. **On the operational plane, separate renewal from data.** Renewal frames are flat CBOR maps with key `1` set to a `uint8` in range `30–33`. Data-plane frames are CBOR maps where the value at key `1` is either `0` (Notification), a `ControlType` `1–3` (Control), or a non-zero uint32 `MessageID` (Request or Response).
+3. **On the data plane, classify by `PeekMessageType`.** A non-zero `MessageID` plus an `Operation` in key `2` identifies a Request. A non-zero `MessageID` with a `Status` in key `2` and no Operation/Endpoint/Feature identifies a Response. `MessageID = 0` identifies a Notification. The three Control values in key `1` identify a Control frame.
+
+ALPN is always available before any application-layer byte is parsed, so the namespace is fixed before decoding begins. Senders must NOT send commissioning MsgTypes on `mash/1` or vice versa; receivers MUST close the connection on such cross-plane frames.
+
 ---
 
 ## 2. Data Plane Envelope (CBOR)
