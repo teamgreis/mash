@@ -40,6 +40,7 @@ Implementations claiming MASH 1.0 conformance MUST comply with the requirements 
 | [features/\*/1.0.yaml](features/README.md) | Machine-readable feature definitions (attribute IDs, types, ranges, commands) |
 | [message-types.md](message-types.md) | Message type registry across data, commissioning, and renewal planes |
 | [error-codes.md](error-codes.md) | Status codes, PASE error codes, commissioning error codes |
+| [security-considerations.md](security-considerations.md) | Threats, required mitigations, and common implementation pitfalls |
 | [glossary.md](glossary.md) | Term definitions used throughout the specification |
 | [spec-conventions.md](spec-conventions.md) | This document |
 

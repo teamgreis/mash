@@ -151,6 +151,7 @@ func writeNavReference(b *strings.Builder) {
 	b.WriteString("      - Glossary: glossary.md\n")
 	b.WriteString("      - Message Types: message-types.md\n")
 	b.WriteString("      - Error Codes: error-codes.md\n")
+	b.WriteString("      - Security Considerations: security-considerations.md\n")
 	b.WriteString("      - Protocol Comparison: protocol-comparison.md\n")
 	b.WriteString("      - Matter Comparison: matter-comparison.md\n")
 	b.WriteString("      - Design Decisions: decision-log.md\n")
