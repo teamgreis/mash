@@ -95,7 +95,7 @@ func writeNavProtocol(b *strings.Builder) {
 func writeNavGeneratedFeatures(b *strings.Builder, m *DocModel) {
 	b.WriteString("  - Features:\n")
 	b.WriteString("      - generated/features/index.md\n")
-	for _, def := range m.Features {
+	for _, def := range userFacingFeatures(m.Features) {
 		slug := featureSlug(def.Name)
 		fmt.Fprintf(b, "      - %s: generated/features/%s.md\n", def.Name, slug)
 	}
@@ -104,7 +104,7 @@ func writeNavGeneratedFeatures(b *strings.Builder, m *DocModel) {
 func writeNavFeatureDesign(b *strings.Builder, m *DocModel) {
 	b.WriteString("  - Feature Design:\n")
 	b.WriteString("      - Overview: features/README.md\n")
-	for _, def := range m.Features {
+	for _, def := range userFacingFeatures(m.Features) {
 		slug := featureSlug(def.Name)
 		fmt.Fprintf(b, "      - %s: features/%s.md\n", def.Name, slug)
 	}

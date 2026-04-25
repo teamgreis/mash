@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration generate mocks usecases features docs install-mockery lint clean help
+.PHONY: build test test-unit test-integration generate mocks usecases features docs docs-check install-mockery lint clean help
 
 # Build all packages
 build:
@@ -45,6 +45,11 @@ docs:
 		-output ../docs/generated \
 		-version 1.0
 
+# Regenerate docs and verify the rendered site has no broken cross-links.
+# Requires `mkdocs` (pip install mkdocs-material).
+docs-check: docs
+	cd .. && mkdocs build --strict
+
 # Generate use case definitions from YAML
 usecases:
 	go run ./cmd/mash-ucgen -input ../docs/usecases/1.0 -output pkg/usecase/definitions_gen.go -version 1.0
@@ -75,6 +80,7 @@ help:
 	@echo "  test-integration    - Run integration tests"
 	@echo "  generate/mocks      - Generate mock files"
 	@echo "  docs                - Generate documentation site"
+	@echo "  docs-check          - Regenerate docs and verify no broken cross-links (mkdocs --strict)"
 	@echo "  install-mockery     - Install mockery v2"
 	@echo "  lint                - Run golangci-lint"
 	@echo "  clean               - Remove generated files"

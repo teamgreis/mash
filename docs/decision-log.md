@@ -3295,8 +3295,6 @@ minor: 0
 
 **Related:** DEC-050 (protocol versioning), DEC-035 (capability discovery), DEC-053 (endpoint type conformance)
 
-**Design Document:** [docs/design/use-cases-on-wire.md](design/use-cases-on-wire.md)
-
 ---
 
 ### DEC-056: Controller-Side Use Case Declarations

@@ -190,7 +190,7 @@ func generateAllFeaturePages(m *DocModel, outputDir string) error {
 		return fmt.Errorf("creating features dir: %w", err)
 	}
 
-	for _, def := range m.Features {
+	for _, def := range userFacingFeatures(m.Features) {
 		content := GenerateFeaturePage(def, m)
 		slug := featureSlug(def.Name)
 		path := filepath.Join(featDir, slug+".md")
@@ -478,7 +478,7 @@ func GenerateFeatureIndexPage(m *DocModel) string {
 	b.WriteString("| ID | Name | Description |\n")
 	b.WriteString("|---:|------|-------------|\n")
 
-	for _, def := range m.Features {
+	for _, def := range userFacingFeatures(m.Features) {
 		slug := featureSlug(def.Name)
 		fmt.Fprintf(&b, "| %s | [%s](%s.md) | %s |\n",
 			hexByte(int(def.ID)), def.Name, slug, strings.TrimSpace(def.Description))

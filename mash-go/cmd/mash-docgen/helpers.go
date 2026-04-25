@@ -12,6 +12,31 @@ func featureSlug(name string) string {
 	return specparse.FeatureDirName(name)
 }
 
+// isInternalFeature reports whether a feature is reserved for internal or
+// test-harness use and should be hidden from user-facing documentation.
+// The feature is still emitted in code generation and on the wire; only its
+// nav entries and the feature-index page suppress it.
+func isInternalFeature(name string) bool {
+	switch name {
+	case "TestControl":
+		return true
+	}
+	return false
+}
+
+// userFacingFeatures returns the subset of all features that should appear in
+// the user-facing nav and index pages.
+func userFacingFeatures(all []*specparse.RawFeatureDef) []*specparse.RawFeatureDef {
+	out := make([]*specparse.RawFeatureDef, 0, len(all))
+	for _, f := range all {
+		if isInternalFeature(f.Name) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // usecaseSlug converts "GPL" to "gpl".
 func usecaseSlug(name string) string {
 	return strings.ToLower(name)
