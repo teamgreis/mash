@@ -117,7 +117,7 @@ Before communicating, a controller and device must be paired:
 
 After pairing, all communication is encrypted and mutually authenticated via TLS 1.3.
 
-> **Detailed flows:** [Security & Commissioning](#8-security--commissioning)
+> **Detailed flows:** [Security & Commissioning](#8-security-commissioning)
 
 ---
 

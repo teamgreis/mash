@@ -13,7 +13,7 @@
 5. [Device Model Hierarchy](#5-device-model-hierarchy)
 6. [Wire Protocol](#6-wire-protocol)
 7. [Transport Layer](#7-transport-layer)
-8. [Discovery & Commissioning](#8-discovery--commissioning)
+8. [Discovery & Commissioning](#8-discovery-commissioning)
 9. [Service Orchestration](#9-service-orchestration)
 10. [Multi-Zone Architecture](#10-multi-zone-architecture)
 11. [Certificate Renewal](#11-certificate-renewal)

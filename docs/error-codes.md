@@ -27,7 +27,7 @@ Returned in CBOR key `2` of a Response message (see [message-types.md §2](messa
 | 12 | `TIMEOUT` | The device's internal handling of the operation timed out. | All |
 | 13 | `RESOURCE_EXHAUSTED` | A device resource limit has been reached (e.g. subscription table full). | All |
 
-Source: `mash-go/pkg/wire/status.go:6–48`. Values 1–12 are also documented in [interaction-model.md §8.1](interaction-model.md#81-status-codes); value 13 is currently only specified here and in the Go source.
+Source: `mash-go/pkg/wire/status.go:6–48`; also documented in [interaction-model.md §8.1](interaction-model.md#81-status-codes).
 
 Values 14–255 are reserved. A client receiving an unknown status value SHOULD treat it as a generic error and MAY log it for diagnostic purposes.
 

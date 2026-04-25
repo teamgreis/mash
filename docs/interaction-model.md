@@ -527,6 +527,7 @@ If no changes occur within maxInterval, device sends a heartbeat notification co
 | 10 | UNSUPPORTED | Operation not supported |
 | 11 | CONSTRAINT_ERROR | Value violates constraint |
 | 12 | TIMEOUT | Operation timed out |
+| 13 | RESOURCE_EXHAUSTED | A device resource limit has been reached (e.g. subscription table full) |
 
 ### 8.2 Error Response
 
@@ -562,14 +563,14 @@ Devices SHOULD respond within 5 seconds for typical operations.
 
 ## 9. Addressing
 
-### 10.1 Address Format
+### 9.1 Address Format
 
 ```
 device_id / endpoint_id / feature_id / attribute_or_command
 evse-001  / 1           / Measurement / acActivePower
 ```
 
-### 10.2 Wildcards
+### 9.2 Wildcards
 
 Not supported. Each request targets specific endpoint/feature.
 
@@ -596,14 +597,14 @@ Not supported. Each request targets specific endpoint/feature.
 
 ## 11. Bidirectional Communication
 
-### 12.1 Overview
+### 11.1 Overview
 
 MASH supports bidirectional communication: both sides of a connection can send requests and handle responses. This enables advanced scenarios where:
 
 - **Controllers expose features** that devices can query (e.g., grid meter data)
 - **Dual-service entities** act as both device and controller simultaneously
 
-### 12.2 Controller-Exposed Features
+### 11.2 Controller-Exposed Features
 
 A controller can optionally expose a device model to connected devices. When configured, devices can:
 
@@ -614,7 +615,7 @@ A controller can optionally expose a device model to connected devices. When con
 
 If a controller does not expose features, incoming requests from devices receive `StatusUnsupported`.
 
-### 12.3 Example: Smart Meter Gateway (SMGW)
+### 11.3 Example: Smart Meter Gateway (SMGW)
 
 A Smart Meter Gateway acts as a controller but also exposes meter data:
 
@@ -631,7 +632,7 @@ SMGW (Controller + Exposed Device)
 3. EV charger can subscribe to grid meter changes
 4. Both directions work over the same TLS connection
 
-### 12.4 Example: Dual-Service Entity (EMS)
+### 11.4 Example: Dual-Service Entity (EMS)
 
 An Energy Management System (EMS) can be both:
 - A **device** that SMGW controls (receives limits)
@@ -653,7 +654,7 @@ An Energy Management System (EMS) can be both:
 **EMS as device:** Accepts limits from SMGW, exposes Status/Measurement
 **EMS as controller:** Sets limits on EVSE, Battery, Heat Pump
 
-### 12.5 Subscription Behavior
+### 11.5 Subscription Behavior
 
 Bidirectional subscriptions work independently:
 
@@ -667,7 +668,7 @@ Both directions use the same subscription mechanism:
 - Delta notifications on attribute changes
 - Interval parameters (minInterval, maxInterval)
 
-### 12.6 Implementation Notes
+### 11.6 Implementation Notes
 
 **On the controller side:**
 - Optionally configure exposed device model

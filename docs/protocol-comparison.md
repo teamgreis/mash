@@ -11,14 +11,14 @@
 
 - [1. Executive Summary](#1-executive-summary)
 - [2. Architecture](#2-architecture)
-- [3. Device / Data Model](#3-device--data-model)
+- [3. Device / Data Model](#3-device-data-model)
 - [4. Interaction Model](#4-interaction-model)
-- [5. Transport & Serialization](#5-transport--serialization)
-- [6. Security & Commissioning](#6-security--commissioning)
+- [5. Transport & Serialization](#5-transport-serialization)
+- [6. Security & Commissioning](#6-security-commissioning)
 - [7. Discovery](#7-discovery)
 - [8. Multi-Controller Support](#8-multi-controller-support)
 - [9. Energy Management Coverage](#9-energy-management-coverage)
-- [10. Resource Requirements & Constraints](#10-resource-requirements--constraints)
+- [10. Resource Requirements & Constraints](#10-resource-requirements-constraints)
 - [11. Summary Matrix](#11-summary-matrix)
 - [12. References](#12-references)
 
