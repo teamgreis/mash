@@ -1,3 +1,6 @@
 go 1.25.5
 
-use ./mash-go
+use (
+	./mash-go
+	./mash-py/tools
+)

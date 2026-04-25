@@ -1,0 +1,126 @@
+[
+  {
+    "name": "read_response_success",
+    "description": "Read success with two attributes",
+    "go_struct_repr": "Response{Status:Success, Payload:map[uint16]any{1:5000000, 2:200000}}",
+    "message_type": "response",
+    "cbor_hex": "a30101020003a2011a004c4b40021a00030d40",
+    "expected": {
+      "message_id": 1,
+      "payload": {
+        "1": 5000000,
+        "2": 200000
+      },
+      "status": 0
+    }
+  },
+  {
+    "name": "error_response_with_message",
+    "description": "Error response carrying a message",
+    "go_struct_repr": "Response{Status:InvalidParameter, Payload:ErrorPayload{...}}",
+    "message_type": "response",
+    "cbor_hex": "a30102020503a101781d636f6e73756d7074696f6e4c696d6974206d757374206265203e3d2030",
+    "expected": {
+      "message_id": 2,
+      "payload": {
+        "1": "consumptionLimit must be \u003e= 0"
+      },
+      "status": 5
+    }
+  },
+  {
+    "name": "error_response_no_payload",
+    "description": "Error response with no payload",
+    "go_struct_repr": "Response{Status:InvalidEndpoint}",
+    "message_type": "response",
+    "cbor_hex": "a2010e0201",
+    "expected": {
+      "message_id": 14,
+      "payload": null,
+      "status": 1
+    }
+  },
+  {
+    "name": "subscribe_response",
+    "description": "Subscribe success with priming values",
+    "go_struct_repr": "Response{Status:Success, Payload:SubscribeResponsePayload{...}}",
+    "message_type": "response",
+    "cbor_hex": "a30103020003a20119138902a2011a004c4b40021a00030d40",
+    "expected": {
+      "message_id": 3,
+      "payload": {
+        "1": 5001,
+        "2": {
+          "1": 5000000,
+          "2": 200000
+        }
+      },
+      "status": 0
+    }
+  },
+  {
+    "name": "subscribe_response_no_priming",
+    "description": "Subscribe success with no priming values",
+    "go_struct_repr": "Response{Status:Success, Payload:SubscribeResponsePayload{ID:5002}}",
+    "message_type": "response",
+    "cbor_hex": "a3010d020003a10119138a",
+    "expected": {
+      "message_id": 13,
+      "payload": {
+        "1": 5002
+      },
+      "status": 0
+    }
+  },
+  {
+    "name": "error_response_timeout",
+    "description": "Timeout error (status 12)",
+    "go_struct_repr": "Response{Status:Timeout}",
+    "message_type": "response",
+    "cbor_hex": "a2011863020c",
+    "expected": {
+      "message_id": 99,
+      "payload": null,
+      "status": 12
+    }
+  },
+  {
+    "name": "error_response_resource_exhausted",
+    "description": "Resource exhausted (status 13)",
+    "go_struct_repr": "Response{Status:ResourceExhausted}",
+    "message_type": "response",
+    "cbor_hex": "a2011864020d",
+    "expected": {
+      "message_id": 100,
+      "payload": null,
+      "status": 13
+    }
+  },
+  {
+    "name": "write_response_effective_values",
+    "description": "Write response carrying effective values",
+    "go_struct_repr": "Response{Status:Success, Payload:map[uint16]any{20:5M, 21:6M}}",
+    "message_type": "response",
+    "cbor_hex": "a3010b020003a2141a004c4b40151a005b8d80",
+    "expected": {
+      "message_id": 11,
+      "payload": {
+        "20": 5000000,
+        "21": 6000000
+      },
+      "status": 0
+    }
+  },
+  {
+    "name": "invoke_response_no_return",
+    "description": "Invoke success with no return value",
+    "go_struct_repr": "Response{Status:Success}",
+    "message_type": "response",
+    "cbor_hex": "a2010c0200",
+    "expected": {
+      "message_id": 12,
+      "payload": null,
+      "status": 0
+    }
+  }
+]

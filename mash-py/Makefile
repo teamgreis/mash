@@ -1,4 +1,4 @@
-.PHONY: help install test test-unit test-interop test-conformance lint typecheck format generate clean
+.PHONY: help install test test-unit test-interop test-conformance lint typecheck format generate gen-vectors clean
 
 PYTHON ?= python3
 VENV   ?= .venv
@@ -19,6 +19,7 @@ help:
 	@echo "  typecheck       - mypy"
 	@echo "  format          - ruff format + ruff check --fix"
 	@echo "  generate        - regenerate code from docs/features YAML"
+	@echo "  gen-vectors     - regenerate cross-language test vectors (runs Go side)"
 	@echo "  clean           - remove venv and caches"
 
 $(VENV)/bin/activate:
@@ -49,6 +50,9 @@ format: install
 
 generate: install
 	$(PY) -m codegen --features-dir ../docs/features --usecases-dir ../docs/usecases/1.0 --output mash_py/
+
+gen-vectors:
+	cd tools && go run gen_vectors.go -out ../tests/vectors/wire
 
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache .mypy_cache

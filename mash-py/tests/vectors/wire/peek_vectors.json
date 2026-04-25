@@ -1,0 +1,44 @@
+[
+  {
+    "name": "peek_request_read",
+    "description": "peek classifies a read request as REQUEST",
+    "go_struct_repr": "Request{Op:Read}",
+    "message_type": "request",
+    "cbor_hex": "a50101020103010402058101"
+  },
+  {
+    "name": "peek_response_success",
+    "description": "peek classifies a success response as RESPONSE",
+    "go_struct_repr": "Response{Status:Success}",
+    "message_type": "response",
+    "cbor_hex": "a30101020003a1011864"
+  },
+  {
+    "name": "peek_response_error_no_payload",
+    "description": "peek classifies a status\u003e4 error response as RESPONSE",
+    "go_struct_repr": "Response{MsgID:42, Status:Busy}",
+    "message_type": "response",
+    "cbor_hex": "a201182a0209"
+  },
+  {
+    "name": "peek_notification",
+    "description": "peek classifies a notification by messageId=0",
+    "go_struct_repr": "Notification{...}",
+    "message_type": "notification",
+    "cbor_hex": "a5010002010301040105a10101"
+  },
+  {
+    "name": "peek_control_ping",
+    "description": "peek classifies a ping as CONTROL",
+    "go_struct_repr": "ControlMessage{Type:Ping, Seq:1}",
+    "message_type": "control",
+    "cbor_hex": "a201010201"
+  },
+  {
+    "name": "peek_control_close",
+    "description": "peek classifies a close (no seq) as CONTROL",
+    "go_struct_repr": "ControlMessage{Type:Close}",
+    "message_type": "control",
+    "cbor_hex": "a10103"
+  }
+]

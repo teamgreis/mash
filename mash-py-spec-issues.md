@@ -80,6 +80,40 @@ C. **Drop TLS during commissioning (Matter style).** PASE-derived AES-CCM channe
 
 ---
 
+### Issue #2 — `peek_message_type` cannot distinguish small-msgID error responses from control messages
+
+**Status:** Open
+**Surfaced during:** mash-py Phase 1 — porting `peek.py` from `pkg/wire/codec.go:181-272`
+
+**Implicit assumption.**
+The wire-format peek classifier in mash-go uses the byte structure alone. A response of the form `{1: msgID, 2: status}` with no payload is byte-identical to a control message of the form `{1: type, 2: sequence}` whenever:
+
+- `msgID` is in {1, 2, 3} (the same range as `ControlMessageType`), and
+- `status` is any uint32 value, and
+- there is no payload at key 3.
+
+`PeekMessageType` resolves the tie in favor of CONTROL (codec.go:230-238 — control check runs before status>4 → Response). This means a perfectly legal MASH response carrying e.g. `{MessageID:1, Status:INVALID_PARAMETER}` peeks as a control message. mash-py's port reproduces the same behavior, since divergence would split interop.
+
+In practice, the dispatcher disambiguates at the session layer: the receiver knows it has an in-flight request with `msgID=1` and routes the frame to the response decoder regardless of peek's verdict. Peek is a fast-path classification, not the authoritative one. But the spec doesn't say that — it doesn't even mention peek. A non-Go implementer following the wire format alone has no way to know.
+
+**Languages affected.**
+All — this is a spec-text issue, not a language-specific API issue.
+
+**Spec options considered.**
+
+A. **Document peek as an optimization, not authoritative.** Spec adds: "Receivers MUST use the session state (in-flight messageIds, expected control sequences) for authoritative classification. The wire format permits structural ambiguity for short error responses; peek is a hint only."
+B. **Reorder checks: status>4 → Response wins over control.** Would break the existing Go test corpus and require behavior change. Wire-format-compatible (no encoding change), but receivers running the old algorithm would misclassify.
+C. **Forbid messageIds in {1, 2, 3} on the wire.** Disambiguates by construction, but wastes 3 valid uint32 values and breaks every existing test.
+D. **Add a tag byte to control messages** (e.g. CBOR tag 65535 or a prepended sentinel). Wire-incompatible — major version bump.
+
+**Decision pending.** Defer to spec maintainer. mash-py currently mirrors Go's behavior (option A's status quo) so interop holds bit-for-bit. A short note has been added to `mash_py/wire/peek.py` so future readers see the dispatch caveat.
+
+**Files affected so far:**
+- `mash-py/mash_py/wire/peek.py` — peek port; behavior matches Go exactly.
+- `mash-py/tests/unit/wire/test_peek.py` — test cases acknowledge Go behavior; comments point to this issue.
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.

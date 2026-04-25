@@ -1,0 +1,42 @@
+[
+  {
+    "name": "strict_duplicate_top_level_key",
+    "description": "Duplicate key 1 at top of map should be rejected by strict decoder",
+    "go_struct_repr": "",
+    "message_type": "invalid",
+    "cbor_hex": "A30119303901020203",
+    "expect_error": "duplicate map key"
+  },
+  {
+    "name": "strict_nan_half_float",
+    "description": "Half-precision NaN should be rejected",
+    "go_struct_repr": "",
+    "message_type": "invalid",
+    "cbor_hex": "F97E00",
+    "expect_error": "NaN"
+  },
+  {
+    "name": "strict_positive_infinity",
+    "description": "Half-precision +Infinity should be rejected",
+    "go_struct_repr": "",
+    "message_type": "invalid",
+    "cbor_hex": "F97C00",
+    "expect_error": "Infinity"
+  },
+  {
+    "name": "strict_negative_infinity",
+    "description": "Half-precision -Infinity should be rejected",
+    "go_struct_repr": "",
+    "message_type": "invalid",
+    "cbor_hex": "F9FC00",
+    "expect_error": "Infinity"
+  },
+  {
+    "name": "strict_string_keyed_map",
+    "description": "Top-level CBOR map with string keys must be rejected",
+    "go_struct_repr": "",
+    "message_type": "invalid",
+    "cbor_hex": "A1616101",
+    "expect_error": "non-integer"
+  }
+]

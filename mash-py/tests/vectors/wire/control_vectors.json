@@ -1,0 +1,46 @@
+[
+  {
+    "name": "control_ping_seq_1",
+    "description": "Ping with sequence number",
+    "go_struct_repr": "ControlMessage{Type:Ping, Sequence:1}",
+    "message_type": "control",
+    "cbor_hex": "a201010201",
+    "expected": {
+      "sequence": 1,
+      "type": 1
+    }
+  },
+  {
+    "name": "control_pong_seq_1",
+    "description": "Pong with sequence number",
+    "go_struct_repr": "ControlMessage{Type:Pong, Sequence:1}",
+    "message_type": "control",
+    "cbor_hex": "a201020201",
+    "expected": {
+      "sequence": 1,
+      "type": 2
+    }
+  },
+  {
+    "name": "control_close",
+    "description": "Close (no sequence)",
+    "go_struct_repr": "ControlMessage{Type:Close}",
+    "message_type": "control",
+    "cbor_hex": "a10103",
+    "expected": {
+      "sequence": 0,
+      "type": 3
+    }
+  },
+  {
+    "name": "control_ping_max_seq",
+    "description": "Ping with max-uint32 sequence",
+    "go_struct_repr": "ControlMessage{Type:Ping, Sequence:max-uint32}",
+    "message_type": "control",
+    "cbor_hex": "a20101021affffffff",
+    "expected": {
+      "sequence": 4294967295,
+      "type": 1
+    }
+  }
+]

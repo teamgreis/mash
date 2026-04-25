@@ -1,0 +1,253 @@
+[
+  {
+    "name": "read_request_explicit_ids",
+    "description": "Read with explicit attribute IDs",
+    "go_struct_repr": "Request{MessageID:1, Operation:Read, EndpointID:1, FeatureID:2, Payload:[]uint16{1,2,3}}",
+    "message_type": "request",
+    "cbor_hex": "a501010201030104020583010203",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 2,
+      "message_id": 1,
+      "operation": 1,
+      "payload": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "read_request_all_attrs",
+    "description": "Read all attributes (empty array payload)",
+    "go_struct_repr": "Request{MessageID:5, Operation:Read, EndpointID:1, FeatureID:2, Payload:[]uint16{}}",
+    "message_type": "request",
+    "cbor_hex": "a501050201030104020580",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 2,
+      "message_id": 5,
+      "operation": 1,
+      "payload": []
+    }
+  },
+  {
+    "name": "read_request_device_root",
+    "description": "Read against DEVICE_ROOT (endpoint=0)",
+    "go_struct_repr": "Request{MessageID:7, Operation:Read, EndpointID:0, FeatureID:1, Payload:[]uint16{1}}",
+    "message_type": "request",
+    "cbor_hex": "a50107020103000401058101",
+    "expected": {
+      "endpoint_id": 0,
+      "feature_id": 1,
+      "message_id": 7,
+      "operation": 1,
+      "payload": [
+        1
+      ]
+    }
+  },
+  {
+    "name": "write_request",
+    "description": "Write a single attribute",
+    "go_struct_repr": "Request{Op:Write, Payload:map[uint16]any{21:int64(6000000)}}",
+    "message_type": "request",
+    "cbor_hex": "a5010202020301040305a1151a005b8d80",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 3,
+      "message_id": 2,
+      "operation": 2,
+      "payload": {
+        "21": 6000000
+      }
+    }
+  },
+  {
+    "name": "write_request_multi_attr",
+    "description": "Write multiple attributes — verifies key sort",
+    "go_struct_repr": "Request{Op:Write, Payload:map[uint16]any{20:5000000, 21:6000000}}",
+    "message_type": "request",
+    "cbor_hex": "a5010b02020301040305a2141a004c4b40151a005b8d80",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 3,
+      "message_id": 11,
+      "operation": 2,
+      "payload": {
+        "20": 5000000,
+        "21": 6000000
+      }
+    }
+  },
+  {
+    "name": "subscribe_request",
+    "description": "Subscribe with attribute IDs and intervals",
+    "go_struct_repr": "Request{Op:Subscribe, Payload:SubscribePayload{IDs:[1,2,3], Min:1000, Max:60000}}",
+    "message_type": "request",
+    "cbor_hex": "a5010302030301040205a30183010203021903e80319ea60",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 2,
+      "message_id": 3,
+      "operation": 3,
+      "payload": {
+        "1": [
+          1,
+          2,
+          3
+        ],
+        "2": 1000,
+        "3": 60000
+      }
+    }
+  },
+  {
+    "name": "subscribe_request_all",
+    "description": "Subscribe with empty payload (all attrs, no intervals)",
+    "go_struct_repr": "Request{Op:Subscribe, Payload:SubscribePayload{}}",
+    "message_type": "request",
+    "cbor_hex": "a5010d02030301040205a0",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 2,
+      "message_id": 13,
+      "operation": 3,
+      "payload": {}
+    }
+  },
+  {
+    "name": "unsubscribe_request",
+    "description": "Unsubscribe (Subscribe op + endpoint=feature=0)",
+    "go_struct_repr": "Request{Op:Subscribe, EP:0, Feat:0, Payload:UnsubscribePayload{ID:5001}}",
+    "message_type": "request",
+    "cbor_hex": "a5010402030300040005a101191389",
+    "expected": {
+      "endpoint_id": 0,
+      "feature_id": 0,
+      "message_id": 4,
+      "operation": 3,
+      "payload": {
+        "1": 5001
+      }
+    }
+  },
+  {
+    "name": "invoke_request",
+    "description": "Invoke with command parameters",
+    "go_struct_repr": "Request{Op:Invoke, Payload:InvokePayload{CmdID:1, Params:map[uint8]any{...}}}",
+    "message_type": "request",
+    "cbor_hex": "a5010602040301040305a2010102a2011a005b8d800402",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 3,
+      "message_id": 6,
+      "operation": 4,
+      "payload": {
+        "1": 1,
+        "2": {
+          "1": 6000000,
+          "4": 2
+        }
+      }
+    }
+  },
+  {
+    "name": "invoke_request_no_params",
+    "description": "Invoke command with no parameters",
+    "go_struct_repr": "Request{Op:Invoke, Payload:InvokePayload{CmdID:2}}",
+    "message_type": "request",
+    "cbor_hex": "a5010802040301040305a10102",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 3,
+      "message_id": 8,
+      "operation": 4,
+      "payload": {
+        "1": 2
+      }
+    }
+  },
+  {
+    "name": "read_request_max_message_id",
+    "description": "Read with messageId at uint32 max",
+    "go_struct_repr": "Request{MessageID:max-uint32, ...}",
+    "message_type": "request",
+    "cbor_hex": "a5011affffffff020103010401058101",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 1,
+      "message_id": 4294967295,
+      "operation": 1,
+      "payload": [
+        1
+      ]
+    }
+  },
+  {
+    "name": "write_request_negative_int",
+    "description": "Write negative int (discharge convention)",
+    "go_struct_repr": "Request{Op:Write, Payload:map[uint16]any{1:int64(-5000000)}}",
+    "message_type": "request",
+    "cbor_hex": "a5010902020301040305a1013a004c4b3f",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 3,
+      "message_id": 9,
+      "operation": 2,
+      "payload": {
+        "1": -5000000
+      }
+    }
+  },
+  {
+    "name": "subscribe_request_min_only",
+    "description": "Subscribe with only minInterval set (other fields omitempty)",
+    "go_struct_repr": "Request{Op:Subscribe, Payload:SubscribePayload{Min:500}}",
+    "message_type": "request",
+    "cbor_hex": "a5010f02030301040205a1021901f4",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 2,
+      "message_id": 15,
+      "operation": 3,
+      "payload": {
+        "2": 500
+      }
+    }
+  },
+  {
+    "name": "read_request_max_attr_id",
+    "description": "Read with attribute ID at uint16 max",
+    "go_struct_repr": "Request{Op:Read, Payload:[]uint16{65535}}",
+    "message_type": "request",
+    "cbor_hex": "a50110020103010401058119ffff",
+    "expected": {
+      "endpoint_id": 1,
+      "feature_id": 1,
+      "message_id": 16,
+      "operation": 1,
+      "payload": [
+        65535
+      ]
+    }
+  },
+  {
+    "name": "write_request_mixed_types",
+    "description": "Write with mixed value types per attribute",
+    "go_struct_repr": "Request{Op:Write, Payload:map[uint16]any{int+bool+string}}",
+    "message_type": "request",
+    "cbor_hex": "a5011102020302040405a301186402f5036568656c6c6f",
+    "expected": {
+      "endpoint_id": 2,
+      "feature_id": 4,
+      "message_id": 17,
+      "operation": 2,
+      "payload": {
+        "1": 100,
+        "2": true,
+        "3": "hello"
+      }
+    }
+  }
+]

@@ -1,0 +1,47 @@
+[
+  {
+    "name": "notification_single_change",
+    "description": "Notification with one changed attribute",
+    "go_struct_repr": "Notification{SubID:5001, EP:1, Feat:2, Changes:{1:5500000}}",
+    "message_type": "notification",
+    "cbor_hex": "a50100021913890301040205a1011a0053ec60",
+    "expected": {
+      "changes": {
+        "1": 5500000
+      },
+      "endpoint_id": 1,
+      "feature_id": 2,
+      "subscription_id": 5001
+    }
+  },
+  {
+    "name": "notification_multiple_changes",
+    "description": "Notification with multiple changed attributes",
+    "go_struct_repr": "Notification{Changes:{1:7200000, 2:150000, 3:7203000}}",
+    "message_type": "notification",
+    "cbor_hex": "a50100021913890301040205a3011a006ddd00021a000249f0031a006de8b8",
+    "expected": {
+      "changes": {
+        "1": 7200000,
+        "2": 150000,
+        "3": 7203000
+      },
+      "endpoint_id": 1,
+      "feature_id": 2,
+      "subscription_id": 5001
+    }
+  },
+  {
+    "name": "notification_empty_changes",
+    "description": "Notification with empty changes map (heartbeat)",
+    "go_struct_repr": "Notification{Changes:{}}",
+    "message_type": "notification",
+    "cbor_hex": "a50100021917700300040105a0",
+    "expected": {
+      "changes": {},
+      "endpoint_id": 0,
+      "feature_id": 1,
+      "subscription_id": 6000
+    }
+  }
+]
