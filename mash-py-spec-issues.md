@@ -82,7 +82,8 @@ C. **Drop TLS during commissioning (Matter style).** PASE-derived AES-CCM channe
 
 ### Issue #2 — `peek_message_type` cannot distinguish small-msgID error responses from control messages
 
-**Status:** Open
+**Status:** ✅ Resolved
+**Resolution:** DEC-083 (2026-04-25) — wrap every Control message in CBOR tag 77; presence of `D8 4D` prefix is the unambiguous CONTROL marker. Both mash-go and mash-py updated together.
 **Surfaced during:** mash-py Phase 1 — porting `peek.py` from `pkg/wire/codec.go:181-272`
 
 **Implicit assumption.**
@@ -106,11 +107,21 @@ B. **Reorder checks: status>4 → Response wins over control.** Would break the 
 C. **Forbid messageIds in {1, 2, 3} on the wire.** Disambiguates by construction, but wastes 3 valid uint32 values and breaks every existing test.
 D. **Add a tag byte to control messages** (e.g. CBOR tag 65535 or a prepended sentinel). Wire-incompatible — major version bump.
 
-**Decision pending.** Defer to spec maintainer. mash-py currently mirrors Go's behavior (option A's status quo) so interop holds bit-for-bit. A short note has been added to `mash_py/wire/peek.py` so future readers see the dispatch caveat.
+**Decision.** **Option D (chosen)** — wrap control messages in CBOR tag 77 (`D8 4D`). Codified as **DEC-083**. Audit of mash-go's five peek consumers (2026-04-25) found that none consult session state as a tiebreaker — every dispatcher routes purely on peek's verdict, including transport-level handlers that close the connection on `Type:Close` (msgID=3 ambiguous case). Option A as originally proposed would have required ~1 day of dispatcher rewrites in four mash-go call sites plus equivalent work in every future port. Option D fixes the ambiguity at the wire level once, costs +2 bytes per control message, and lets all dispatchers stay simple. Spec window for the wire-format change was open (no production deployments), so the cheaper-now-than-later argument carried.
 
-**Files affected so far:**
-- `mash-py/mash_py/wire/peek.py` — peek port; behavior matches Go exactly.
-- `mash-py/tests/unit/wire/test_peek.py` — test cases acknowledge Go behavior; comments point to this issue.
+**Why D over A, B, C:**
+- A (peek-is-a-hint, document only) was a punt: documenting "session state is authoritative" doesn't make today's code authoritative.
+- B (reorder peek so status>4 wins) didn't cover the worst case (`Status:Success + msgID=3 + no payload` → connection close).
+- C (forbid msgIDs in {1,2,3}) wasted three messageId slots and added a magic-number rule with no structural justification.
+
+**Files updated 2026-04-25:**
+- `docs/decision-log.md` — added DEC-083; cross-referenced DEC-069, DEC-082; updated changelog.
+- `docs/transport.md §6.2-6.4` — control messages shown wrapped in tag 77.
+- `docs/interaction-model.md §3.4` — new section documenting Control message wire form.
+- `mash-go/pkg/wire/codec.go` — `EncodeControlMessage`/`DecodeControlMessage` use `cbor.Tag{Number: 77, ...}`; `PeekMessageType` simplified from ~92 lines to ~30 (tag prefix + key-4 discriminator).
+- `mash-py/mash_py/wire/codec.py` + `peek.py` — same shape via `cbor2.CBORTag(77, ...)`.
+- `mash-py/tests/vectors/wire/control_vectors.json` — regenerated; every entry now begins with `d84d`.
+- `mash-py/tests/unit/wire/test_peek.py` — flipped the ambiguity-acknowledgement test to a regression guard.
 
 ---
 

@@ -240,6 +240,109 @@ func TestControlMessageRoundTrip(t *testing.T) {
 	}
 }
 
+// TestControlMessageHasTagPrefix asserts that every encoded control message
+// begins with the DEC-083 tag prefix `D8 4D`. If a future refactor of
+// EncodeControlMessage drops the tag (e.g., reverting to a bare CBOR map),
+// this test fails before any cross-language interop test can.
+func TestControlMessageHasTagPrefix(t *testing.T) {
+	cases := []ControlMessage{
+		{Type: ControlPing, Sequence: 1},
+		{Type: ControlPong, Sequence: 1},
+		{Type: ControlClose},
+		{Type: ControlPing, Sequence: 4_294_967_295},
+	}
+	for _, msg := range cases {
+		data, err := EncodeControlMessage(&msg)
+		if err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		if len(data) < 2 || data[0] != 0xD8 || data[1] != 0x4D {
+			t.Errorf("missing tag-77 prefix on %v: got %x", msg, data)
+		}
+	}
+}
+
+// TestDecodeControlMessageRejectsTaglessMap is the load-bearing regression
+// guard for DEC-083: a CBOR map that *looks* like a control message
+// (`{1: type, 2: sequence}`) without the tag wrapper MUST be rejected.
+// Pre-DEC-083 this byte form was the canonical control encoding; accepting
+// it now would re-open the ambiguity with payload-less Responses.
+func TestDecodeControlMessageRejectsTaglessMap(t *testing.T) {
+	// Hand-craft `{1:1, 2:1}` — pre-DEC-083 ping(seq=1).
+	taglessPing := []byte{0xA2, 0x01, 0x01, 0x02, 0x01}
+	if _, err := DecodeControlMessage(taglessPing); err == nil {
+		t.Errorf("DecodeControlMessage accepted a tagless map; DEC-083 requires tag 77")
+	}
+}
+
+// TestDecodeControlMessageRejectsWrongTag pins the exact tag number to 77.
+// A future change that switched to a different tag (e.g., for IANA-assigned
+// reasons) should be a deliberate, code-visible diff.
+func TestDecodeControlMessageRejectsWrongTag(t *testing.T) {
+	// Tag 78 wrapping a valid control map: D8 4E A2 01 01 02 01
+	wrongTag := []byte{0xD8, 0x4E, 0xA2, 0x01, 0x01, 0x02, 0x01}
+	if _, err := DecodeControlMessage(wrongTag); err == nil {
+		t.Errorf("DecodeControlMessage accepted tag 78; only tag 77 is valid")
+	}
+}
+
+// TestPeekClassifiesPreviouslyAmbiguousResponseAsResponse is the explicit
+// regression for the bug DEC-083 fixes. Pre-DEC-083, this exact byte
+// sequence (a payload-less Response with msgID in {1,2,3}) was misclassified
+// by PeekMessageType as CONTROL — causing the transport handler to treat it
+// as a Close and tear down the connection. The tagless wire form is now
+// unambiguously RESPONSE.
+//
+// If this test fails after a future peek refactor, do NOT relax the
+// assertion. The catastrophic case (msgID=3 + Status=Success → connection
+// close) was the proximate cause of DEC-083; preserving its non-control
+// classification is the contract.
+func TestPeekClassifiesPreviouslyAmbiguousResponseAsResponse(t *testing.T) {
+	cases := []struct {
+		name string
+		resp Response
+	}{
+		{"msgID=1 success", Response{MessageID: 1, Status: StatusSuccess}},
+		{"msgID=2 busy", Response{MessageID: 2, Status: StatusBusy}},
+		// The catastrophic case — msgID=3 + payload-less success.
+		// Pre-DEC-083 this peeked as CONTROL Close and the entire
+		// connection was torn down on receipt.
+		{"msgID=3 success (catastrophic case)", Response{MessageID: 3, Status: StatusSuccess}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := EncodeResponse(&tc.resp)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			mt, err := PeekMessageType(data)
+			if err != nil {
+				t.Fatalf("peek: %v", err)
+			}
+			if mt != MessageTypeResponse {
+				t.Errorf("got %v, want MessageTypeResponse (DEC-083 regression)", mt)
+			}
+		})
+	}
+}
+
+// TestPeekClassifiesTaggedFrameAsControl complements the test above:
+// a tag-77-wrapped frame must classify as CONTROL even when its contents
+// would otherwise look like a Response (we hand-craft the worst case).
+func TestPeekClassifiesTaggedFrameAsControl(t *testing.T) {
+	// D8 4D A2 01 03 02 00 — tag77({1:3, 2:0})
+	// Inner map happens to match Response{MsgID:3, Status:Success} byte-shape,
+	// but the tag prefix forces the CONTROL classification.
+	tagged := []byte{0xD8, 0x4D, 0xA2, 0x01, 0x03, 0x02, 0x00}
+	mt, err := PeekMessageType(tagged)
+	if err != nil {
+		t.Fatalf("peek: %v", err)
+	}
+	if mt != MessageTypeControl {
+		t.Errorf("got %v, want MessageTypeControl", mt)
+	}
+}
+
 func TestRequestValidation(t *testing.T) {
 	tests := []struct {
 		name    string

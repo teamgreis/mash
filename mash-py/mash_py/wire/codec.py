@@ -16,7 +16,8 @@ Wire forms by message type:
 - Request:      ``{1: messageId, 2: operation, 3: endpointId, 4: featureId, 5: payload?}``
 - Response:     ``{1: messageId, 2: status, 3: payload?}``
 - Notification: ``{1: 0, 2: subscriptionId, 3: endpointId, 4: featureId, 5: changes}``
-- Control:      ``{1: type, 2: sequence?}``  — sequence omitted when zero
+- Control:      ``77({1: type, 2: sequence?})``  — wrapped in CBOR tag 77 per
+  DEC-083; sequence omitted when zero
 
 Payloads embedded inside Requests/Responses are encoded operation-by-operation.
 See mash_py.wire.payloads for dataclass definitions and the encode helpers
@@ -261,21 +262,44 @@ def decode_notification(data: bytes) -> Notification:
 # ---------------------------------------------------------------------------
 
 
+#: CBOR tag wrapping every Control message frame (DEC-083).
+#:
+#: The tag is 77 ('M' for MASH, encoded as ``D8 4D``). The presence of this
+#: tag at the top of a frame is the unique CONTROL signal — without it, the
+#: frame is application-layer (Request / Response / Notification). This
+#: replaces the heuristic peek classifier that previously had to guess
+#: whether a payload-less ``{1: msgID, 2: status}`` map was a Response or a
+#: ``ControlMessage``; with the tag, the question is unambiguous.
+CONTROL_MESSAGE_TAG: int = 77
+
+
 def encode_control_message(msg: ControlMessage) -> bytes:
     out: dict[int, Any] = {1: int(msg.type)}
     if msg.sequence:
         out[2] = msg.sequence
-    return marshal(out)
+    return marshal(cbor2.CBORTag(CONTROL_MESSAGE_TAG, out))
 
 
 def decode_control_message(data: bytes) -> ControlMessage:
     raw = unmarshal(data)
-    if not isinstance(raw, dict):
-        raise ValueError(f"control message must be a CBOR map, got {type(raw).__name__}")
-    _require_int_keys(raw)
+    if not isinstance(raw, cbor2.CBORTag):
+        raise ValueError(
+            f"control message must be wrapped in CBOR tag {CONTROL_MESSAGE_TAG} (DEC-083); "
+            f"got bare {type(raw).__name__}"
+        )
+    if raw.tag != CONTROL_MESSAGE_TAG:
+        raise ValueError(
+            f"control message: expected tag {CONTROL_MESSAGE_TAG}, got {raw.tag}"
+        )
+    inner = raw.value
+    if not isinstance(inner, dict):
+        raise ValueError(
+            f"control message body must be a CBOR map, got {type(inner).__name__}"
+        )
+    _require_int_keys(inner)
     return ControlMessage(
-        type=ControlMessageType(_get_uint(raw, 1, "type")),
-        sequence=_get_uint_optional(raw, 2, default=0),
+        type=ControlMessageType(_get_uint(inner, 1, "type")),
+        sequence=_get_uint_optional(inner, 2, default=0),
     )
 
 

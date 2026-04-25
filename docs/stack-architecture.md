@@ -501,12 +501,16 @@ Example:
 
 ### 6.4 Message Routing (PeekMessageType)
 
+Per DEC-083, control messages are wrapped in CBOR tag 77 (`D8 4D`), so the
+classifier first checks for that prefix; the application-layer rules below
+apply only to tagless frames.
+
 ```mermaid
 flowchart TD
     DATA["Incoming CBOR Data"] --> PEEK["PeekMessageType()"]
+    PEEK -->|"begins with D8 4D<br/>(CBOR tag 77, DEC-083)"| CTRL["Control Message<br/>(Ping/Pong/Close)"]
     PEEK -->|"key 1 = 0"| NOTIF["Notification<br/>(messageID=0)"]
-    PEEK -->|"key 1 = 1-3,<br/>no endpoint fields"| CTRL["Control Message<br/>(Ping/Pong/Close)"]
-    PEEK -->|"key 2 = 1-4,<br/>has endpoint/feature"| REQ["Request<br/>(Read/Write/Subscribe/Invoke)"]
+    PEEK -->|"key 4 present<br/>(featureId)"| REQ["Request<br/>(Read/Write/Subscribe/Invoke)"]
     PEEK -->|"otherwise"| RESP["Response"]
 ```
 

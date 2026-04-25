@@ -4487,6 +4487,88 @@ Both deployments produce identical wire behavior. Once a TLS connection is estab
 
 ---
 
+### DEC-083: CBOR Tag 77 Wrapper for Control Messages
+
+**Date:** 2026-04-25
+**Status:** Accepted
+
+**Context:**
+Control messages (Ping/Pong/Close) and application Responses share a CBOR map shape `{1: small-int, 2: small-int}` with no other keys. Specifically, a Response of the form `{1: messageId, 2: status}` with no payload (key 3 absent) is byte-identical to a ControlMessage of the form `{1: type, 2: sequence}` whenever `messageId` falls in the range {1, 2, 3} — the same range as `ControlMessageType` (Ping=1, Pong=2, Close=3). The receiver has no structural way to distinguish them.
+
+A `peek_message_type` classifier resolves the tie heuristically (mash-go's `pkg/wire/codec.go:230-238` routes ambiguous frames to CONTROL). Audit of mash-go's five peek consumers (2026-04-25) found that none consult session state as a tiebreaker — every dispatcher routes purely on peek's verdict:
+
+| Site | Action when peek misclassifies a Response as CONTROL |
+|---|---|
+| `pkg/transport/server.go:367-379` | msgID=1 sends spurious Pong; msgID=2 drops; **msgID=3 closes the connection** |
+| `pkg/service/device_service_zone.go:248-274` | Same — **msgID=3 tears down the zone connection** |
+| `pkg/service/device_session.go:106-160` | No CONTROL case in switch, no default — **silently dropped** |
+| `pkg/service/zone_session.go:121-133` | `default: ignore` — **silently dropped** |
+
+The msgID=3 case is the most severe: every session that uses sequential messageIds reaches msgID=3 on the third request. A no-payload error response with msgID=3 (legitimate per current spec) gets decoded as `ControlMessage{Type: Close}` and the entire connection is torn down with no diagnostic.
+
+Today's mash-go is "lucky" because all production `sendErrorResponse` paths attach a non-empty `ErrorPayload` (key 3 present, no collision). But:
+- `protocol_handler.go:677` returns `Response{Status: Success, Payload: result}` for Invoke; if `result` is nil, the encoded response has no key 3.
+- The wire format permits the bug regardless of mash-go's current handlers — a non-Go implementer constructing `Response{MessageID: 2, Status: Success}` with no payload produces bug-triggering bytes today.
+
+The ambiguity surfaced during the mash-py port (`mash-py-spec-issues.md` Issue #2). Resolving it by spec text alone ("peek is a hint, session state is authoritative") would require ~1 day of dispatcher-rewrite work in four mash-go call sites and equivalent work in every future port to thread an in-flight messageId tracker through the receive path.
+
+**Decision:**
+Wrap every Control message in **CBOR tag 77** (`0xD8 0x4D`). The presence of the tag at the start of a frame is the unambiguous signal that the frame is a control message; absence of the tag means the frame is an application-layer message (Request/Response/Notification). Peek classification reduces to "first byte is `0xD8` and second is `0x4D` → CONTROL".
+
+**Wire form before:**
+```
+{1: type, 2: sequence?}      # Control map at top level
+A2 01 01 02 01               # Ping(seq=1) — 5 bytes
+A1 01 03                     # Close       — 3 bytes
+```
+
+**Wire form after:**
+```
+77({1: type, 2: sequence?})  # Control map wrapped in CBOR tag 77
+D8 4D A2 01 01 02 01         # Ping(seq=1) — 7 bytes (+2)
+D8 4D A1 01 03               # Close       — 5 bytes (+2)
+```
+
+**Tag number rationale:**
+- Tag 77 ('M' in ASCII = MASH) is in the IANA CBOR Tag Registry's "Specification Required" range and (per the registry as of 2026-04-25) currently unassigned.
+- 1-byte minor argument form (`0xD8 0x4D`) keeps the overhead at exactly 2 bytes per control message regardless of message type.
+- Implementations MUST treat the exact tag value as load-bearing — no other tag value indicates a control message; receivers MUST reject any other tag at the top level of a frame as a protocol error.
+- IANA registration of tag 77 for MASH control messages SHOULD be filed before 1.0 finalization. Until registered, no other CBOR-using protocol is known to use this tag value.
+
+**Cost:**
+- **Wire overhead.** +2 bytes per control message. At a 30-second Ping interval (per `transport.md` §6.1), the steady-state overhead is ~5.7 bytes/minute per connection — far below noise.
+- **Spec change.** `transport.md` §6.2/6.3 updated to show the tagged wire form; `interaction-model.md` §3 updated to document control as the only tagged top-level frame type. No other protocol semantics change.
+- **Implementation change.** ~30 lines in `pkg/wire/codec.go` (encode/decode/peek), mirrored in `mash_py/wire/codec.py` and `peek.py`. The peek heuristic that previously disambiguated control from response collapses into a single tag check, *reducing* total LOC. All saved control-message vectors and any hand-crafted control-message hex literals in tests need to be regenerated.
+- **Inter-version compatibility.** This is a wire-format breaking change. A pre-DEC-083 peer sending a tagless Ping to a post-DEC-083 receiver would be misclassified as a Request and rejected by `Request.Validate`. Conversely, a post-DEC-083 peer sending a tagged Ping to a pre-DEC-083 receiver would fail to decode. Because MASH is pre-1.0 with no external deployments yet, the change lands in lockstep across mash-go and mash-py; future implementers see only the tagged form.
+
+**Rationale:**
+- **Eliminates the ambiguity at the wire level.** A spec-text fix would leave a permanent cognitive tax on every reader and every implementer; a wire-level fix removes it once. Future implementations have no opportunity to recreate the bug.
+- **Cheap and reversible at this stage.** mash-go is the only existing implementation, mash-py is mid-port (Phase 1), and no production deployments depend on the tagless wire form. The window for a wire-format change is open and won't be cheaper later.
+- **Eliminates the heuristic peek logic.** mash-go's peek classifier carries ~80 lines of "control vs response" disambiguation (codec.go:181-272). Post-DEC-083, the equivalent logic is a 2-byte prefix check. Less code, less attack surface, no edge cases.
+- **Aligned with how Notification was already disambiguated.** Notifications use the sentinel `messageId == 0` to signal their type — a structural marker, not a heuristic. Control messages now follow the same pattern (tag instead of sentinel because field 1's encoding is more constrained than messageId's).
+
+**Declined Alternatives:**
+- **Option A: Document peek as a hint, require dispatchers to consult session state.** Rejected post-audit. None of mash-go's dispatchers consult session state today; the documentation would mismatch the implementation. Even with implementation updates, the cost is ~1 day per language and the cognitive tax is permanent.
+- **Option B: Reorder peek so `status > 4` wins over the control check.** Rejected as a partial fix. Status values 0-4 (`SUCCESS`, `INVALID_ENDPOINT`, `INVALID_FEATURE`, `INVALID_ATTRIBUTE`, `INVALID_COMMAND`) plus msgID ∈ {1,2,3} plus no-payload would still misclassify. The worst case (msgID=3 + Status=Success + no payload → connection close) is not covered.
+- **Option C: Forbid messageIds in {1, 2, 3}.** Rejected. Wastes 3/2³² of the messageId space, requires every existing test corpus to be rewritten, and adds a "magic number" rule with no structural justification.
+- **Option E: Always include key 3 in Response (carrying CBOR null when no payload).** Rejected. +1 byte per Response in the common case, where pings are far rarer than responses; the cost falls in the wrong place.
+- **Option G: Use a sentinel field-1 value for control messages (parallel to Notification's `messageId=0`).** Rejected. The candidate sentinel range is already small (`messageId` is uint32 and any specific value is a wasted slot). Tag-based disambiguation is cleaner because tags are by-design out-of-band relative to the value space.
+
+**Implementations:**
+- **mash-go:** `pkg/wire/codec.go` updated to wrap encode/unwrap decode in `cbor.Tag{Number: 77, Content: ...}`; `PeekMessageType` updated to recognize `D8 4D` as the unique CONTROL marker.
+- **mash-py:** `mash_py/wire/codec.py` and `peek.py` updated to use `cbor2.CBORTag(77, ...)`; the heuristic in `peek.py` is replaced by the tag prefix check.
+- **mash-py-spec-issues.md Issue #2** marked Resolved by DEC-083.
+
+**Implementation notes:**
+- The tag MUST be at the top of the frame (i.e., `data[0:2] == 0xD8 0x4D`). Implementations MUST NOT accept a control message buried under nested CBOR structure.
+- The strict-decode pre-pass (mash-py `_strict.py`) traverses tags transparently — no change required there. Any tag at the top level passes through; only the codec's tag-number check enforces the 77-only contract.
+- Decoders MUST reject a frame that begins with the tag-77 prefix but whose wrapped value is not a CBOR map matching the ControlMessage shape (`{1: type, 2: sequence?}`).
+- Encoders MUST NOT emit any tag other than 77 at the top level of a frame. Tagged sub-values inside payloads (e.g., a Time tag inside an attribute value) remain permitted.
+
+**Related:** DEC-069 (8 KB max message — tag overhead well within the cap), DEC-082 (two-port deployment — tag wrapping applies identically to both deployment shapes), `mash-py-spec-issues.md` Issue #2 (resolved by this DEC).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -4627,3 +4709,4 @@ Key learnings:
 | 2026-02-14 | Added DEC-068: Invalid passcode validation. Devices reject 12 prohibited low-entropy setup codes (Matter 5.1.7.1). Valid range narrowed to 1-99999998. Standard test passcode changed from 12345678 to 20202021. |
 | 2026-04-24 | Added DEC-081: Remove `_mashd._udp` commissioner-discovery service. "Device picks controller" flow is architecturally incoherent in a pure server-device model; no production code path used it. Delete service type from specs, Go API, test harness, and TC-MASHD conformance cases. |
 | 2026-04-25 | Added DEC-082: Two-port deployment as conformant alternative to single-port ALPN routing. Surfaced while porting MASH to Python (mash-py): DEC-067's single-port pattern assumed a `GetConfigForClient`-equivalent primitive that isn't available in Python's stdlib `ssl` (or in C/Zig/some Rust TLS stacks). DEC-082 makes both deployment shapes conformant — same wire behavior, observable only as different mDNS SRV ports. Single-port (DEC-067) remains canonical for Go; two-port is canonical for languages without dynamic TLS config callbacks. |
+| 2026-04-25 | Added DEC-083: CBOR tag 77 wrapper for control messages. Surfaced during mash-py Phase 1 — payload-less Responses with msgID ∈ {1,2,3} encode byte-identically to ControlMessages, and audit found no mash-go dispatcher uses session state as a tiebreaker (msgID=3 + no payload silently closes the connection). Wraps all Ping/Pong/Close in `D8 4D <map>` (tag 77 = ASCII 'M'); +2 bytes per control message; eliminates the ambiguity at the wire level. Both mash-go and mash-py updated together; resolves spec-issues Issue #2. |

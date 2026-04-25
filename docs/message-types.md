@@ -18,7 +18,7 @@ MASH carries three distinct sub-protocols over its TCP/TLS connection. Each uses
 
 Classification details:
 
-- **Data plane** uses `PeekMessageType` logic: `MessageID=0` → Notification; Control messages present three specific `ControlType` values in key `1` with no endpoint/feature fields; Requests present `Operation` values 1–4 in key `2`; Responses carry a `Status` in key `2`. See [interaction-model.md §3](interaction-model.md#3-message-format) and `mash-go/pkg/wire/codec.go` (`PeekMessageType`).
+- **Data plane** uses `PeekMessageType` logic: a frame beginning with CBOR tag 77 (`D8 4D`) is a **Control** message (DEC-083); otherwise the frame is a CBOR map and `MessageID=0` → Notification, presence of key 4 (`FeatureID`) → Request, otherwise Response. See [interaction-model.md §3](interaction-model.md#3-message-format) and `mash-go/pkg/wire/codec.go` (`PeekMessageType`).
 - **Commissioning** uses a compact flat CBOR structure where key `1` is a `uint8` MsgType. Values 1–4 are SPAKE2+, 10–13 are CSR/certificate installation, 20 is Complete, 255 is Error. Defined in `mash-go/pkg/commissioning/messages.go:8–37`.
 - **Renewal** uses the same flat structure as commissioning but a disjoint MsgType range (30–33). Defined in `mash-go/pkg/commissioning/renewal_messages.go:41–50` and documented at [stack-architecture.md §11.1](stack-architecture.md#111-in-session-renewal-flow).
 
@@ -29,8 +29,8 @@ The three MsgType namespaces do not collide because each plane is identified by 
 A receiver dispatches an incoming frame in three steps:
 
 1. **Pick the namespace from ALPN.** If the TLS connection negotiated `mash-comm/1`, every frame uses the **commissioning** MsgType space. If it negotiated `mash/1`, the frame is on the **operational** plane and step 2 applies.
-2. **On the operational plane, separate renewal from data.** Renewal frames are flat CBOR maps with key `1` set to a `uint8` in range `30–33`. Data-plane frames are CBOR maps where the value at key `1` is either `0` (Notification), a `ControlType` `1–3` (Control), or a non-zero uint32 `MessageID` (Request or Response).
-3. **On the data plane, classify by `PeekMessageType`.** A non-zero `MessageID` plus an `Operation` in key `2` identifies a Request. A non-zero `MessageID` with a `Status` in key `2` and no Operation/Endpoint/Feature identifies a Response. `MessageID = 0` identifies a Notification. The three Control values in key `1` identify a Control frame.
+2. **On the operational plane, separate renewal from data.** Renewal frames are flat CBOR maps with key `1` set to a `uint8` in range `30–33`. Control frames begin with CBOR tag 77 (`D8 4D`), per DEC-083. Other operational frames are CBOR maps where the value at key `1` is either `0` (Notification) or a non-zero uint32 `MessageID` (Request or Response).
+3. **On the data plane, classify by `PeekMessageType`.** A frame beginning with `D8 4D` is a Control frame. A tagless frame with `MessageID = 0` identifies a Notification. A tagless frame with a non-zero `MessageID` and key `4` (`FeatureID`) present identifies a Request; absence of key `4` identifies a Response.
 
 ALPN is always available before any application-layer byte is parsed, so the namespace is fixed before decoding begins. Senders must NOT send commissioning MsgTypes on `mash/1` or vice versa; receivers MUST close the connection on such cross-plane frames.
 
@@ -38,9 +38,9 @@ ALPN is always available before any application-layer byte is parsed, so the nam
 
 ## 2. Data Plane Envelope (CBOR)
 
-Every data-plane frame is a CBOR map with integer keys. Presence and meaning of each key depends on message category.
+Every data-plane frame is a CBOR map with integer keys. Control frames are wrapped in **CBOR tag 77** (`D8 4D`) per DEC-083; the table below describes the inner map after unwrapping the tag.
 
-| Key | Request | Response | Notification | Control |
+| Key | Request | Response | Notification | Control (inside tag 77) |
 |---|---|---|---|---|
 | 1 | `MessageID` (uint32, non-zero) | `MessageID` (uint32, echoed) | `0` (fixed marker) | `ControlType` (uint8, 1–3) |
 | 2 | `Operation` (uint8, 1–4) | `Status` (uint8, 0–13) | `SubscriptionID` (uint32) | optional `Sequence` (uint32) |

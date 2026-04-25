@@ -145,16 +145,38 @@ func DecodeNotification(data []byte) (*Notification, error) {
 	}, nil
 }
 
+// ControlMessageTag is the CBOR tag wrapping every Control message frame.
+// See DEC-083: tag 77 (ASCII 'M' for MASH) disambiguates Control from a
+// payload-less Response with messageId in {1,2,3}, which would otherwise
+// encode to byte-identical CBOR. Receivers MUST treat the absence of this
+// tag at the top of a frame as proof the frame is application-layer
+// (Request/Response/Notification).
+const ControlMessageTag uint64 = 77
+
 // EncodeControlMessage encodes a control message (ping/pong/close) to CBOR bytes.
+//
+// Per DEC-083, the encoded form is `tag77({1: type, 2: sequence?})`. The
+// tag prefix `D8 4D` makes the frame unambiguous at the wire level.
 func EncodeControlMessage(msg *ControlMessage) ([]byte, error) {
-	return Marshal(msg)
+	return Marshal(cbor.Tag{Number: ControlMessageTag, Content: msg})
 }
 
 // DecodeControlMessage decodes CBOR bytes into a control message.
+//
+// The frame must begin with the DEC-083 tag (`D8 4D`); a tagless map with
+// the same shape is rejected so that pre-DEC-083 senders can't accidentally
+// be routed through the control path on the receive side.
 func DecodeControlMessage(data []byte) (*ControlMessage, error) {
-	var msg ControlMessage
-	if err := Unmarshal(data, &msg); err != nil {
+	var raw cbor.RawTag
+	if err := Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("failed to decode control message: %w", err)
+	}
+	if raw.Number != ControlMessageTag {
+		return nil, fmt.Errorf("control message: expected tag %d, got %d", ControlMessageTag, raw.Number)
+	}
+	var msg ControlMessage
+	if err := Unmarshal(raw.Content, &msg); err != nil {
+		return nil, fmt.Errorf("failed to decode control message body: %w", err)
 	}
 	return &msg, nil
 }
@@ -173,19 +195,28 @@ const (
 // PeekMessageType examines CBOR data to determine the message type
 // without fully decoding it.
 //
+// Per DEC-083, every Control message frame begins with CBOR tag 77 (`D8 4D`).
+// The tag prefix is the unique CONTROL marker; any frame without it is
+// application-layer (Request/Response/Notification) and is classified by
+// the messageId-based rules below.
+//
 // Message type detection logic:
-// - Notification: messageId (key 1) = 0
-// - Control: key 1 is 1-3 (valid ControlMessageType) AND no payload at key 3
-// - Request: has endpoint (key 3) and feature (key 4) as integers
-// - Response: has payload at key 3 as a map, or status > 4
+//   - Frame begins with `D8 4D` (tag 77)              → CONTROL
+//   - Top-level map key 1 (messageId) == 0            → NOTIFICATION
+//   - Top-level map has key 4 (featureId)             → REQUEST
+//     (operation in field 2 may be 0; downstream validate() rejects it)
+//   - Otherwise                                       → RESPONSE
 func PeekMessageType(data []byte) (MessageType, error) {
-	// First decode into map[any]any to detect non-integer keys
+	// DEC-083: tag-77 prefix is the unambiguous CONTROL signal.
+	if len(data) >= 2 && data[0] == 0xD8 && data[1] == byte(ControlMessageTag) {
+		return MessageTypeControl, nil
+	}
+
+	// Application-layer frames are CBOR maps with integer keys.
 	var anyMap map[any]any
 	if err := Unmarshal(data, &anyMap); err != nil {
 		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)
 	}
-
-	// MASH protocol requires integer keys at the top level - reject string keys
 	for k := range anyMap {
 		switch k.(type) {
 		case uint64, int64, int, uint, uint32, int32, uint16, int16, uint8, int8:
@@ -195,79 +226,24 @@ func PeekMessageType(data []byte) (MessageType, error) {
 		}
 	}
 
-	// Now decode into uint64 map for processing
 	var rawMsg map[uint64]any
 	if err := Unmarshal(data, &rawMsg); err != nil {
 		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)
 	}
 
-	// Get field 1 (messageId / controlType)
 	field1, _ := toUint32(rawMsg[1])
-
-	// Check for notification (messageId = 0)
 	if field1 == NotificationMessageID {
 		return MessageTypeNotification, nil
 	}
 
-	// Get field 2 (operation / status / sequence)
-	field2, _ := toUint8(rawMsg[2])
-
-	// Check field 3 to distinguish Request from Response
-	// Request has uint8 EndpointID at key 3
-	// Response has map or nil payload at key 3
-	field3 := rawMsg[3]
-
-	// If field 3 is a map or absent with status value > 4, it's a Response
-	if field3 != nil {
-		switch field3.(type) {
-		case map[any]any, map[uint64]any, map[string]any:
-			// Field 3 is a map -> Response payload
-			return MessageTypeResponse, nil
-		}
+	// Request frames carry both endpointId (key 3) and featureId (key 4).
+	// The presence of key 4 is the cleanest discriminator: Responses never
+	// use key 4. Notifications were already handled above.
+	if _, hasField4 := rawMsg[4]; hasField4 {
+		return MessageTypeRequest, nil
 	}
 
-	// Check for control message: Type (key 1) is 1-3 AND no endpoint/feature fields
-	// Must check this BEFORE the field2 > 4 check because control messages use
-	// field 2 as a sequence number which can be any uint32 value
-	if field1 >= 1 && field1 <= 3 {
-		_, hasField3 := rawMsg[3]
-		_, hasField4 := rawMsg[4]
-		if !hasField3 && !hasField4 {
-			return MessageTypeControl, nil
-		}
-	}
-
-	// If field 2 is a valid status (0-13) and > 4 (not a valid operation), it's Response
-	// Status values 5-13 are not valid Operation values
-	if field2 > 4 {
-		return MessageTypeResponse, nil
-	}
-
-	// Check for request: field 2 is valid operation (1-4) and has endpoint/feature
-	if field2 >= 1 && field2 <= 4 {
-		endpointID, _ := toUint8(field3)
-		featureID, _ := toUint8(rawMsg[4])
-		if endpointID > 0 || featureID > 0 {
-			return MessageTypeRequest, nil
-		}
-		// EndpointID can be 0 (DEVICE_ROOT), so also check if field 4 exists
-		if _, hasField4 := rawMsg[4]; hasField4 {
-			return MessageTypeRequest, nil
-		}
-	}
-
-	// If field 2 is missing/zero but message has endpoint (key 3) and feature (key 4)
-	// fields, treat as a malformed request so DecodeRequest.Validate rejects it
-	// with an appropriate error response.
-	if field2 == 0 {
-		_, hasField3 := rawMsg[3]
-		_, hasField4 := rawMsg[4]
-		if hasField3 && hasField4 {
-			return MessageTypeRequest, nil
-		}
-	}
-
-	// Default to response
+	// No key 4 → Response. Keys 1, 2, and an optional payload at key 3.
 	return MessageTypeResponse, nil
 }
 
@@ -282,22 +258,6 @@ func toUint32(v any) (uint32, bool) {
 		return uint32(n), true
 	case int:
 		return uint32(n), true
-	default:
-		return 0, false
-	}
-}
-
-// toUint8 converts various numeric types to uint8.
-func toUint8(v any) (uint8, bool) {
-	switch n := v.(type) {
-	case uint64:
-		return uint8(n), true
-	case uint32:
-		return uint8(n), true
-	case int64:
-		return uint8(n), true
-	case int:
-		return uint8(n), true
 	default:
 		return 0, false
 	}

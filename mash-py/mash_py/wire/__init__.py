@@ -12,6 +12,7 @@ pkg/wire/codec.go:18-48.
 from __future__ import annotations
 
 from mash_py.wire.codec import (
+    CONTROL_MESSAGE_TAG,
     decode_control_message,
     decode_notification,
     decode_request,
@@ -43,6 +44,7 @@ from mash_py.wire.payloads import (
 from mash_py.wire.peek import peek_message_type
 
 __all__ = [
+    "CONTROL_MESSAGE_TAG",
     "NOTIFICATION_MESSAGE_ID",
     "ControlMessage",
     "ControlMessageType",

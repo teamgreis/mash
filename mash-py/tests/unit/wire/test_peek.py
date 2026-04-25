@@ -60,18 +60,20 @@ class TestPeekClassification:
         resp = Response(message_id=42, status=Status.INVALID_PARAMETER)  # status=5
         assert peek_message_type(encode_response(resp)) == MessageType.RESPONSE
 
-    def test_response_error_with_no_payload_msg_id_in_control_range(self) -> None:
-        """KNOWN AMBIGUITY (mash-py-spec-issues.md Issue #2).
-
-        A response of the form ``{1: msgID, 2: status}`` with no payload and
-        msgID in {1,2,3} is byte-indistinguishable from a control message and
-        peek will return CONTROL. Real receivers must disambiguate via session
-        state (in-flight messageId tracking). This test pins mash-py to the
-        same behavior as mash-go (verified by running pkg/wire.PeekMessageType
-        against the same bytes).
+    def test_response_error_no_payload_msg_id_in_old_ambiguous_range(self) -> None:
+        """Regression: previously a response of the form ``{1: msgID, 2: status}``
+        with no payload and msgID ∈ {1,2,3} was byte-identical to a control
+        message and peek mistakenly returned CONTROL (mash-py-spec-issues.md
+        Issue #2 / DEC-083). Tag-77-wrapped controls eliminate the ambiguity:
+        every control frame now starts with ``D8 4D``, so a tagless map can
+        only be application-layer.
         """
         resp = Response(message_id=1, status=Status.BUSY)  # status 9
-        assert peek_message_type(encode_response(resp)) == MessageType.CONTROL
+        assert peek_message_type(encode_response(resp)) == MessageType.RESPONSE
+        # And same for msgID=3 — the catastrophic case (formerly classified
+        # as Close, tearing down the connection).
+        resp3 = Response(message_id=3, status=Status.SUCCESS)
+        assert peek_message_type(encode_response(resp3)) == MessageType.RESPONSE
 
     def test_notification(self) -> None:
         n = Notification(
@@ -141,3 +143,45 @@ class TestPeekHandlesMalformedRequest:
         from mash_py.wire import MessageType
 
         assert peek_message_type(bad) == MessageType.REQUEST
+
+
+class TestPeekDEC083:
+    """Explicit regression coverage for the DEC-083 wire-format change.
+
+    These tests target the exact byte sequences that used to misclassify.
+    They are the load-bearing pin: if peek ever drifts back to the
+    field-1-heuristic behavior, these failures point at the *specific*
+    input that broke and at the DEC that fixes it.
+    """
+
+    @pytest.mark.parametrize("msg_id", [1, 2, 3])
+    def test_payload_less_response_with_msg_id_in_old_ambiguous_range(
+        self, msg_id: int
+    ) -> None:
+        """Pre-DEC-083: Response{MsgID:msg_id, Status:Success} with no payload
+        encoded as `{1:msg_id, 2:0}` and peek returned CONTROL. Tagged
+        controls fix this — tagless map → must classify as RESPONSE.
+
+        msg_id=3 is the catastrophic case: pre-fix, transport handler treated
+        it as ControlClose and tore down the connection.
+        """
+        resp = Response(message_id=msg_id, status=Status.SUCCESS)
+        assert peek_message_type(encode_response(resp)) == MessageType.RESPONSE
+
+    def test_tag_77_prefix_classifies_as_control_even_for_response_shaped_inner(
+        self,
+    ) -> None:
+        """Inverse direction: `D8 4D <tag77> A2 01 03 02 00` — inner map
+        looks like a Response, but the tag prefix forces CONTROL. This pins
+        the tag prefix as the authoritative signal."""
+        # Hand-built: tag 77 wrapping {1:3, 2:0}
+        tagged = bytes.fromhex("d84da201030200")
+        assert peek_message_type(tagged) == MessageType.CONTROL
+
+    def test_short_frames_below_two_bytes_dont_trip_tag_check(self) -> None:
+        """A 1-byte frame must not be misread as a tag-prefix. CBOR `01`
+        (integer 1) is a degenerate but valid input shape; peek should
+        proceed to the map-check path and reject it there as 'not a map'.
+        """
+        with pytest.raises(ValueError, match="map"):
+            peek_message_type(b"\x01")

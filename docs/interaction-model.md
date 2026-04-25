@@ -185,7 +185,23 @@ To "change" a parameter like duration, re-send the entire command with new value
 }
 ```
 
-### 3.4 MessageID Management
+### 3.4 Control Message (from transport keep-alive)
+
+Control messages (Ping / Pong / Close) live alongside Request / Response /
+Notification but are wrapped in **CBOR tag 77** (`D8 4D`) per DEC-083.
+The tag is the unambiguous CONTROL marker — any frame that does not begin
+with `D8 4D` is application-layer.
+
+```cbor
+77({
+  1: type,             // uint8: 1=ping, 2=pong, 3=close
+  2: sequence          // uint32: optional, omitted when zero
+})
+```
+
+See `transport.md` §6 for keep-alive semantics and timing.
+
+### 3.5 MessageID Management
 
 **MessageID Space:**
 - Range: 1 to 4,294,967,295 (0 reserved for notifications)

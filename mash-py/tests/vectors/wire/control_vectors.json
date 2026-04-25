@@ -4,7 +4,7 @@
     "description": "Ping with sequence number",
     "go_struct_repr": "ControlMessage{Type:Ping, Sequence:1}",
     "message_type": "control",
-    "cbor_hex": "a201010201",
+    "cbor_hex": "d84da201010201",
     "expected": {
       "sequence": 1,
       "type": 1
@@ -15,7 +15,7 @@
     "description": "Pong with sequence number",
     "go_struct_repr": "ControlMessage{Type:Pong, Sequence:1}",
     "message_type": "control",
-    "cbor_hex": "a201020201",
+    "cbor_hex": "d84da201020201",
     "expected": {
       "sequence": 1,
       "type": 2
@@ -26,7 +26,7 @@
     "description": "Close (no sequence)",
     "go_struct_repr": "ControlMessage{Type:Close}",
     "message_type": "control",
-    "cbor_hex": "a10103",
+    "cbor_hex": "d84da10103",
     "expected": {
       "sequence": 0,
       "type": 3
@@ -37,7 +37,7 @@
     "description": "Ping with max-uint32 sequence",
     "go_struct_repr": "ControlMessage{Type:Ping, Sequence:max-uint32}",
     "message_type": "control",
-    "cbor_hex": "a20101021affffffff",
+    "cbor_hex": "d84da20101021affffffff",
     "expected": {
       "sequence": 4294967295,
       "type": 1

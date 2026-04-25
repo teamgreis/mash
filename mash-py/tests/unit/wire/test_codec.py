@@ -260,6 +260,45 @@ class TestControlMessageRoundTrip:
         assert decoded.sequence == msg.sequence
 
 
+class TestControlMessageDEC083:
+    """Regression tests for the DEC-083 wire-format change (CBOR tag 77).
+
+    The bug DEC-083 fixes: a payload-less Response with messageId in {1,2,3}
+    used to encode byte-identically to a ControlMessage, so peek_message_type
+    misclassified it as CONTROL — and the transport handler treated msgID=3
+    as a Close, tearing down the connection. These tests pin the new
+    invariants so a future refactor can't silently re-open the ambiguity.
+    """
+
+    def test_encoded_control_has_tag_prefix(self) -> None:
+        """Every encoded control message must begin with `D8 4D` (tag 77)."""
+        for msg in [
+            ControlMessage(type=ControlMessageType.PING, sequence=1),
+            ControlMessage(type=ControlMessageType.PONG, sequence=42),
+            ControlMessage(type=ControlMessageType.CLOSE),
+        ]:
+            data = encode_control_message(msg)
+            assert data[:2] == b"\xd8\x4d", f"missing tag prefix on {msg}: {data.hex()}"
+
+    def test_decode_rejects_tagless_map(self) -> None:
+        """A pre-DEC-083 ping (`{1:1, 2:1}` with no tag) must be rejected."""
+        tagless_ping = bytes.fromhex("a201010201")
+        with pytest.raises(ValueError, match="tag"):
+            decode_control_message(tagless_ping)
+
+    def test_decode_rejects_wrong_tag(self) -> None:
+        """Only tag 77 is valid. Tag 78 wrapping the same map must error."""
+        wrong_tag = bytes.fromhex("d84ea201010201")  # tag 78
+        with pytest.raises(ValueError, match="tag 77"):
+            decode_control_message(wrong_tag)
+
+    def test_decode_rejects_tag_with_non_map_body(self) -> None:
+        """Tag 77 wrapping something other than a CBOR map must error."""
+        # D8 4D 0A — tag 77 wrapping integer 10
+        with pytest.raises(ValueError, match="map"):
+            decode_control_message(bytes.fromhex("d84d0a"))
+
+
 # ---------------------------------------------------------------------------
 # Validation tests
 # ---------------------------------------------------------------------------

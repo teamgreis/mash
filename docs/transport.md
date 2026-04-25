@@ -266,23 +266,52 @@ Keep-alive uses application-layer ping/pong (not TCP keep-alive):
 
 ### 6.2 Ping Message
 
+Per DEC-083, every control message frame is wrapped in **CBOR tag 77** (`D8 4D`).
+The tag prefix is the unique CONTROL marker; any frame that does not begin
+with `D8 4D` is application-layer (Request / Response / Notification) and
+MUST be classified accordingly.
+
 ```cbor
-{
-  "type": "ping",
-  "seq": 12345
-}
+77({
+  1: 1,         // type: 1 = ping
+  2: 12345      // sequence (uint32; omitted when zero)
+})
+```
+
+Wire bytes for a ping with sequence 12345:
+
+```
+D8 4D A2 01 01 02 19 30 39
+│  │  │  │  │  │  │  └────── sequence value (12345 in 2-byte form)
+│  │  │  │  │  │  └────────── key 2 (sequence)
+│  │  │  │  │  └───────────── value 1 (ping)
+│  │  │  │  └──────────────── key 1 (type)
+│  │  │  └─────────────────── 2-element map
+│  │  └────────────────────── tag 77 ('M' for MASH)
+│  └───────────────────────── tag with 1-byte argument
+└──────────────────────────── (start of frame)
 ```
 
 ### 6.3 Pong Message
 
 ```cbor
-{
-  "type": "pong",
-  "seq": 12345
-}
+77({
+  1: 2,         // type: 2 = pong
+  2: 12345      // sequence (echoed from the matching ping)
+})
 ```
 
-### 6.4 Connection Loss Detection
+### 6.4 Close Message
+
+```cbor
+77({
+  1: 3          // type: 3 = close
+})
+```
+
+The sequence field is omitted on close (no sequence semantics).
+
+### 6.5 Connection Loss Detection
 
 **Maximum detection delay: 95 seconds**
 
@@ -301,7 +330,7 @@ This is the worst-case scenario when network partition occurs immediately after 
 | Network partition after ping | 5 seconds |
 | Network partition mid-cycle | Up to 95 seconds |
 
-### 6.5 Connection Closure
+### 6.6 Connection Closure
 
 After 3 missed pongs:
 1. Close TCP connection

@@ -32,13 +32,13 @@
     "description": "peek classifies a ping as CONTROL",
     "go_struct_repr": "ControlMessage{Type:Ping, Seq:1}",
     "message_type": "control",
-    "cbor_hex": "a201010201"
+    "cbor_hex": "d84da201010201"
   },
   {
     "name": "peek_control_close",
     "description": "peek classifies a close (no seq) as CONTROL",
     "go_struct_repr": "ControlMessage{Type:Close}",
     "message_type": "control",
-    "cbor_hex": "a10103"
+    "cbor_hex": "d84da10103"
   }
 ]
