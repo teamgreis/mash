@@ -649,7 +649,7 @@ If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl
 
 ### Phase 6 — mDNS Discovery (Browser Only)
 
-**Status.** Pending.
+**Status.** Complete (2026-04-26). 35 unit tests + 2 interop tests green. Python browser resolves a live `mash-device` over real mDNS in ~2s.
 
 **Goal.** A Python controller can browse for commissionable Go devices and resolve them to host:port.
 
