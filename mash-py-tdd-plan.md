@@ -391,6 +391,7 @@ The `gen_vectors` Go program runs in CI on the Go side. If protocol changes alte
 
 The conventions in each phase:
 
+- **Status:** `Done (YYYY-MM-DD)` once the phase's acceptance criterion is met, or `Pending` otherwise. A phase whose primary code has landed but whose interop check is blocked on a later phase is marked `Done (YYYY-MM-DD; interop deferred to Phase N)` so the gap stays visible.
 - **Goal:** what this phase delivers.
 - **Depends on:** prior phases (numbers).
 - **Files created/modified:** with rough size estimates.
@@ -399,9 +400,39 @@ The conventions in each phase:
 - **Interop verification:** the live Go-side check.
 - **Refinement contingency:** if interop fails, what's the most likely cause and how to bisect.
 
+### Progress snapshot
+
+| Phase | Title | Status |
+|---|---|---|
+| 0 | Project Scaffolding | Done (2026-04-25) |
+| 1 | CBOR Wire Codec | Done (2026-04-25) |
+| 2 | Length-Prefixed Framing | Done (2026-04-26) |
+| 3 | Crypto Facade & Certificate Helpers | Done (2026-04-26) |
+| 4 | TLS Transport (DEC-082 two-port) | Done (2026-04-26; live interop deferred to Phase 6) |
+| 5 | `mash_py.wire.peek` Live Verification | Done (2026-04-26; live body deferred to Phase 8/11) |
+| 6 | mDNS Discovery (Browser Only) | Pending |
+| 7 | SPAKE2+ Algorithm Core | Pending |
+| 8 | PASE Message Exchange (Client Side) | Pending |
+| 9 | CSR & Certificate Install | Pending |
+| 10 | Operational Connection (Post-Commissioning) | Pending |
+| 11 | Interaction Model Client | Pending |
+| 12 | Code Generation (Python from YAML) | Pending |
+| 13 | Device Model | Pending |
+| 14 | PASE Server (Device Side) | Pending |
+| 15 | Operational Server (Device Side) | Pending |
+| 16 | Subscriptions & Notifications | Pending |
+| 17 | TestControl Feature & Trigger Handlers | Pending |
+| 18 | mDNS Advertiser | Pending |
+| 19 | Certificate Renewal (MsgTypes 30–33) | Pending |
+| 20 | Failsafe & Multi-Zone Resolution | Pending |
+| 21 | Test Harness (Python Runner Subset) | Pending |
+| 22 | Conformance Gate (mash-test against Python device) | Pending |
+
 ---
 
 ### Phase 0 — Project Scaffolding
+
+**Status.** Done (2026-04-25).
 
 **Goal.** A Python package that builds, tests, and lints; CI green on a no-op test.
 
@@ -428,6 +459,8 @@ The conventions in each phase:
 ---
 
 ### Phase 1 — CBOR Wire Codec (Request/Response/Notification/Control)
+
+**Status.** Done (2026-04-25).
 
 **Goal.** Encode and decode all four MASH message classes with byte-identical output to Go's `pkg/wire`.
 
@@ -469,6 +502,8 @@ The conventions in each phase:
 
 ### Phase 2 — Length-Prefixed Framing
 
+**Status.** Done (2026-04-26).
+
 **Goal.** Read and write framed messages on a binary stream with the same 4-byte BE length prefix and 8192-byte cap as Go.
 
 **Depends on.** Phase 0.
@@ -501,6 +536,8 @@ The conventions in each phase:
 
 ### Phase 3 — Crypto Facade & Certificate Helpers
 
+**Status.** Done (2026-04-26).
+
 **Goal.** A `mash_py.crypto` module that exposes everything the rest of the stack needs in language-agnostic terms.
 
 **Depends on.** Phase 0.
@@ -532,6 +569,8 @@ The conventions in each phase:
 ---
 
 ### Phase 4 — TLS Transport (Two-Port Deployment per DEC-082)
+
+**Status.** Done (2026-04-26; live interop deferred to Phase 6 — needs the mDNS browser before a Python client can discover a Go device's port). Unit and TLS-loopback coverage is complete; `tests/interop/test_phase4_tls.py` is a scaffold that asserts only the Go toolchain precondition.
 
 **Goal.** Python `Connection` class for clients (TLS 1.3, ALPN-aware) and a two-listener server pattern (commissioning port + operational port, separate SSLContexts). Wire-conformant per DEC-082; no ClientHello parsing or BIO trickery.
 
@@ -586,6 +625,8 @@ If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl
 
 ### Phase 5 — `mash_py.wire.peek` Live Verification
 
+**Status.** Done (2026-04-26; live body deferred to Phase 8/11 — Go's commissioning handler rejects non-PASE first frames, so Read/Write/Subscribe traffic can't flow until the PASE client and interaction client land). The spec-driven oracle (`classify_per_spec`) plus its agreement helper (`assert_classifies_per_spec`) are implemented and self-tested in `tests/interop/wire/test_peek_against_go.py`; the live test that drives Go traffic is `pytest.skip(...)` until its dependencies arrive.
+
 **Goal.** Confirm the Phase 1 classifier handles real Go-emitted messages without ambiguity. This is a "promote unit-test confidence to interop confidence" phase.
 
 **Depends on.** Phase 4.
@@ -607,6 +648,8 @@ If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl
 ---
 
 ### Phase 6 — mDNS Discovery (Browser Only)
+
+**Status.** Pending.
 
 **Goal.** A Python controller can browse for commissionable Go devices and resolve them to host:port.
 
@@ -641,6 +684,8 @@ If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl
 ---
 
 ### Phase 7 — SPAKE2+ Algorithm Core
+
+**Status.** Pending.
 
 **Goal.** A Python module that, given a setup code and identities, produces the same intermediate values (w0, w1, pA, pB, transcript hash, shared secret, confirmation MAC) as the Go implementation, byte-identically when seeded with the same RNG.
 
@@ -687,6 +732,8 @@ If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl
 
 ### Phase 8 — PASE Message Exchange (Client Side)
 
+**Status.** Pending.
+
 **Goal.** A Python controller can drive a complete PASE handshake with a Go device.
 
 **Depends on.** Phases 4, 7.
@@ -728,6 +775,8 @@ cd mash-py && pytest tests/interop/commissioning/test_pase_against_go_device.py 
 ---
 
 ### Phase 9 — CSR & Certificate Install
+
+**Status.** Pending.
 
 **Goal.** Python controller can issue a Zone CA-signed operational cert to a Go device after PASE.
 
@@ -776,6 +825,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 10 — Operational Connection (Post-Commissioning)
 
+**Status.** Pending.
+
 **Goal.** After commissioning, Python controller reconnects to the Go device on the operational port with mTLS using the issued cert, and exchanges a successful Read on DeviceInfo.
 
 **Depends on.** Phases 4, 9.
@@ -808,6 +859,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 11 — Interaction Model Client (Read/Write/Subscribe/Invoke)
 
+**Status.** Pending.
+
 **Goal.** Full request/response correlation for the controller side, with subscription notification dispatch.
 
 **Depends on.** Phases 1, 2, 10.
@@ -839,6 +892,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 ---
 
 ### Phase 12 — Code Generation (Python from YAML)
+
+**Status.** Pending.
 
 **Goal.** A `codegen` tool that reads `docs/features/*.yaml` and emits Python files in `mash_py/features/` and `mash_py/model/`.
 
@@ -880,6 +935,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 13 — Device Model (Endpoints, Features, Attributes)
 
+**Status.** Pending.
+
 **Goal.** A Python device can hold an endpoint hierarchy with features and attributes, with values readable and writable through the in-memory API.
 
 **Depends on.** Phase 12.
@@ -910,6 +967,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 14 — PASE Server (Device Side)
 
+**Status.** Pending.
+
 **Goal.** A Python device can receive PASE handshake from a Go controller and complete it.
 
 **Depends on.** Phases 4, 7, 13.
@@ -936,6 +995,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 ---
 
 ### Phase 15 — Operational Server (Device Side)
+
+**Status.** Pending.
 
 **Goal.** Python device responds correctly to Read/Write/Subscribe/Invoke from a Go controller after commissioning.
 
@@ -965,6 +1026,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 16 — Subscriptions & Notifications
 
+**Status.** Pending.
+
 **Goal.** Python device emits notifications when subscribed attributes change. Python controller receives and routes them.
 
 **Depends on.** Phase 15.
@@ -992,6 +1055,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 ---
 
 ### Phase 17 — TestControl Feature & Trigger Handlers
+
+**Status.** Pending.
 
 **Goal.** Python device implements TestControl (feature 0x0A on endpoint 0) so that `mash-test`'s trigger commands work.
 
@@ -1025,6 +1090,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 18 — mDNS Advertiser
 
+**Status.** Pending.
+
 **Goal.** Python device advertises commissioning + operational mDNS records correctly.
 
 **Depends on.** Phase 6 (browser uses same primitives).
@@ -1051,6 +1118,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 ---
 
 ### Phase 19 — Certificate Renewal (MsgTypes 30–33)
+
+**Status.** Pending.
 
 **Goal.** Both directions of in-session cert renewal work.
 
@@ -1084,6 +1153,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 ---
 
 ### Phase 20 — Failsafe & Multi-Zone Resolution
+
+**Status.** Pending.
 
 **Goal.** Python device supports multiple zones (max 1 GRID + 1 LOCAL + 1 TEST per DEC-043), with limit/setpoint resolution, failsafe gating, and **per-zone TLS server cert selection**.
 
@@ -1123,6 +1194,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 21 — Test Harness (Python Runner Subset)
 
+**Status.** Pending.
+
 **Goal.** A Python `mash-py-test` CLI that loads YAML test cases from `mash-go/testdata/cases/`, drives a Go device, and reports pass/fail. Ports the *minimum useful subset* of `mash-go/internal/testharness/runner/`.
 
 **Depends on.** Phases 6, 11, 18.
@@ -1152,6 +1225,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 ---
 
 ### Phase 22 — Conformance Gate (mash-test against Python device)
+
+**Status.** Pending.
 
 **Goal.** The Go `mash-test` binary, run against a Python device, passes a target subset of conformance tests.
 
