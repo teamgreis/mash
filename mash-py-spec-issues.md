@@ -125,6 +125,30 @@ D. **Add a tag byte to control messages** (e.g. CBOR tag 65535 or a prepended se
 
 ---
 
+### Issue #3 — `mash-test` is single-port-shaped at the harness layer
+
+**Status:** Deferred (until mash-py Phase 4 ships)
+**Surfaced during:** post-DEC-083 review of conformance coverage (2026-04-25)
+
+**Implicit assumption.**
+DEC-082 declares two-port deployment conformant alongside single-port and states that "mDNS SRV records carry the actual port per service." A real controller dialing the SRV-advertised port is indifferent to deployment shape. But `mash-go/cmd/mash-test` — which is itself a synthetic controller used to verify conformance — accepts a single `-target host:port` flag and dials it for both ALPN values (`internal/testharness/runner/runner.go:825-831`). The runner reads SRV records (`discovery_handlers.go:591-594`) for *verification* assertions but never *uses* them to drive TCP connections.
+
+This is not a spec issue per se — DEC-082 is consistent and complete — but the canonical reference *test harness* doesn't honor the spec's discovery contract. Today this is invisible because mash-go is single-port (both SRV records advertise the same port). The moment a two-port device exists (mash-py Phase 4), conformance runs against it fail at the commissioning ALPN connection.
+
+**Languages affected.**
+None directly — both shapes are wire-compatible. But every future two-port implementation (Python now; C/Zig/Rust if/when they arrive) hits the same harness gap.
+
+**Disposition.** Deferred to mash-py Phase 22. The fix is a mash-go change (add `-srv-resolve` flag to `mash-test`, browse mDNS per ALPN, dial the SRV-advertised port). Documented as a Phase 22 prerequisite in `mash-py-tdd-plan.md` because it is the forcing function — there is no two-port device to test against until Phase 4 lands, and conformance is the one place the gap actually bites. Until then, mash-go's single-port shape continues to work with the existing `-target` flag.
+
+**Why deferred rather than fixed now.**
+- No two-port device exists yet; the change has no concrete failing test to validate against.
+- macOS mDNS browse reliability is already flaky (see `TC-MASHC-*`, `TC-NOTFOUND-*` clusters in `mash-go/test-base-protocol.log`); making the harness depend on real mDNS by default would worsen baseline noise before there's value to offset it.
+- An opt-in flag preserves the existing single-port-friendly path until mDNS reliability is acceptable for the default flip.
+
+**Related:** DEC-082 (two-port deployment), `mash-py-tdd-plan.md` Phase 4 ("Harness coverage caveat") and Phase 22 ("Prerequisite (mash-go harness change — DEC-082 compliance)").
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.

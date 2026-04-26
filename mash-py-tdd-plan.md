@@ -580,6 +580,8 @@ openssl s_client -connect localhost:8444 -tls1_3 -alpn mash-comm/1 -showcerts
 ```
 If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl` module is stricter about certificate verification. May need to pass `check_hostname=False` and a custom verify callback that matches the Go device's self-signed cert by `CommonName == discriminator`. If the Go controller fails to connect to the Python device's commissioning port, verify the mDNS SRV record advertises the correct port (use `dns-sd -L MASH-5678 _mash-comm._tcp local`).
 
+**Harness coverage caveat.** Once Phase 4 ships, the Python device runs two listeners on different ports. `mash-go/cmd/mash-test` in its current form takes a single `-target host:port` and dials it for both ALPN values — meaning a `mash-comm/1` connection lands on the operational port, fails TLS, and every commissioning conformance case fails noisily. This is a harness gap, not a wire-protocol gap; Phase 22 owns the fix. Until that change lands, conformance against the Python device is run **with the Python device deployed in single-port mode for testing** (or skipped entirely). Document this exception in `tools/run_conformance.sh` when Phase 22 lands.
+
 ---
 
 ### Phase 5 — `mash_py.wire.peek` Live Verification
@@ -1155,6 +1157,19 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 **Depends on.** Phases 14–20.
 
+**Prerequisite (mash-go harness change — DEC-082 compliance).**
+
+Before Phase 22 acceptance can be reached, `mash-go/cmd/mash-test` must become deployment-shape-agnostic. Today the runner takes a single `-target host:port` and dials it for both ALPN values (`internal/testharness/runner/runner.go:825-831`). This works against a single-port device (mash-go) by accident — both ALPNs share the same TCP port — but bypasses DEC-082's "mDNS SRV port is authoritative" contract. Against a two-port device (mash-py from Phase 4 onward), commissioning connections would dial the operational port and every commissioning conformance case would fail.
+
+The fix is a small mash-go PR landed *as part of Phase 22's first commit*:
+
+- Add `-srv-resolve` flag (or a `--target mdns:<instance-name>` form) that opts the runner into per-ALPN mDNS SRV resolution.
+- When opted in, the runner browses `_mash._tcp` for `mash/1` connections and `_mash-comm._tcp` for `mash-comm/1` connections, then dials the SRV-advertised host:port per service.
+- Default behaviour stays as today (`-target host:port` for both ALPNs) so existing CI invocations don't break.
+- Phase 22's `tools/run_conformance.sh` invokes mash-test with the SRV-resolve flag enabled.
+
+This change covers single-port and two-port deployments with one harness path, validates DEC-082's discovery contract end-to-end, and creates no per-implementation harness branching. mash-go's own conformance run can also flip on the flag once mDNS reliability on the CI environment is acceptable; that flip is out of scope for this phase.
+
 **Target subset (defined explicitly to set scope):**
 - All `commissioning-*.yaml` cases
 - All `base-protocol-*.yaml` cases
@@ -1165,28 +1180,38 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 - `env:multi-device` cases (require multi-device orchestration)
 - Any `slow` cases (CI gate would balloon)
 
-**Files created.**
+**Files created (mash-py).**
 
 - `tests/conformance/test_against_go_runner.py` — pytest wrapper that invokes `mash-go/cmd/mash-test` against a freshly started Python device
 - `tools/run_conformance.sh`
+
+**Files modified (mash-go).**
+
+- `internal/testharness/runner/runner.go` — add `-srv-resolve` flag and per-ALPN SRV resolution path (~80 LOC)
+- `cmd/mash-test/main.go` — wire the flag through
+- `internal/testharness/runner/runner_test.go` — unit-test the SRV-resolve path against a mock browser
 
 **Test layers.**
 
 - Conformance only.
 
-**Acceptance.** Go's `mash-test --target localhost:8443` passes the target subset against a Python device.
+**Acceptance.** Go's `mash-test --target mdns:MASH-1234 --srv-resolve` passes the target subset against a Python device deployed in two-port mode.
 
 **Interop verification.**
 
 ```bash
-# Terminal 1
-cd mash-py && python -m mash_py.cli.device --port 8443 --discriminator 1234
+# Terminal 1: Python device in two-port mode (operational 8443, commissioning 8444)
+cd mash-py && python -m mash_py.cli.device --discriminator 1234
 
 # Terminal 2
-cd mash-go && go run ./cmd/mash-test --target localhost:8443 --setup-code 20202021 --filter "TC-COMM-*,TC-IM-*"
+cd mash-go && go run ./cmd/mash-test \
+  --target mdns:MASH-1234 --srv-resolve \
+  --setup-code 20202021 --filter "TC-COMM-*,TC-IM-*"
 ```
 
 **Refinement contingency.** Each failing test points to a specific protocol gap. Address by re-opening the relevant phase. Don't add ad-hoc patches in Phase 22 — fix at the layer that owns the gap.
+
+If `-srv-resolve` itself misbehaves (mDNS browse times out, wrong port resolved), the failure surface is mash-go's harness, not mash-py's protocol. Reproduce with `mash-go/cmd/mash-test` against a fresh `mash-go` device first to isolate; mash-go is single-port, so SRV resolution must yield the same port for both ALPNs and any divergence is a harness bug.
 
 ---
 
