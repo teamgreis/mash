@@ -87,6 +87,8 @@ func TestE2E_StandardCommissioning(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -107,6 +109,10 @@ func TestE2E_StandardCommissioning(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	// === Verify Results ===
@@ -259,7 +265,6 @@ type pairingRequestMockAdvertiser struct {
 	// Base fields from mockAdvertiser
 	commissionable   *discovery.CommissionableInfo
 	operationalZones map[string]*discovery.OperationalInfo
-	commissionerZone *discovery.CommissionerInfo
 
 	// Track pairing requests
 	activePairingRequests map[uint16]*discovery.PairingRequestInfo
@@ -310,27 +315,6 @@ func (a *pairingRequestMockAdvertiser) StopOperational(zoneID string) error {
 	return nil
 }
 
-func (a *pairingRequestMockAdvertiser) AdvertiseCommissioner(ctx context.Context, info *discovery.CommissionerInfo) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.commissionerZone = info
-	return nil
-}
-
-func (a *pairingRequestMockAdvertiser) UpdateCommissioner(zoneID string, info *discovery.CommissionerInfo) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.commissionerZone = info
-	return nil
-}
-
-func (a *pairingRequestMockAdvertiser) StopCommissioner(zoneID string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.commissionerZone = nil
-	return nil
-}
-
 func (a *pairingRequestMockAdvertiser) AnnouncePairingRequest(ctx context.Context, info *discovery.PairingRequestInfo) error {
 	a.mu.Lock()
 	a.activePairingRequests[info.Discriminator] = info
@@ -355,7 +339,6 @@ func (a *pairingRequestMockAdvertiser) StopAll() {
 	defer a.mu.Unlock()
 	a.commissionable = nil
 	a.operationalZones = make(map[string]*discovery.OperationalInfo)
-	a.commissionerZone = nil
 	a.activePairingRequests = make(map[uint16]*discovery.PairingRequestInfo)
 }
 
@@ -444,6 +427,8 @@ func TestE2E_DeferredCommissioning_PairingRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
+
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
 
 	// Use a browser that's linked to the device scenario
 	controllerBrowser := newPairingRequestMockBrowser()
@@ -543,6 +528,11 @@ func TestE2E_DeferredCommissioning_PairingRequest(t *testing.T) {
 		t.Fatal("Timeout waiting for commissioning")
 	}
 
+	// DEC-066: explicit operational reconnect after commissioning.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
+	}
+
 	// Wait for device connection event
 	select {
 	case zoneID := <-deviceConnectedCh:
@@ -629,6 +619,7 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService(GRID) failed: %v", err)
 	}
+	wireCertStores(t, deviceSvc, controller1, controller1Config.ZoneName)
 	controller1.SetBrowser(newMockBrowser())
 
 	if err := controller1.Start(ctx); err != nil {
@@ -640,6 +631,9 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	device1, err := controller1.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("First GRID commission failed: %v", err)
+	}
+	if err := controller1.Reconnect(ctx, device1.ID); err != nil {
+		t.Fatalf("Reconnect (controller1) failed: %v", err)
 	}
 	t.Logf("First GRID controller commissioned: %s", device1.ID)
 
@@ -672,6 +666,7 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService(GRID 2) failed: %v", err)
 	}
+	wireCertStores(t, deviceSvc, controller2, controller2Config.ZoneName)
 	controller2.SetBrowser(newMockBrowser())
 
 	if err := controller2.Start(ctx); err != nil {
@@ -711,6 +706,7 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService(LOCAL) failed: %v", err)
 	}
+	wireCertStores(t, deviceSvc, controller3, controller3Config.ZoneName)
 	controller3.SetBrowser(newMockBrowser())
 
 	if err := controller3.Start(ctx); err != nil {
@@ -722,6 +718,9 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	device3, err := controller3.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("LOCAL commission failed: %v", err)
+	}
+	if err := controller3.Reconnect(ctx, device3.ID); err != nil {
+		t.Fatalf("Reconnect (controller3) failed: %v", err)
 	}
 	t.Logf("LOCAL controller commissioned: %s", device3.ID)
 

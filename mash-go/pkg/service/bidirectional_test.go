@@ -87,6 +87,8 @@ func TestBidirectional_ControllerExposesFeatures(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -107,6 +109,10 @@ func TestBidirectional_ControllerExposesFeatures(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -200,6 +206,8 @@ func TestBidirectional_ControllerWithoutExposedFeatures(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -220,6 +228,10 @@ func TestBidirectional_ControllerWithoutExposedFeatures(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -322,6 +334,8 @@ func TestBidirectional_Subscriptions(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -342,6 +356,10 @@ func TestBidirectional_Subscriptions(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -493,6 +511,8 @@ func TestBidirectional_NormalOperationsStillWork(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -513,6 +533,10 @@ func TestBidirectional_NormalOperationsStillWork(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)

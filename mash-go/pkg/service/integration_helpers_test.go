@@ -5,9 +5,22 @@ package service
 import (
 	"context"
 	"sync"
+	"testing"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 )
+
+// wireCertStores attaches an in-memory device cert store and a freshly-CA'd
+// controller cert store to the two services, matching the pattern from
+// commissioning_cert_exchange_test.go. Cert stores have been mandatory at
+// commissioning since commit 11889f4 (2026-01-26); the integration-tagged
+// tests below all need them.
+func wireCertStores(t *testing.T, deviceSvc *DeviceService, controllerSvc *ControllerService, controllerZoneName string) {
+	t.Helper()
+	deviceSvc.SetCertStore(cert.NewMemoryStore())
+	controllerSvc.SetCertStore(createControllerCertStore(t, controllerZoneName))
+}
 
 // ============================================================================
 // Mock Advertiser for Integration Tests
@@ -21,7 +34,6 @@ type mockAdvertiser struct {
 	// Track what's being advertised
 	commissionable   *discovery.CommissionableInfo
 	operationalZones map[string]*discovery.OperationalInfo
-	commissionerZone *discovery.CommissionerInfo
 	pairingRequests  map[uint16]*discovery.PairingRequestInfo
 }
 
@@ -70,27 +82,6 @@ func (m *mockAdvertiser) StopOperational(zoneID string) error {
 	return nil
 }
 
-func (m *mockAdvertiser) AdvertiseCommissioner(ctx context.Context, info *discovery.CommissionerInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionerZone = info
-	return nil
-}
-
-func (m *mockAdvertiser) UpdateCommissioner(zoneID string, info *discovery.CommissionerInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionerZone = info
-	return nil
-}
-
-func (m *mockAdvertiser) StopCommissioner(zoneID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionerZone = nil
-	return nil
-}
-
 func (m *mockAdvertiser) AnnouncePairingRequest(ctx context.Context, info *discovery.PairingRequestInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -110,7 +101,6 @@ func (m *mockAdvertiser) StopAll() {
 	defer m.mu.Unlock()
 	m.commissionable = nil
 	m.operationalZones = make(map[string]*discovery.OperationalInfo)
-	m.commissionerZone = nil
 	m.pairingRequests = make(map[uint16]*discovery.PairingRequestInfo)
 }
 

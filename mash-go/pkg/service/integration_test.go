@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -91,6 +90,8 @@ func TestE2E_CommissioningFlow(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -130,6 +131,10 @@ func TestE2E_CommissioningFlow(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: operational reconnect is now an explicit step after commissioning.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	// === Verify Results ===
@@ -337,6 +342,7 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	controller1Config := validControllerConfig()
 	controller1Config.ZoneName = "Home Manager 1"
 	controller1, _ := NewControllerService(controller1Config)
+	wireCertStores(t, deviceSvc, controller1, controller1Config.ZoneName)
 	controller1.SetBrowser(newMockBrowser())
 	_ = controller1.Start(ctx)
 	defer func() { _ = controller1.Stop() }()
@@ -344,6 +350,9 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	device1, err := controller1.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("First commission failed: %v", err)
+	}
+	if err := controller1.Reconnect(ctx, device1.ID); err != nil {
+		t.Fatalf("Reconnect (controller1) failed: %v", err)
 	}
 	t.Logf("First controller commissioned device: %s", device1.ID)
 
@@ -357,6 +366,7 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	controller2Config := validControllerConfig()
 	controller2Config.ZoneName = "Home Manager 2"
 	controller2, _ := NewControllerService(controller2Config)
+	wireCertStores(t, deviceSvc, controller2, controller2Config.ZoneName)
 	controller2.SetBrowser(newMockBrowser())
 	_ = controller2.Start(ctx)
 	defer func() { _ = controller2.Stop() }()
@@ -364,6 +374,9 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	device2, err := controller2.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Second commission failed: %v", err)
+	}
+	if err := controller2.Reconnect(ctx, device2.ID); err != nil {
+		t.Fatalf("Reconnect (controller2) failed: %v", err)
 	}
 	t.Logf("Second controller commissioned device: %s", device2.ID)
 
@@ -425,6 +438,7 @@ func TestE2E_OperationalRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
 	controllerSvc.SetBrowser(newMockBrowser())
 
 	if err := controllerSvc.Start(ctx); err != nil {
@@ -432,16 +446,23 @@ func TestE2E_OperationalRead(t *testing.T) {
 	}
 	defer func() { _ = controllerSvc.Stop() }()
 
-	// Commission device
+	// Commission device. Discriminator must match the device's
+	// validDeviceConfig() value (1234) — DEC-084 §2.3 makes it part of the
+	// PBKDF2 salt, so a mismatch fails PASE before the controller can read.
 	discoveryService := &discovery.CommissionableService{
-		Host:      "localhost",
-		Port:      port,
-		Addresses: []string{"127.0.0.1"},
+		Host:          "localhost",
+		Port:          port,
+		Addresses:     []string{"127.0.0.1"},
+		Discriminator: 1234,
 	}
 
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: operational reconnect is now an explicit step after commissioning.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	// Wait for connection to be fully established
@@ -513,6 +534,7 @@ func TestE2E_OperationalSubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
 	controllerSvc.SetBrowser(newMockBrowser())
 
 	if err := controllerSvc.Start(ctx); err != nil {
@@ -520,16 +542,22 @@ func TestE2E_OperationalSubscribe(t *testing.T) {
 	}
 	defer func() { _ = controllerSvc.Stop() }()
 
-	// Commission device
+	// Commission device. DEC-084: discriminator participates in salt
+	// derivation; must match validDeviceConfig().
 	discoveryService := &discovery.CommissionableService{
-		Host:      "localhost",
-		Port:      port,
-		Addresses: []string{"127.0.0.1"},
+		Host:          "localhost",
+		Port:          port,
+		Addresses:     []string{"127.0.0.1"},
+		Discriminator: 1234,
 	}
 
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: operational reconnect is now an explicit step after commissioning.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -601,6 +629,7 @@ func TestE2E_SubscriptionNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
 	controllerSvc.SetBrowser(newMockBrowser())
 
 	if err := controllerSvc.Start(ctx); err != nil {
@@ -608,16 +637,22 @@ func TestE2E_SubscriptionNotification(t *testing.T) {
 	}
 	defer func() { _ = controllerSvc.Stop() }()
 
-	// Commission device
+	// Commission device. DEC-084: discriminator participates in salt
+	// derivation; must match validDeviceConfig().
 	discoveryService := &discovery.CommissionableService{
-		Host:      "localhost",
-		Port:      port,
-		Addresses: []string{"127.0.0.1"},
+		Host:          "localhost",
+		Port:          port,
+		Addresses:     []string{"127.0.0.1"},
+		Discriminator: 1234,
 	}
 
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: operational reconnect is now an explicit step after commissioning.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -723,6 +758,7 @@ func TestE2E_NotificationDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
 	controllerSvc.SetBrowser(newMockBrowser())
 
 	if err := controllerSvc.Start(ctx); err != nil {
@@ -730,16 +766,22 @@ func TestE2E_NotificationDelivery(t *testing.T) {
 	}
 	defer func() { _ = controllerSvc.Stop() }()
 
-	// Commission device
+	// Commission device. Discriminator must match the device's
+	// (deviceConfig.Discriminator = 2345 above) — DEC-084 §2.3.
 	discoveryService := &discovery.CommissionableService{
-		Host:      "localhost",
-		Port:      uint16(port),
-		Addresses: []string{"127.0.0.1"},
+		Host:          "localhost",
+		Port:          uint16(port),
+		Addresses:     []string{"127.0.0.1"},
+		Discriminator: 2345,
 	}
 
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: operational reconnect is now an explicit step after commissioning.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
@@ -863,6 +905,8 @@ func TestE2E_DeviceIDConsistencyForReconnection(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -883,6 +927,10 @@ func TestE2E_DeviceIDConsistencyForReconnection(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	// Wait for device to process connection
@@ -979,6 +1027,8 @@ func TestE2E_ReconnectionAfterDisconnect(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
+
 	browser := newMockBrowser()
 	controllerSvc.SetBrowser(browser)
 
@@ -1010,6 +1060,10 @@ func TestE2E_ReconnectionAfterDisconnect(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	deviceID := connectedDevice.ID
@@ -1110,9 +1164,10 @@ func TestE2E_RenewalOverTLS(t *testing.T) {
 		t.Fatalf("Failed to create controller service: %v", err)
 	}
 
-	// Setup in-memory cert store for the controller
-	certStore := cert.NewMemoryControllerStore()
-	controllerSvc.SetCertStore(certStore)
+	// Wire device + controller cert stores (controller store needs a Zone CA
+	// to issue operational certs; the bare NewMemoryControllerStore() above
+	// would fail at SignCSR).
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
 
 	// Setup mock browser for controller discovery
 	mockBrowser := newMockBrowser()
@@ -1153,6 +1208,10 @@ func TestE2E_RenewalOverTLS(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, commService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: explicit operational reconnect.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	deviceID := connectedDevice.ID
@@ -1284,6 +1343,7 @@ func TestE2E_RemoveDevice(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	wireCertStores(t, deviceSvc, controllerSvc, controllerConfig.ZoneName)
 	controllerSvc.SetBrowser(newMockBrowser())
 
 	// Track controller device removal event
@@ -1312,6 +1372,10 @@ func TestE2E_RemoveDevice(t *testing.T) {
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
+	}
+	// DEC-066: operational reconnect is now an explicit step after commissioning.
+	if err := controllerSvc.Reconnect(ctx, connectedDevice.ID); err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
 	}
 
 	deviceID := connectedDevice.ID
