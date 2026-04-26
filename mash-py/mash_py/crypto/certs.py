@@ -52,6 +52,8 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 )
 from cryptography.x509.oid import (
     ExtendedKeyUsageOID as _ExtendedKeyUsageOID,
+)
+from cryptography.x509.oid import (
     ExtensionOID,
     NameOID,
 )
