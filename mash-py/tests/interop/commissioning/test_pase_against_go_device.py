@@ -18,13 +18,13 @@ Two test surfaces in this file:
    Spec reference: ``docs/testing/behavior/commissioning-pase.md §4.1``
    (full sequence) and ``§4.2`` (wire format).
 
-**Failure-path coverage caveat (Issue #6).** mash-go currently mis-uses
-``CommissioningError`` for in-PASE failures (invalid pA, wrong identity,
-MAC mismatch). mash-py refuses to silently absorb that bug, so live
-*failure* paths (wrong setup code, etc.) raise
-:class:`PASEProtocolError` against current mash-go. The Phase 8
-acceptance gate is the success path; failure-path interop returns when
-mash-go ships the fix. See ``mash-py-spec-issues.md`` Issue #6.
+**Failure-path coverage.** mash-go was fixed in the same workstream that
+filed Issue #6 — `pkg/commissioning/session.go` now sends
+``PASEComplete{ErrCodeAuthFailed}`` on every in-PASE failure mode (wrong
+identity, invalid pA, MAC mismatch), as the spec mandates. The
+``test_live_pase_wrong_setup_code_raises_auth_failed`` test below
+exercises the spec-conformant failure path against a live mash-go
+device to keep the contract enforced from both sides.
 """
 
 from __future__ import annotations
@@ -43,7 +43,11 @@ from typing import Any
 
 import pytest
 
-from mash_py.commissioning import PASEClient, generate_verifier
+from mash_py.commissioning import (
+    PASEAuthFailedError,
+    PASEClient,
+    generate_verifier,
+)
 from mash_py.discovery import Browser, BrowseTimeoutError
 from mash_py.transport.connection import _ssl_object  # internal helper, used for verify
 from mash_py.transport.tls import (
@@ -347,3 +351,66 @@ async def test_live_pase_handshake_against_go_device(live_go_device) -> None:
     # K_main and K_encrypt are derived through different HKDF info
     # strings; if they collide that's a chain-derivation bug.
     assert client.shared_secret != client.encryption_key
+
+
+@pytest.mark.skipif(not _go_available(), reason="go toolchain not available")
+@pytest.mark.slow
+@pytest.mark.timeout(180)
+async def test_live_pase_wrong_setup_code_raises_auth_failed(live_go_device) -> None:
+    """Failure-path acceptance: a wrong setup code triggers a
+    spec-conformant PASEComplete{ErrCodeAuthFailed} from the device,
+    which mash-py surfaces as :class:`PASEAuthFailedError`.
+
+    Pre-Issue-#6 mash-go would have sent ``PASEComplete{ErrCodeConfirmFailed
+    = 2}`` on MAC mismatch, which mash-py's :class:`PASEAuthFailedError`
+    *also* covers (any non-zero code raises that class), but the test
+    here additionally pins the error_code value to 1 — the DEC-047
+    consolidated value — to lock in the fix. If mash-go regresses to
+    sending code 2 again, this assertion catches it.
+    """
+    proc, discriminator, _setup_code, _port = live_go_device
+
+    async with Browser() as browser:
+        try:
+            svc = await browser.find_commissionable_by_discriminator(
+                discriminator, timeout=30.0
+            )
+        except BrowseTimeoutError:
+            pytest.fail("Go device did not surface on mDNS within 30s", pytrace=False)
+
+    if "127.0.0.1" in svc.addresses:
+        target_host = "127.0.0.1"
+    elif svc.addresses:
+        ipv4 = next((a for a in svc.addresses if ":" not in a), None)
+        target_host = ipv4 or svc.addresses[0]
+    else:
+        target_host = svc.host.rstrip(".")
+    ssl_ctx = make_commissioning_client_context()
+
+    reader, writer = await asyncio.open_connection(
+        host=target_host,
+        port=svc.port,
+        ssl=ssl_ctx,
+        server_hostname=target_host,
+    )
+    try:
+        # Use a deliberately wrong setup code. The device computed its
+        # verifier from "20202021"; we drive PASE with "87654321" so
+        # the SPAKE2+ MAC mismatch fires.
+        client = PASEClient("87654321", discriminator)
+        with pytest.raises(PASEAuthFailedError) as excinfo:
+            await asyncio.wait_for(client.handshake(reader, writer), timeout=15.0)
+    finally:
+        writer.close()
+        with contextlib.suppress(ConnectionError, OSError):
+            await writer.wait_closed()
+
+    # DEC-047 / Issue #6: every in-PASE failure unifies to ErrCodeAuthFailed = 1.
+    # If this assertion regresses to 2 (ErrCodeConfirmFailed), mash-go has
+    # backslid on the §2.5 unification.
+    from mash_py.commissioning import ERR_CODE_AUTH_FAILED
+
+    assert excinfo.value.error_code == ERR_CODE_AUTH_FAILED, (
+        f"expected error_code={ERR_CODE_AUTH_FAILED} (ErrCodeAuthFailed) "
+        f"per spec §2.5, got {excinfo.value.error_code}"
+    )
