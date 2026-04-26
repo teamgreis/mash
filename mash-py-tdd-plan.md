@@ -412,9 +412,9 @@ The conventions in each phase:
 | 5 | `mash_py.wire.peek` Live Verification | Done (2026-04-26; live body deferred to Phase 8/11) |
 | 6 | mDNS Discovery (Browser Only) | Done (2026-04-26) |
 | 7A | SPAKE2+ Spec Rewrite + DEC-084 | Done (2026-04-26) |
-| 7B | mash-test Conformance Vectors + Harness | Pending |
-| 7C | mash-go SPAKE2+ Update to DEC-084 | Pending |
-| 7D | mash-py SPAKE2+ Implementation | Pending |
+| 7B | mash-test Conformance Vectors + Harness | Done (2026-04-26) |
+| 7C | mash-go SPAKE2+ Update to DEC-084 | Done (2026-04-26) |
+| 7D | mash-py SPAKE2+ Implementation | Done (2026-04-26) |
 | 8 | PASE Message Exchange (Client Side) | Pending |
 | 9 | CSR & Certificate Install | Pending |
 | 10 | Operational Connection (Post-Commissioning) | Pending |
@@ -754,7 +754,7 @@ The original Phase 7 ("port spec to Python") cannot meaningfully execute against
 
 ### Phase 7B — mash-test Conformance Vectors + Harness
 
-**Status.** Pending.
+**Status.** Done (2026-04-26). 13 algorithmic vectors emitted by `tools/spake2plus_oracle/gen_vectors.py` (third independent implementation, stdlib-only) and stored at `mash-go/testdata/spake2plus_vectors.json`. Vectors cover MHF, w0/w1 split, L computation, client/server public values, transcript, K_shared, three-key chain, confirmation keys, confirmation MACs, an end-to-end `full_handshake`, and both negative `point_validation_*` cases. The Go runner (`mash-test`) and the Python runner (`tests/vectors/commissioning/test_spake2plus_vectors.py`) both report 13 pass / 0 fail / 0 skip.
 
 **Goal.** A set of algorithmic conformance vectors (deterministic-RNG SPAKE2+ traces) plus a runner that exercises any candidate implementation against them, treating mash-test as the executable spec for SPAKE2+. Both 7C and 7D pass these vectors before they are accepted.
 
@@ -861,7 +861,7 @@ A third change touches the verifier storage format: `(w0, L)` becomes `(w0, L, s
 
 ### Phase 7D — mash-py SPAKE2+ Implementation
 
-**Status.** Pending. Replaces the original Phase 7.
+**Status.** Done (2026-04-26). `mash_py/commissioning/{__init__,mhf,spake2plus}.py` implement DEC-084 (RFC 9383 fixed M/N, PBKDF2-HMAC-SHA256 100k MHF, derived 16-byte salt, length-prefixed RFC 9383 §3.3 transcript, three-key chain, KcA/KcB confirmation MAC keys, mandatory identity-element rejection). `Verifier` is a frozen dataclass with the same CBOR field numbering as mash-go's struct. State machines (`SPAKE2PlusClient`, `SPAKE2PlusServer`) accept an optional fixed ephemeral so vector tests drive deterministic outputs while production callers always draw fresh `secrets.randbelow`. All 13 Phase 7B conformance vectors pass byte-identically (including the end-to-end `full_handshake` vector and both negative `point_validation_*` cases). 31 round-trip / negative-case unit tests, plus an interop scaffold that runs a minimal `tools/print_verifier` Go helper and asserts byte-equality of `(salt, w0, L)` against mash-go's `commissioning.GenerateVerifier` for two distinct setup codes. Live PASE message exchange is deferred to Phase 8 per plan (single skip-marked sentinel test documents the boundary). Ruff and mypy clean across `mash_py/commissioning/` and the new test packages. Full mash-py suite stays at 360 passing tests (no regressions).
 
 **Goal.** A spec-conformant Python implementation of DEC-084's SPAKE2+ that passes 7B's algorithmic vectors and completes a live PASE handshake against the 7C-updated `mash-device`.
 
