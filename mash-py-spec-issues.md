@@ -125,6 +125,54 @@ D. **Add a tag byte to control messages** (e.g. CBOR tag 65535 or a prepended se
 
 ---
 
+### Issue #4 — Operational-cert generation: spec vs. mash-go divergences
+
+**Status:** Open
+**Surfaced during:** mash-py Phase 3 — porting cert helpers from `mash-go/pkg/cert`
+
+**Implicit assumption.**
+`docs/testing/behavior/commissioning-pase.md` §"Certificate generation algorithm" (lines 388-475) is the only normative description of operational-certificate content. It is internally consistent and unambiguous, but `mash-go/pkg/cert/generate.go` diverges from it in five places:
+
+| Field | Spec (`commissioning-pase.md`) | mash-go (`generate.go`) |
+|---|---|---|
+| Subject Key Identifier | `SHA-1 of public key` (line 414 — RFC 5280 method 1) | `SHA-256(SubjectPublicKeyInfo_DER)[:20]` (line 38-39) |
+| Device-ID hex case | `hash[0:8].hex().upper()` (line 425) | `hex.EncodeToString` → lowercase (line 63) |
+| Subject CN | `<device-id>` (line 398) | `<device-id>` (line 208) — match |
+| Subject O | `<zone-name>` (line 399) | `"MASH Device"` (line 139) |
+| Subject OU | `MASH Device` (line 400) | `"V<vendor>"`, `"P<product>"` (lines 141-143) |
+| NotBefore | `now() - 5 minutes` (line 446 — clock-skew allowance) | `now()` (line 211) |
+| NotAfter | `now() + 365 days` | `now() + OperationalCertValidity` (1 year) — match |
+
+**Languages affected.** Direct portability impact is small — TLS chain validation is driven primarily by issuer/subject DN matching, with SKI/AKI as a hint. But:
+
+1. A mixed-language chain (Python device cert ↔ Go-issued zone CA, or vice versa) where one side uses SHA-1 SKI and the other uses SHA-256[:20] SKI may fail the AKI-matches-SKI consistency check that some path-validation libraries enforce.
+2. mash-py implementing the spec literally produces different cert content than mash-go does, even before random fields (serial, validity).
+3. Phase 22 conformance ("does the Go controller accept a Python-issued cert?" and the reverse) needs a decision on which content is canonical before tests can be written meaningfully.
+
+**Spec options considered.**
+
+A. **Update mash-go to match the spec.** SHA-1 SKI is RFC 5280 method 1, ubiquitous and what every X.509 library produces by default. Subject DN composition and the -5 min clock skew are uncontroversial. Cost: ~1 day of Go changes plus updating the in-tree test corpus that hard-codes Go's current outputs.
+B. **Update the spec to match mash-go.** SHA-256[:20] SKI is more collision-resistant (DEC-040 made a similar argument for full-cert fingerprint as device identity). Subject-DN composition could be argued either way. Cost: revise `commissioning-pase.md` lines 388-475, file a DEC, possibly document the SKI choice as a deliberate non-default.
+C. **Acknowledge both, treat operational-cert content as implementation-defined within constraints.** Spec specifies only what TLS verification depends on (signature alg, validity, AKI/SKI consistency *within an implementation*) and lets each side pick its hash and subject layout. Cost: weakest interop guarantee; Phase 22 cross-implementation cert tests become very narrow.
+
+**Disposition.** Open — needs spec-owner decision. mash-py implements the spec as written (SHA-1 SKI, spec-conformant subject DN, -5 min NotBefore, uppercase device-ID hex) and tests against itself. Phase 22 will be the forcing function: the cross-language conformance run will surface whichever mismatch actually breaks chain validation in practice, and the resolution chosen there will dictate which side updates.
+
+**Why mash-py implements the spec rather than mash-go's behavior.**
+- Per the project's stated multi-implementation goal (DEC-082 framing), the spec is the contract. Cloning mash-go would defeat the portability check that mash-py exists to perform.
+- The spec text is unambiguous; if it is wrong, that is a spec change, not a Python implementation choice.
+- If interop in Phase 22 fails, mash-go and the spec disagree concretely — that's the cleanest possible signal for the spec owner to act on.
+
+**Affected files (mash-py side only):**
+- `mash-py/mash_py/crypto/certs.py` — implements spec.
+- `mash-py/tests/unit/crypto/test_certs.py` — asserts spec output.
+
+**Affected files (pending spec/Go decision):**
+- `docs/testing/behavior/commissioning-pase.md` — may need revision under option B or C.
+- `mash-go/pkg/cert/generate.go` — may need revision under option A.
+- `mash-py-tdd-plan.md` Phase 22 — cross-implementation cert acceptance test is contingent on this decision.
+
+---
+
 ### Issue #3 — `mash-test` is single-port-shaped at the harness layer
 
 **Status:** Deferred (until mash-py Phase 4 ships)
