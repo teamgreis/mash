@@ -919,7 +919,7 @@ diff <(...) <(...)
 
 ### Phase 8 — PASE Message Exchange (Client Side)
 
-**Status.** Pending.
+**Status.** Done (2026-04-26). 24 unit tests + 1 live-interop test green; mash-py controller drives a complete PASE handshake against `mash-go/cmd/mash-device` in commissioning mode and derives a 32-byte `K_main`. Spec-strict on the failure envelope — surfaces mash-go Issue #6 (PASE failures sent as `CommissioningError` instead of `PASEComplete`) as `PASEProtocolError` rather than absorbing the bug.
 
 **Goal.** A Python controller can drive a complete PASE handshake with a Go device.
 

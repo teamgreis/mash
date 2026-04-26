@@ -1,39 +1,60 @@
-"""Phase 7D interop scaffold: SPAKE2+ algorithmic-layer interop with mash-go.
+"""Phase 7D + Phase 8 interop: SPAKE2+ with a live mash-go device.
 
-The full live PASE handshake (TLS connection, MsgTypes 1-4) ships in
-Phase 8. This file asserts only the algorithmic layer:
+Two test surfaces in this file:
 
-1. Python's :func:`generate_verifier` produces the same ``(salt, w0, L)``
-   bytes that mash-go's ``commissioning.GenerateVerifier`` produces for
-   the same ``(setup_code, discriminator)`` inputs.
+1. **Phase 7D — algorithmic equivalence.** Python's
+   :func:`generate_verifier` and mash-go's ``commissioning.GenerateVerifier``
+   produce byte-identical ``(salt, w0, L)`` for the same QR-code inputs.
+   Plus a frozen vector cross-check against the third-party SPAKE2+
+   oracle. These run without needing the Go device to be live; only
+   the algorithm surface is exercised.
 
-2. The ``full_handshake`` conformance vector — which both runtimes must
-   reproduce byte-identically — gives us a frozen-ground-truth check
-   without needing the Go toolchain available.
+2. **Phase 8 — live PASE handshake.** Spin up ``mash-go/cmd/mash-device``
+   in commissioning mode, discover it via mDNS, dial the
+   ``_mash-comm._tcp`` ALPN, drive ``PASEClient.handshake`` to
+   completion, assert the derived ``K_main`` is 32 bytes. This is the
+   load-bearing Phase 8 acceptance gate.
 
-The ``go run`` cross-check is the load-bearing interop signal: the
-recorded vectors come from the third-party oracle (``tools/spake2plus_oracle``),
-so passing them only proves "Python matches the oracle." The Go
-helper at ``mash-py/tools/print_verifier`` runs the actual mash-go
-``commissioning.GenerateVerifier`` and prints the result, which we
-compare to mash-py's output. Together this gives the three-way
-agreement (Python, Go, oracle) the Phase 7 acceptance gate calls for.
+   Spec reference: ``docs/testing/behavior/commissioning-pase.md §4.1``
+   (full sequence) and ``§4.2`` (wire format).
+
+**Failure-path coverage caveat (Issue #6).** mash-go currently mis-uses
+``CommissioningError`` for in-PASE failures (invalid pA, wrong identity,
+MAC mismatch). mash-py refuses to silently absorb that bug, so live
+*failure* paths (wrong setup code, etc.) raise
+:class:`PASEProtocolError` against current mash-go. The Phase 8
+acceptance gate is the success path; failure-path interop returns when
+mash-go ships the fix. See ``mash-py-spec-issues.md`` Issue #6.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import os
 import shutil
+import signal
+import socket
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from mash_py.commissioning import generate_verifier
+from mash_py.commissioning import PASEClient, generate_verifier
+from mash_py.discovery import Browser, BrowseTimeoutError
+from mash_py.transport.connection import _ssl_object  # internal helper, used for verify
+from mash_py.transport.tls import (
+    make_commissioning_client_context,
+    verify_alpn,
+    verify_tls13,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GO_HELPER_DIR = REPO_ROOT / "mash-py" / "tools" / "print_verifier"
+MASH_GO_DIR = REPO_ROOT / "mash-go"
 
 
 pytestmark = pytest.mark.interop
@@ -128,11 +149,201 @@ def test_static_verifier_matches_recorded_vector() -> None:
     assert v.L.hex() == out["L_hex"]
 
 
-def test_live_pase_handshake_deferred_to_phase_8() -> None:
-    """Sentinel test: documents that the full live PASE exchange lands
-    in Phase 8 once :mod:`mash_py.commissioning.messages` and
-    :mod:`mash_py.commissioning.pase_client` exist."""
-    pytest.skip(
-        "Phase 7D scope ends at the algorithmic layer. "
-        "Live PASE message exchange (MsgTypes 1-4) ships in Phase 8."
+# ---------------------------------------------------------------------------
+# Phase 8 — live PASE handshake against ``mash-go/cmd/mash-device``
+# ---------------------------------------------------------------------------
+
+
+def _free_port() -> int:
+    """Bind a kernel-assigned port and immediately release it.
+
+    Same pattern as ``tests/interop/discovery/test_browse_go.py`` —
+    avoids collisions when multiple interop tests run on the same host.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+def go_device_state_dir():
+    """Fresh state directory so ``mash-device`` boots uncommissioned."""
+    d = tempfile.mkdtemp(prefix="mash-py-phase8-")
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.fixture
+def live_go_device(go_device_state_dir):
+    """Launch ``go run ./cmd/mash-device`` in commissioning mode.
+
+    Yields ``(proc, discriminator, setup_code, port)``. The fixture tears
+    the process down on exit even on assertion failure.
+
+    Process-group SIGTERM is required because ``go run`` on macOS does
+    not propagate signals to the compiled child binary; orphaned
+    devices keep advertising on mDNS and leak into subsequent test runs.
+    See the discovery interop fixture for the full rationale.
+    """
+    if not _go_available():
+        pytest.skip("Go toolchain not available")
+    if not MASH_GO_DIR.is_dir():
+        pytest.skip(f"mash-go checkout not found at {MASH_GO_DIR}")
+
+    discriminator = 4032  # arbitrary; not the binary's default of 1234
+    setup_code = "20202021"
+    port = _free_port()
+    cmd = [
+        "go",
+        "run",
+        "./cmd/mash-device",
+        "-type",
+        "evse",
+        "-discriminator",
+        str(discriminator),
+        "-setup-code",
+        setup_code,
+        "-port",
+        str(port),
+        "-state-dir",
+        go_device_state_dir,
+        "-log-level",
+        "warn",
+        "-serial",
+        "PHASE8-INTEROP-001",
+        "-brand",
+        "MASH-Phase8",
+        "-model",
+        "EVSE-X",
+        "-name",
+        "Phase 8 Interop Device",
+    ]
+    env = os.environ.copy()
+    env["MASH_NON_INTERACTIVE"] = "1"
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=MASH_GO_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        start_new_session=True,
     )
+
+    try:
+        yield proc, discriminator, setup_code, port
+    finally:
+        pgid = None
+        with contextlib.suppress(ProcessLookupError, OSError):
+            pgid = os.getpgid(proc.pid)
+        if pgid is not None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(pgid, signal.SIGTERM)
+        try:
+            proc.wait(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            if pgid is not None:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(pgid, signal.SIGKILL)
+            proc.wait(timeout=5.0)
+        if proc.returncode and proc.returncode not in (0, -signal.SIGTERM):
+            err = (
+                proc.stderr.read().decode("utf-8", errors="replace")
+                if proc.stderr
+                else ""
+            )
+            print(f"\n--- mash-device stderr (exit {proc.returncode}) ---\n{err}")
+
+
+@pytest.mark.skipif(not _go_available(), reason="go toolchain not available")
+@pytest.mark.slow
+@pytest.mark.timeout(180)
+async def test_live_pase_handshake_against_go_device(live_go_device) -> None:
+    """End-to-end Phase 8 acceptance: PASE handshake completes with the
+    Go device.
+
+    Sequence:
+      1. mDNS-browse for the device's commissionable record.
+      2. Open TLS over the SRV-advertised commissioning port (DEC-082).
+      3. Run :meth:`PASEClient.handshake` to derive ``K_main``.
+      4. Assert the secret is 32 bytes and the encryption key is derived.
+
+    This is the load-bearing test for Phase 8: success here means a
+    Python controller can authenticate against a real Go device. Failure
+    paths land in a follow-up once mash-go ships the Issue #6 fix.
+    """
+    proc, discriminator, setup_code, _port = live_go_device
+
+    # 1) mDNS browse — wait up to 30s for ``go run`` cold compile + mDNS
+    #    announce. The 30s budget mirrors the Phase 6 discovery test.
+    async with Browser() as browser:
+        try:
+            svc = await browser.find_commissionable_by_discriminator(
+                discriminator, timeout=30.0
+            )
+        except BrowseTimeoutError:
+            stderr = (
+                proc.stderr.read(8192).decode("utf-8", errors="replace")
+                if proc.stderr
+                else "<no stderr>"
+            )
+            pytest.fail(
+                f"Go device did not surface on mDNS within 30s. "
+                f"stderr tail:\n{stderr}",
+                pytrace=False,
+            )
+
+    assert svc.discriminator == discriminator
+    assert svc.port > 0
+
+    # 2) TLS connect on the SRV-advertised host:port using the
+    #    commissioning ALPN (``mash-comm/1``). The browser surfaced both
+    #    the .local hostname and a list of IP addresses. Prefer
+    #    127.0.0.1 when the device is local; otherwise dial the first
+    #    advertised IP — some hosts (notably this CI box) lack an inline
+    #    .local resolver, so feeding ``getaddrinfo`` an mDNS hostname
+    #    raises ``gaierror``. Plain IP literals always resolve.
+    if "127.0.0.1" in svc.addresses:
+        target_host = "127.0.0.1"
+    elif svc.addresses:
+        # Skip IPv6 addresses (which contain ":") to avoid IPv6 sockets
+        # and dual-stack quirks; pick the first IPv4 if available.
+        ipv4 = next((a for a in svc.addresses if ":" not in a), None)
+        target_host = ipv4 or svc.addresses[0]
+    else:
+        target_host = svc.host.rstrip(".")
+    ssl_ctx = make_commissioning_client_context()
+
+    reader, writer = await asyncio.open_connection(
+        host=target_host,
+        port=svc.port,
+        ssl=ssl_ctx,
+        server_hostname=target_host,
+    )
+    try:
+        # Defensive: confirm the TLS layer landed on TLS 1.3 + commissioning ALPN
+        # before we feed bytes to the PASE state machine.
+        sslobj = _ssl_object(writer)
+        assert sslobj is not None
+        verify_tls13(sslobj)
+        alpn = verify_alpn(sslobj)
+        assert alpn == "mash-comm/1", f"unexpected ALPN: {alpn!r}"
+
+        # 3) Drive PASE.
+        client = PASEClient(setup_code, discriminator)
+        k_main = await asyncio.wait_for(client.handshake(reader, writer), timeout=15.0)
+    finally:
+        writer.close()
+        with contextlib.suppress(ConnectionError, OSError):
+            await writer.wait_closed()
+
+    # 4) Acceptance assertions.
+    assert isinstance(k_main, bytes)
+    assert len(k_main) == 32
+    assert client.shared_secret == k_main
+    assert len(client.encryption_key) == 32
+    # K_main and K_encrypt are derived through different HKDF info
+    # strings; if they collide that's a chain-derivation bug.
+    assert client.shared_secret != client.encryption_key

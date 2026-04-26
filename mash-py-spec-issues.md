@@ -271,6 +271,67 @@ D. **Pull a vetted SPAKE2+ library.** Replace the hand-rolled implementation in 
 
 ---
 
+### Issue #6 — PASE failure-path message envelope: spec says `PASEComplete`, mash-go uses `CommissioningError`
+
+**Status:** Open (spec is canonical; mash-go has the bug)
+**Surfaced during:** mash-py Phase 8 (PASE message exchange — client side), 2026-04-26.
+
+**The divergence.**
+`docs/testing/behavior/commissioning-pase.md §2.5` is normative on the failure path:
+
+> Failure of any check is a fatal protocol error — the receiver MUST abort the handshake, send `PASEComplete` with `ErrorCode = ErrCodeAuthFailed` (1) per DEC-047, and close the TLS connection.
+
+mash-go's `pkg/commissioning/session.go` does this for a *confirmation-MAC mismatch* (sends `PASEComplete` at line 249–253), but for two earlier failure modes it sends `CommissioningError` (MsgType 255) instead:
+
+| Failure | mash-go behavior | Spec mandate |
+|---|---|---|
+| `ClientIdentity != b"mash-controller"` | `CommissioningError{ErrorCode: ErrCodeAuthFailed=1}` (lines 180–186) | `PASEComplete{ErrorCode: ErrCodeAuthFailed}` |
+| Invalid pA (point validation per §2.5) | `CommissioningError{ErrorCode: ErrCodeInvalidPublicKey=1}` (lines 198–204) | `PASEComplete{ErrorCode: ErrCodeAuthFailed}` |
+| MAC mismatch | `PASEComplete{ErrorCode: ErrCodeConfirmFailed=2}` (line 237) | `PASEComplete{ErrorCode: ErrCodeAuthFailed=1}` |
+
+The numeric error code on the wire is the same value (1) for the first two — `ErrCodeInvalidPublicKey` and `ErrCodeAuthFailed` are both `uint8 = 1`, with `ErrCodeInvalidPublicKey` already commented as deprecated in `messages.go:43`. But the *message envelope* is different: a spec-conformant controller looking for MsgType 4 with a non-zero error code would not match a MsgType 255 failure message.
+
+The third row is a different drift: mash-go sends `ErrCodeConfirmFailed = 2` even though `messages.go:44` comments the constant as deprecated in favor of `ErrCodeAuthFailed = 1`. Per DEC-047 this is supposed to consolidate to a single auth-failure code to prevent information leakage.
+
+**Languages affected.**
+Any implementation that follows the spec literally — currently only mash-py. Today, mash-go is the only implementation that sends `CommissioningError` on PASE invalid-pubkey paths; mash-go's own client also handles both envelopes (`session.go:67–71, 97–101`), so Go-vs-Go interop is fine. mash-py picks up the issue because Phase 8 is the first non-Go client.
+
+**Why this is a mash-go bug, not a spec issue.**
+The spec's choice — always reuse `PASEComplete` for failure — is the right design:
+- One PASE failure envelope means the controller's state machine has exactly one "expecting PASEComplete" branch instead of two ("expect PASEComplete *or* CommissioningError").
+- It matches the DEC-047 principle of treating all SPAKE2+ failures uniformly to prevent timing/structural oracles. If a peer can distinguish "wrong identity" (CommissioningError) from "wrong setup code" (PASEComplete + non-zero code) by message type alone, that's a structural oracle on top of the timing oracle DEC-047 already addresses.
+- `CommissioningError` (MsgType 255) is genuinely useful for cross-cutting failures *outside* the PASE handshake (device busy, retry-after hints — DEC-063). Using it for PASE-specific failures conflates two channels.
+
+`CommissioningError` does have a legitimate spec role, just not this one. `docs/security.md §13` and DEC-063 define it as the early-rejection envelope when the device cannot even *start* a PASE session — e.g. busy with another commissioning attempt. Used that way, the message is sent immediately after (or instead of) `PASEResponse` and carries `ErrCodeBusy = 5` plus a `RetryAfter` hint. Reusing the same envelope for *intra-PASE* failures collides with that role and is what makes mash-go's behavior wrong.
+
+**Disposition (spec-strict).**
+- **Spec text:** No change required — `commissioning-pase.md §2.5` is correct. `CommissioningError` stays reserved for DEC-063 (busy / cross-cutting non-PASE errors).
+- **mash-go fix (separate workstream):** Three changes in `pkg/commissioning/session.go`:
+  1. On invalid pA (line 198–204), send `PASEComplete{ErrorCode: ErrCodeAuthFailed}` instead of `CommissioningError`.
+  2. On wrong client identity (line 180–186), same.
+  3. On MAC mismatch (line 237), use `ErrCodeAuthFailed = 1` instead of `ErrCodeConfirmFailed = 2` (DEC-047 unification).
+  4. Drop the deprecated `ErrCodeInvalidPublicKey` and `ErrCodeConfirmFailed` constants from `messages.go` once callers are updated.
+  5. Update `session_test.go` assertions that currently match `*CommissioningError` on PASE failure paths.
+- **mash-py Phase 8 client (this PR):** Strict to spec. The PASE state machine accepts:
+  - In the "expecting PASEResponse" slot: `PASEResponse` (success path) **or** `CommissioningError{ErrCodeBusy}` (DEC-063 busy rejection — distinct error class, not auth failure). Anything else is a protocol error.
+  - In the "expecting PASEComplete" slot: `PASEComplete` only. Non-zero `ErrorCode` is auth failure.
+  - mash-py does **not** accept `CommissioningError` in lieu of `PASEComplete` as a failure envelope — that would paper over the mash-go bug and weaken the spec contract.
+- **Interop consequence.** With mash-go in its current state:
+  - **Success path** (correct setup code): clean — both runtimes follow spec.
+  - **Failure paths against mash-go device:** mash-py raises `PASEProtocolError("unexpected CommissioningError during PASE")` because mash-go sends the wrong envelope. Failure-path interop tests are deferred until mash-go ships the fix; the Phase 8 acceptance gate is the success-path handshake.
+- **DEC-047 conformance test:** Once mash-go is fixed, add a `TC-COMM-NEG-*` row that asserts the device emits `PASEComplete` (not `CommissioningError`) on every PASE-internal failure mode. Until then the mash-py interop suite documents the gap explicitly.
+
+**Files affected.**
+- `mash-go/pkg/commissioning/session.go` — three send sites need to switch envelope and code.
+- `mash-go/pkg/commissioning/messages.go` — remove deprecated `ErrCodeInvalidPublicKey` and `ErrCodeConfirmFailed` after callers are updated.
+- `mash-go/pkg/commissioning/session_test.go` — update assertions that currently match `*CommissioningError` on PASE failures.
+- `mash-py/mash_py/commissioning/messages.py` — Phase 8 implementation; supports the dual-envelope decode path until mash-go ships the fix.
+- `mash-py/mash_py/commissioning/pase_client.py` — Phase 8 client treats both envelopes as auth-failure.
+
+**Related decisions.** DEC-047 (consolidated error codes), DEC-084 (SPAKE2+ algorithm spec).
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.
