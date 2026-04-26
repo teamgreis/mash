@@ -410,8 +410,11 @@ The conventions in each phase:
 | 3 | Crypto Facade & Certificate Helpers | Done (2026-04-26) |
 | 4 | TLS Transport (DEC-082 two-port) | Done (2026-04-26; live interop deferred to Phase 6) |
 | 5 | `mash_py.wire.peek` Live Verification | Done (2026-04-26; live body deferred to Phase 8/11) |
-| 6 | mDNS Discovery (Browser Only) | Pending |
-| 7 | SPAKE2+ Algorithm Core | Pending |
+| 6 | mDNS Discovery (Browser Only) | Done (2026-04-26) |
+| 7A | SPAKE2+ Spec Rewrite + DEC-084 | Done (2026-04-26) |
+| 7B | mash-test Conformance Vectors + Harness | Pending |
+| 7C | mash-go SPAKE2+ Update to DEC-084 | Pending |
+| 7D | mash-py SPAKE2+ Implementation | Pending |
 | 8 | PASE Message Exchange (Client Side) | Pending |
 | 9 | CSR & Certificate Install | Pending |
 | 10 | Operational Connection (Post-Commissioning) | Pending |
@@ -683,50 +686,230 @@ If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl
 
 ---
 
-### Phase 7 — SPAKE2+ Algorithm Core
+### Phase 7 — SPAKE2+ Block (7A → 7B → 7C → 7D)
+
+**Why a block.** When the original Phase 7 began (2026-04-26) the Python port surfaced a substantive gap between `docs/testing/behavior/commissioning-pase.md §2` and `mash-go/pkg/commissioning/spake2plus.go` that goes beyond stylistic divergence. The spec section is internally contradictory (M = G·H(label) "with hash-to-curve per RFC 9380" — type-mismatched) and incomplete (`K_shared` invoked but never defined; PASE_X declared `bytes[32]` but compressed P-256 is 33 bytes). The Go implementation is also flawed in ways the spec doesn't catch (no Memory-Hard KDF before HKDF — verifier theft makes the 27-bit setup code brute-forceable in seconds; transcript not length-prefixed; missing identity-element check during point validation). Both artifacts share an author and were written 4 days apart with no DEC documenting either set of choices. See `mash-py-spec-issues.md` Issue #5 for the full eight-finding catalog.
+
+The original Phase 7 ("port spec to Python") cannot meaningfully execute against a contradictory spec, and matching Go silently would defeat the spec-portability validation that is the entire reason `mash-py` exists. The work is therefore restructured into four ordered sub-phases:
+
+| Sub-phase | Owner | Output |
+|---|---|---|
+| 7A | spec | DEC-084 + rewritten `commissioning-pase.md §2`/§4.2 |
+| 7B | mash-go (test harness) | Algorithmic conformance vectors + `mash-test` updates |
+| 7C | mash-go (implementation) | Updated `pkg/commissioning/spake2plus.go` passing 7B's vectors |
+| 7D | mash-py | Spec-conformant Python implementation passing 7B's vectors and live PASE against 7C |
+
+**Acceptance gate for Phase 7.** All four sub-phases complete; Python and Go produce byte-identical SPAKE2+ intermediates given identical inputs; the algorithmic vectors from 7B run green against both implementations.
+
+---
+
+### Phase 7A — SPAKE2+ Spec Rewrite + DEC-084
+
+**Status.** Done (2026-04-26). DEC-084 filed; `commissioning-pase.md §2` and `§4.2` rewritten; `security.md §4.4` updated to cross-reference; `mash-py-spec-issues.md` Issue #5 marked Resolved.
+
+**Goal.** A complete, self-consistent, security-reviewed specification of MASH's SPAKE2+ handshake. After 7A, two implementers reading only `docs/` can produce byte-identical SPAKE2+ intermediates from identical inputs.
+
+**Depends on.** Nothing (spec-only work). Replaces the broken `commissioning-pase.md §2`.
+
+**Background.** Eight findings from the Phase 7 analysis (`mash-py-spec-issues.md` Issue #5) drive the rewrite. The DEC adopts RFC 9383 + Matter conventions where they exist, fills the spec's gaps explicitly, and adds a Memory-Hard KDF before any HKDF chain (the most security-critical change).
+
+**Files created/modified.**
+
+- `docs/decision-log.md` — new **DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + MHF)**. Replaces the cryptographic decisions implicit in DEC-014 (which only ratified "use SPAKE2+ with 8-digit codes") with an explicit primitive-by-primitive specification.
+- `docs/testing/behavior/commissioning-pase.md` — full rewrite of §2 (Cryptographic Parameters), §4.2 (PASE wire messages — fix `bytes[32]` to 65-byte uncompressed), and a new §2.5 listing security-critical implementation requirements (point validation, identity-element rejection, MHF parameter persistence).
+- `docs/security.md` §4.4 — cross-reference DEC-084; remove any text that contradicts the rewrite.
+- `mash-py-spec-issues.md` — flip Issue #5 status to ✅ Resolved with DEC-084.
+
+**Decisions the DEC must settle.**
+
+| Decision | Recommendation | Stakes |
+|---|---|---|
+| MHF | PBKDF2-HMAC-SHA256, 100k iterations | ESP32-friendly (no 64 KB Argon2id memory cost); Matter precedent |
+| Per-device salt | 16 bytes random, generated at first commissioning, persisted in NVS alongside discriminator | Salt distribution is the trickiest sub-decision — see §A below |
+| Salt distribution | Embedded in QR code OR exchanged via new `PBKDFParameter` PASE message | Matter uses message exchange; pure-QR avoids a round trip but bloats QR |
+| Verifier on device | `(w0, L, salt, iterations)` — extends current `(w0, L)` | NVS layout breaking change; tolerable since no production deployments |
+| M, N points | RFC 9383 §4 fixed P-256 constants verbatim (literal hex) | Matches Go's current values, matches Matter, ecosystem-standard |
+| Transcript layout | RFC 9383 §3.3 length-prefixed: 8-byte LE length per field; A‖B‖M‖N‖pA‖pB‖Z‖V‖w0 | Standard; prevents canonicalization attacks |
+| Identity binding | In transcript (RFC 9383 standard), not in HKDF salt | Identities = controller's commissioning-cert SKI + device's discriminator-derived ID |
+| K_shared definition | `K_shared = SHA-256(TT)` | Standard SPAKE2+ |
+| Session-key chain | Keep spec's K_main / K_confirm / K_encrypt naming and three-key structure (genuinely better than Go's two-key); MASH-specific HKDF info strings | Naming is one of the few good choices in the current spec |
+| Confirmation MAC | RFC 9383 §3.4: `KcA‖KcB = HKDF-Expand(K_confirm, "ConfirmationKeys", 32)` then `confirmA = MAC(KcA, pB)`, `confirmB = MAC(KcB, pA)` | Standard mutual authentication |
+| Point validation | Mandatory: on-curve check, identity-element rejection, subgroup check (for future curve agility) | Both implementations currently miss the identity-element check |
+| Wire size for pA / pB | 65 bytes uncompressed (`0x04 || X || Y`) | Resolves §4.2 inconsistency; fits in single TLS record |
+
+**Test layers.** None — spec phase. Acceptance is review-driven, not test-driven.
+
+**Acceptance.**
+
+1. The DEC is filed with explicit rationale per decision and explicit MHF parameter choice with security analysis.
+2. The rewritten `§2` is reviewed end-to-end and contains no type mismatches, no undefined variables, and no contradictions with cited RFCs.
+3. A naive implementer (or AI) reading only the spec can derive byte-identical w0, w1, pA, pB, Z, V, K_shared, K_main, K_confirm, K_encrypt, confirmA, confirmB given fixed inputs (setup code, salt, ephemeral scalars, identities). This is verified mechanically in 7B.
+4. Spec-issues Issue #5 is closed with the resolution pointing to DEC-084.
+
+**Interop verification.** None — no code yet.
+
+**Refinement contingency.** If the salt-distribution decision (pure-QR vs. PBKDFParameter exchange) proves contentious, the DEC may need a follow-up addendum. Both options are wire-compatible at the SPAKE2+ algorithmic layer; the choice affects PASE message flow (which 7C/7D handle).
+
+---
+
+### Phase 7B — mash-test Conformance Vectors + Harness
 
 **Status.** Pending.
 
-**Goal.** A Python module that, given a setup code and identities, produces the same intermediate values (w0, w1, pA, pB, transcript hash, shared secret, confirmation MAC) as the Go implementation, byte-identically when seeded with the same RNG.
+**Goal.** A set of algorithmic conformance vectors (deterministic-RNG SPAKE2+ traces) plus a runner that exercises any candidate implementation against them, treating mash-test as the executable spec for SPAKE2+. Both 7C and 7D pass these vectors before they are accepted.
 
-**Depends on.** Phase 3.
+**Depends on.** 7A (need stable spec to derive vectors against).
 
-**Background.**
-- RFC 9383 SPAKE2+ on P-256 with HKDF-SHA256.
-- Go constants: `mash-go/pkg/commissioning/spake2plus.go:38–49`.
-  - HKDF info for verifier derivation: `"SPAKE2+-P256-SHA256 w"` (line 90, 154)
-  - HKDF info for session key derivation: `"SPAKE2+-P256-SHA256"` (line 254, 417)
-  - M point: `886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f5ff355163e43ce224e0b0e65ff02ac8e5c7be09419c785e0ca547d55a12e2d20`
-  - N point: `d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b4907d60aa6bfade45008a636337f5168c64d9bd36034808cd564490b1e656edbe7`
-- CircuitMatter's `pase.py` provides the algorithmic skeleton; we re-implement using `cryptography` instead of `ecdsa` for performance.
+**Background.** Without algorithmic vectors derived independently of either implementation, "Go passes its own tests" and "Python passes its own tests" don't actually prove byte-compatibility. The Phase 7 audit found that mash-go's existing SPAKE2+ tests are self-consistent but don't catch the divergences from RFC 9383 — the test corpus shipped alongside the implementation rather than from the spec. 7B fixes this.
 
-**Files created.**
+**Files created/modified.**
 
-- `mash_py/commissioning/spake2plus.py` — `Spake2Plus` class with:
-  - `derive_w0_w1(setup_code, salt) -> (bytes, bytes)`
-  - `client_init(w0, w1) -> (x, pA)` — controller side
-  - `server_init(w0, L) -> (y, pB)` — device side
-  - `compute_session_keys(transcript) -> (shared_secret, confirmation_key)`
-  - `compute_confirmation_mac(key, public_value) -> bytes`
-- `tests/unit/commissioning/test_spake2plus.py`
-- `tests/vectors/commissioning/test_spake2plus_vectors.py` — load vectors from `tools/gen_vectors`
+- `tools/spake2plus_oracle/` — a new top-level Python script that implements DEC-084's algorithm purely by reading the spec text. It is intentionally a third independent implementation (separate from mash-py and mash-go) so the vectors it produces don't accidentally track either runtime's quirks. ~300 LOC. Lives outside `mash-py/` and `mash-go/` to avoid implying it is itself canonical — it is a vector generator, not a reference implementation.
+- `mash-go/testdata/spake2plus_vectors.json` — generated by `tools/spake2plus_oracle`. Ships in the repo; regenerated only when DEC-084 changes.
+- `mash-go/cmd/mash-test/spake2plus_conformance.go` (new file) or YAML test cases in `mash-go/testdata/cases/` — runs the vectors against an implementation under test.
+- `mash-go/cmd/mash-test/cmd_run.go` (modify) — add `-srv-resolve` flag to fix `mash-py-spec-issues.md` Issue #3 (single-port-shaped harness gap that has been deferred to Phase 22; bringing it forward avoids blocking the live-PASE step in 7D and 7C's interop tests against `mash-py`).
+
+**Vectors required (each input/output recorded in JSON).**
+
+| Vector | Inputs | Recorded outputs |
+|---|---|---|
+| `mhf_basic` | setup_code="20202021", salt=0x00…16 zeros, iterations=100000 | mhf_output (32 bytes) |
+| `derive_w0_w1` | mhf_output | w0, w1 (each 32 bytes) |
+| `compute_L` | w1 | L (65-byte uncompressed point) |
+| `client_init_fixed_x` | w0, x=0x42…32 bytes | pA (65 bytes) |
+| `server_init_fixed_y` | w0, L, y=0x84…32 bytes | pB (65 bytes) |
+| `transcript` | controller_id, device_id, M, N, pA, pB, Z, V, w0 | TT (variable length), TT_hex |
+| `k_shared` | TT | K_shared (32 bytes) |
+| `key_chain` | K_shared | K_main, K_confirm, K_encrypt |
+| `confirmation_keys` | K_confirm | KcA, KcB |
+| `confirm_macs` | KcA, KcB, pA, pB | confirmA, confirmB |
+| `full_handshake` | setup_code, salt, identities, x, y | every intermediate above |
+| `point_validation` | pA = identity element | expected: rejection |
+| `point_validation_off_curve` | pA off curve | expected: rejection |
 
 **Test layers.**
 
 | Layer | What |
 |---|---|
-| Unit | Round-trip handshake with both parties in Python; final shared secret matches between client and server. RFC 9383 test vectors (Section A) for known fixed inputs. |
-| Vector | Use seeded RNG. Setup code `20202021`, identities `"controller"` and `"device"`, seed `0x42`. Assert: w0, w1, pA, pB, Z, V, transcript hash, shared secret, confirmation MAC all match Go. |
-| Interop | Deferred to Phase 8 (full PASE message exchange). |
+| Vector | `tools/spake2plus_oracle/test_self.py` — the oracle's own self-tests; round-trip client+server reach same K_shared on multiple seeds. |
+| Conformance | `mash-go/cmd/mash-test`'s new vector runner reads the JSON, invokes the implementation under test (initially mash-go's `spake2plus.go`), and asserts every recorded output matches byte-for-byte. |
+| Negative | Point-validation vectors must produce specific errors (not just "any error"). |
 
-**Acceptance.** Vectors match.
+**Acceptance.**
 
-**Interop verification.** Deferred.
+1. `tools/spake2plus_oracle` builds and self-tests pass.
+2. `mash-go/testdata/spake2plus_vectors.json` exists, ≥12 vectors, each with full intermediates.
+3. `mash-test`'s vector runner exists. Initially it fails against unmodified mash-go (since 7C hasn't shipped yet) — that failure is the expected forcing function for 7C.
+4. The `-srv-resolve` flag is implemented so 7C and 7D can drive `mash-test` against either single-port or two-port deployments.
 
-**Refinement contingency.** SPAKE2+ has many subtle places to deviate:
-- **Encoding of points.** P-256 points must be encoded as 65-byte uncompressed (`0x04 || X || Y`) for transcript inclusion. Go does this in `spake2plus.go:242–251`.
-- **Concatenation order in transcript.** Per RFC 9383: `clientIdentity || serverIdentity || pA || pB || Z || V || w0`. Get any wrong, every secret diverges.
-- **HKDF salt vs info.** Go uses `clientID || serverID` as salt for the verifier derivation, info as the version string. Don't swap them.
+**Interop verification.** N/A in 7B; the oracle generates the vectors and self-validates.
+
+**Refinement contingency.** If the oracle's choice of "third implementation" is questioned (e.g., "what if the oracle has the same bug as mash-py?"), supplement with vectors from CircuitMatter or a non-MASH reference. Risk is low because the oracle implements only the algorithmic core (no MASH-specific message handling), and the spec text is mechanically translatable after 7A.
+
+---
+
+### Phase 7C — mash-go SPAKE2+ Update to DEC-084
+
+**Status.** Pending.
+
+**Goal.** `mash-go/pkg/commissioning/` matches the DEC-084 spec and passes every vector from 7B. Existing PASE integration tests pass with updated expectations.
+
+**Depends on.** 7A (spec), 7B (vectors).
+
+**Background.** The current mash-go SPAKE2+ implementation diverges from the new spec in eight places (Issue #5). Most changes are mechanical (new HKDF info strings, new key naming) but two are substantive:
+
+1. Adding the MHF wrapper around `derive_w0_w1`. Go has `golang.org/x/crypto/pbkdf2` — single-import.
+2. Restructuring the transcript builder to produce length-prefixed bytes per RFC 9383 §3.3.
+
+A third change touches the verifier storage format: `(w0, L)` becomes `(w0, L, salt, iterations)`. This is a breaking change to the device's NVS layout, but tolerable since there are no production deployments.
+
+**Files created/modified.**
+
+- `mash-go/pkg/commissioning/spake2plus.go` — substantive rewrite. ~50 LOC delta net (most of the changes are 1-line swaps; the MHF and length-prefixed transcript add ~50 lines of new code and remove ~30 lines of the current ad-hoc transcript).
+- `mash-go/pkg/commissioning/spake2plus_test.go` — update expected values; add tests for new identity-element check, MHF roundtrip, transcript canonicalization.
+- `mash-go/pkg/commissioning/messages.go` — extend `Verifier` struct with `Salt`/`Iterations`; PASE message wire size adjustment if §4.2 wire size changed (currently `bytes[32]` → 65-byte uncompressed).
+- `mash-go/pkg/cert/store.go` — verifier-storage breaking change (NVS layout). Add a one-line migration that drops pre-DEC-084 verifiers; document in DEC-084.
+- `mash-go/pkg/service/device_service_commissioning.go`, `device_session.go`, `controller_renewal.go` — call-site updates for renamed keys (`sharedSecret` → `K_main`, `confirmKey` → `K_confirm`).
+- `mash-go/internal/testharness/runner/security_handlers.go` — call-site updates if the runner peeks at SPAKE2+ intermediates.
+- `mash-go/cmd/mash-test/spake2plus_conformance.go` — vector runner from 7B should now pass against mash-go.
+
+**Test layers.**
+
+| Layer | What |
+|---|---|
+| Unit | All existing `spake2plus_test.go` tests pass with updated expected values; new tests for MHF roundtrip, identity-element rejection, length-prefixed transcript canonicalization. |
+| Vector | 7B's vector runner produces zero failures. |
+| Integration | `pkg/service/`'s integration-tagged tests (the ones that complete a full PASE) pass with updated cert-store fixtures. |
+| End-to-end | `mash-controller` commissions `mash-device` end-to-end; both build, both interop. |
+
+**Acceptance.**
+
+1. `go test ./...` clean across all 22 packages.
+2. `go test -tags=integration ./pkg/service/...` clean (this is currently broken on a separate axis — the cert-store mandatory-at-commissioning issue noted in MEMORY.md must be resolved as part of 7C since it touches the same code).
+3. 7B's vector runner produces zero failures against mash-go.
+4. End-to-end commissioning of `mash-device` from `mash-controller` completes successfully on the new wire format.
+
+**Interop verification.** Deferred — there is no second implementation to interop against until 7D ships. The vector-runner in 7B serves as a partial interop check.
+
+**Refinement contingency.** The integration-tagged test failures predate this work (commit 11889f4 made cert stores mandatory at commissioning, leaving ~14 E2E tests stranded). 7C is the natural place to fix them since the same files are being touched. If scope creep becomes a problem, those test fixes can be split into a 7C.1 follow-up — but they should not be deferred past 7D, since 7D's live-PASE interop test requires a working `mash-device` binary.
+
+---
+
+### Phase 7D — mash-py SPAKE2+ Implementation
+
+**Status.** Pending. Replaces the original Phase 7.
+
+**Goal.** A spec-conformant Python implementation of DEC-084's SPAKE2+ that passes 7B's algorithmic vectors and completes a live PASE handshake against the 7C-updated `mash-device`.
+
+**Depends on.** 7A (spec), 7B (vectors), 7C (Go reference for live interop), Phase 3 (crypto facade), Phase 4 (TLS transport).
+
+**Background.** With 7A–7C done, 7D becomes mechanical: implement the algorithm per spec, test against the algorithmic vectors, then drive the wire-level handshake in Phase 8. The earlier draft of `mash_py/commissioning/spake2plus.py` (uncommitted at the time of this restructure) already encodes most of the structure (client/server state machines, transcript composition, key derivation chain) — much of it carries over with the spec-fix swaps applied.
+
+**Files created.**
+
+- `mash_py/commissioning/__init__.py` — exports.
+- `mash_py/commissioning/spake2plus.py` — DEC-084 implementation. ~500 LOC.
+- `mash_py/commissioning/mhf.py` — Memory-Hard KDF wrapper (PBKDF2 by default per DEC-084; pluggable for future Argon2id support).
+- `tests/unit/commissioning/test_spake2plus.py` — round-trip handshake; identity-element rejection; MHF roundtrip.
+- `tests/vectors/commissioning/test_spake2plus_vectors.py` — load 7B's vectors and assert byte-identical outputs.
+- `tests/interop/commissioning/test_pase_against_go_device.py` — scaffold (live PASE message exchange ships in Phase 8; this file asserts only the algorithmic layer here).
+
+**Test layers.**
+
+| Layer | What |
+|---|---|
+| Unit | Round-trip client + server reach same K_shared for multiple seeds. Negative cases: identity-element pA, off-curve pA, wrong setup code, MAC mismatch. |
+| Vector | All vectors from 7B pass byte-identically. |
+| Interop | Run the algorithmic core only (no PASE messages yet — those are Phase 8): instantiate Python's verifier from setup code 20202021 + salt; verify Go's `mash-device` produces the same `(w0, L)` via debug RPC or log inspection. Live PASE message exchange remains Phase 8. |
+
+**Acceptance.**
+
+1. All vectors from 7B pass.
+2. Mutual round-trip handshake succeeds in Python (both parties Python).
+3. Static (w0, L) verifier value matches between Python and Go for shared inputs.
+4. Ruff and mypy clean across `mash_py/commissioning/`.
+5. Phase 7 progress-snapshot row (4 sub-rows) all marked Done.
+
+**Interop verification.**
+
+```bash
+# 1. Build Go device with DEC-084
+cd mash-go && go install ./cmd/mash-device
+
+# 2. Generate the (w0, L) verifier on Go side
+mash-device --print-verifier --setup-code 20202021 --salt-hex 00...16 --iterations 100000
+
+# 3. Generate the same in Python
+cd mash-py && python -m mash_py.commissioning.cli print-verifier --setup-code 20202021 --salt-hex 00...16 --iterations 100000
+
+# 4. byte-compare the outputs
+diff <(...) <(...)
+```
+
+**Refinement contingency.** If a single vector mismatches:
+1. The vector's failed-output field localises the divergence (e.g., w0 mismatches → MHF or w0/w1 derivation).
+2. The 7B vectors carry intermediate values for every step, so the bisection is at most 5 levels deep.
+3. Compare against the `tools/spake2plus_oracle` (third independent implementation) to determine whether mash-py or mash-go is wrong.
 
 ---
 
@@ -736,7 +919,7 @@ If TLS works manually but Python fails, `cryptography` is fine — Python's `ssl
 
 **Goal.** A Python controller can drive a complete PASE handshake with a Go device.
 
-**Depends on.** Phases 4, 7.
+**Depends on.** Phases 4, 7D (which itself depends on 7A–7C).
 
 **Background.**
 - Message types 1–4 in `mash-go/pkg/commissioning/messages.go:8–37`.
@@ -1338,7 +1521,7 @@ jobs:
 |---|---|---|---|
 | Two-port deployment violates a Go-spec convention | None (resolved by DEC-082) | — | Was a concern under DEC-067-only; DEC-082 makes two-port first-class conformant. |
 | Shared connection-cap counter (DEC-064) bug between two listeners | Low | Medium | Phase 4 unit tests assert (max_zones+2)nd connection rejected regardless of which port it lands on; covers race with `asyncio.Lock` around the counter. |
-| SPAKE2+ port has subtle deviation that only surfaces under specific seeds | Medium | High | Phase 7 vector tests use multiple seeds; vectors include all intermediate values, not just final secret |
+| SPAKE2+ port has subtle deviation that only surfaces under specific seeds | Low (after Phase 7 restructure) | High | Phase 7B vectors derived from a third-party oracle (`tools/spake2plus_oracle`) independent of both runtimes; full intermediate values per vector enable bisection. Risk dropped Medium → Low because 7A's spec rewrite removes the underspecification that previously enabled silent divergence. |
 | Codegen drift between Go and Python emitters | Low (with CI gate) | High | CI job that diffs spec coverage |
 | `mash-test` discovery via mDNS fails in CI environment | Medium | Medium | Allow `--target host:port` bypass for CI; default to mDNS for dev |
 | `cryptography` package can't be installed in some target environments | Low | High | Phase-2 swap to pure-Python primitives (Decision B) is pre-planned |

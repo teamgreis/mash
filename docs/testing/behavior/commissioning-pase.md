@@ -21,68 +21,219 @@ Commissioning is the process by which a controller joins a device to its zone. M
 
 ## 2. SPAKE2+ Cryptographic Parameters
 
+> **Normative spec:** This section defines MASH's SPAKE2+ algorithm completely. Two implementers reading only this section MUST be able to produce byte-identical intermediate values (w0, w1, pA, pB, Z, V, K_shared, K_main, K_confirm, K_encrypt, KcA, KcB, confirmA, confirmB) given identical inputs.
+>
+> Codified by **DEC-084**. Replaces the pre-DEC-084 §2 (which was incomplete and contradictory; see `mash-py-spec-issues.md` Issue #5 for the eight findings).
+
 ### 2.1 Algorithm Specification
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| Group | P-256 (secp256r1) | Matches TLS cipher preference, widely supported |
-| Hash | SHA-256 | Standard, efficient, secure |
-| KDF | HKDF-SHA256 | RFC 5869 compliant |
-| MAC | HMAC-SHA256 | For key confirmation |
+| Group | P-256 (`secp256r1`) | DEC-014; matches TLS cipher preference, widely supported |
+| Hash | SHA-256 | Standard, efficient, hardware-accelerated on common MCUs |
+| KDF | HKDF-SHA256 (RFC 5869) | Standard, RFC-conformant |
+| MAC | HMAC-SHA256 (RFC 4231) | Standard, used for key confirmation |
+| Memory-Hard KDF (MHF) | PBKDF2-HMAC-SHA256 (RFC 8018) | Defends against offline brute-force of stolen verifiers |
+| MHF iteration count | **100,000** | Protocol constant (v1). ESP32 budget ~2s, fits §5.3 |
 
-### 2.2 SPAKE2+ Constants
+> **Why an MHF.** The setup code carries only ~27 bits of entropy (8 decimal digits = ~10⁸ values). Without a memory-hard or computation-bound key-derivation function before HKDF, a stolen device verifier can be brute-forced for the original setup code in seconds on a GPU. PBKDF2-HMAC-SHA256 at 100,000 iterations raises that to ~3 hours per device on a high-end GPU — affordable for a determined attacker but infeasible for opportunistic attacks. Verifier theft is treated as full device compromise (see §2.5). Argon2id may be specified as an optional MHF in a future protocol version for hardware that can spare the additional memory.
 
-Standard P-256 SPAKE2+ constants (from RFC 9382):
+### 2.2 SPAKE2+ Generator Points M and N
+
+MASH uses the **fixed RFC 9383 §4 P-256 SPAKE2+ generator points verbatim**. These are universally agreed across the SPAKE2+ ecosystem (RFC 9383, Matter, all conformant implementations); using them lets MASH share testing infrastructure and security analysis with that ecosystem.
 
 ```
-M = (base point of P-256) * H("MASH SPAKE2+ M v1")
-N = (base point of P-256) * H("MASH SPAKE2+ N v1")
+M.x = 886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f
+M.y = 5ff355163e43ce224e0b0e65ff02ac8e5c7be09419c785e0ca547d55a12e2d20
+
+N.x = d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49
+N.y = 07d60aa6bfade45008a636337f5168c64d9bd36034808cd564490b1e656edbe7
 ```
 
-Where H is SHA-256 with hash-to-curve per RFC 9380.
+Both points are on the P-256 curve. They are used in their SEC1 uncompressed encoding (`0x04 || X || Y`, 65 bytes) wherever the algorithm includes a point in a hash input.
 
-### 2.3 Setup Code Processing
+> **No MASH-specific derivation.** Pre-DEC-084 the spec specified `M = G * H("MASH SPAKE2+ M v1")` with "hash-to-curve per RFC 9380." That formula was type-mismatched (the multiplication requires `H` to produce a scalar, but RFC 9380 hash-to-curve produces a point) and would have produced different points than every other SPAKE2+ deployment in existence. DEC-084 standardizes on the RFC 9383 fixed constants — same as Matter, same as every other interoperable implementation.
 
-**Format:** 8 decimal digits (00000000-99999999)
+### 2.3 Salt Derivation, MHF, and w0 / w1
 
-**Password derivation:**
+**Setup code format.** 8 decimal digits, encoded as 8 ASCII bytes (e.g., `"20202021"` → `b"20202021"`, 8 bytes). See DEC-068 for invalid-passcode validation; this section assumes a valid setup code.
+
+**Salt derivation.** The salt is per-device (different setup codes on different devices produce different verifiers) and computed deterministically from the QR-code contents — no exchange between controller and device is required:
+
 ```
-password_bytes = UTF8(setup_code)  // e.g., "12345678" → 8 bytes
-w0 = HKDF-Expand(
-    HKDF-Extract(salt="", password_bytes),
-    info="MASH SPAKE2+ w0",
-    length=32
+salt = SHA-256(b"MASH PBKDF2 salt v1" || discriminator (2 bytes BE) || setup_code_utf8)[0:16]
+```
+
+- `discriminator` is the device's 12-bit discriminator from the QR code, encoded as a 2-byte big-endian unsigned integer (high 4 bits zero).
+- `setup_code_utf8` is the 8-byte UTF-8 encoding of the 8-digit setup code.
+- The output is the first 16 bytes of the SHA-256 hash.
+- The salt is not secret. Its only requirement is per-(discriminator, setup_code)-pair uniqueness, which the SHA-256 prefix guarantees.
+
+> **Why derived, not exchanged.** Matter uses a `PBKDFParameter` exchange to convey per-device salt. Deriving the salt instead avoids one round trip per commissioning, eliminates a state to negotiate, and removes a wire-format dependency. Both controller and device arrive at the same salt independently from QR-code contents both sides already have.
+
+**Memory-Hard KDF.**
+
+```
+mhf_out = PBKDF2-HMAC-SHA256(
+    password = setup_code_utf8,   // 8 bytes
+    salt     = salt,              // 16 bytes (from above)
+    c        = 100000,            // iterations (protocol constant)
+    dkLen    = 80                 // output length
 )
-w1 = HKDF-Expand(
-    HKDF-Extract(salt="", password_bytes),
-    info="MASH SPAKE2+ w1",
-    length=32
-)
+// mhf_out is 80 bytes
 ```
 
-### 2.4 Session Key Derivation
-
-After SPAKE2+ exchange, both parties derive session keys:
+**w0 and w1 derivation.** The 80 bytes of MHF output are split and reduced modulo the P-256 curve order `n`:
 
 ```
-K_main = HKDF-Expand(
-    HKDF-Extract(salt="", K_shared),
-    info="MASH PASE Session Key",
-    length=32
-)
-
-K_confirm = HKDF-Expand(
-    HKDF-Extract(salt="", K_shared),
-    info="MASH PASE Confirmation",
-    length=32
-)
-
-K_encrypt = HKDF-Expand(
-    HKDF-Extract(salt="", K_main),
-    info="MASH PASE Encryption",
-    length=32
-)
+w0_buf = mhf_out[0:40]              // first 40 bytes
+w1_buf = mhf_out[40:80]             // last 40 bytes
+w0 = (big-endian integer of w0_buf) mod n
+w1 = (big-endian integer of w1_buf) mod n
 ```
+
+`n` is the P-256 base-point order (`0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551`). Using 40-byte slices (320 bits) reduced modulo 256-bit `n` gives a near-uniform distribution of `w0` and `w1` over `[0, n)`, per RFC 9383 §3.2 / Matter §3.10.
+
+If either `w0` or `w1` reduces to zero (probability ≈ 2⁻²⁵⁶), the device MUST reject the setup code as invalid. In practice this never happens for any valid setup code under DEC-068.
+
+**Verifier point L.** The device computes:
+
+```
+L = w1 * G       // P-256 base-point multiplication
+```
+
+**Verifier storage.** The device persists `(discriminator, salt, w0, L)` in NVS after factory provisioning. Total: 16 + 16 + 32 + 65 = 129 bytes per device. The device SHOULD discard the original setup code from NVS after computing the verifier — the setup code remains on the printed label, the only place it is needed for re-pairing.
+
+The controller does not persist the verifier. It re-derives `(salt, w0, w1)` from the QR-code contents at the start of each commissioning attempt.
+
+### 2.4 SPAKE2+ Handshake and Session-Key Derivation
+
+**Identity strings.** MASH binds the SPAKE2+ transcript to fixed protocol-constant identity strings:
+
+```
+ControllerIdentity = b"mash-controller"   // 15 bytes
+DeviceIdentity     = b"mash-device"       // 11 bytes
+```
+
+These differentiate roles in the transcript (preventing a controller's MAC from being valid as a device's MAC and vice versa). Session-specific entropy is provided separately by the random ephemeral scalars `x` and `y`.
+
+**Public values.** Each side generates a fresh random ephemeral scalar uniformly in `[1, n − 1]`:
+
+```
+Controller: x ←_R [1, n − 1]
+            pA = x * G + w0 * M
+
+Device:     y ←_R [1, n − 1]
+            pB = y * G + w0 * N
+```
+
+Public values are exchanged in their SEC1 uncompressed encoding (`0x04 || X || Y`, 65 bytes).
+
+**Point validation.** Both sides MUST validate received points before using them — see §2.5.
+
+**Shared secrets Z and V.**
+
+```
+Controller computes:
+    Y_unmasked = pB − w0 * N      // strip the device's mask
+    Z = x * Y_unmasked
+    V = w1 * Y_unmasked
+
+Device computes:
+    X_unmasked = pA − w0 * M      // strip the controller's mask
+    Z = y * X_unmasked
+    V = y * L                     // L = w1 * G, so this equals y * w1 * G
+                                  // same value as the controller's V
+```
+
+**Transcript composition.** The transcript `TT` is a length-prefixed concatenation per RFC 9383 §3.3. Each field is preceded by an 8-byte little-endian unsigned-integer length:
+
+```
+TT = LEN(ControllerIdentity)  || ControllerIdentity
+   || LEN(DeviceIdentity)     || DeviceIdentity
+   || LEN(M_bytes)            || M_bytes
+   || LEN(N_bytes)            || N_bytes
+   || LEN(pA)                 || pA
+   || LEN(pB)                 || pB
+   || LEN(Z_bytes)            || Z_bytes
+   || LEN(V_bytes)            || V_bytes
+   || LEN(w0_bytes)           || w0_bytes
+
+Where:
+    LEN(s) = uint64 little-endian (8 bytes) of len(s)
+    M_bytes, N_bytes, Z_bytes, V_bytes = SEC1 uncompressed (65 bytes)
+    w0_bytes = 32-byte big-endian encoding of w0
+```
+
+The length prefixes prevent canonicalization attacks where one variable-length field could absorb bytes from the next.
+
+**Shared secret K_shared.**
+
+```
+K_shared = SHA-256(TT)        // 32 bytes
+```
+
+**Session-key chain.** Three keys are derived from K_shared with MASH-specific HKDF info strings:
+
+```
+K_main    = HKDF-SHA256(salt="", IKM=K_shared, info=b"MASH PASE Session Key",  L=32)
+K_confirm = HKDF-SHA256(salt="", IKM=K_shared, info=b"MASH PASE Confirmation", L=32)
+K_encrypt = HKDF-SHA256(salt="", IKM=K_main,   info=b"MASH PASE Encryption",   L=32)
+```
+
+Notes:
+- All HKDF calls use the combined Extract-then-Expand form per RFC 5869 §2.
+- `K_encrypt` derives from `K_main`, not directly from `K_shared`. This lets `K_main` be exposed to other layers (e.g., for session identification) without revealing `K_encrypt`.
+- The three info strings are domain-separation tags; using them prevents cross-protocol confusion if K_shared were ever reused.
+
+**Confirmation-MAC keys KcA and KcB.** Per RFC 9383 §3.4:
+
+```
+KcA_KcB = HKDF-SHA256(salt="", IKM=K_confirm, info=b"ConfirmationKeys", L=32)
+KcA = KcA_KcB[0:16]      // controller's MAC key
+KcB = KcA_KcB[16:32]     // device's MAC key
+```
+
+**Confirmation MACs.** Each side MACs the *peer's* public point with its *own* MAC key:
+
+```
+confirmA = HMAC-SHA256(KcA, pB)      // controller → device
+confirmB = HMAC-SHA256(KcB, pA)      // device → controller
+```
+
+Each MAC output is 32 bytes. The role labels in the MAC keys (KcA vs KcB) prevent reflection attacks — a controller's confirmation MAC cannot be replayed as the device's, even though both share the same K_confirm.
+
+### 2.5 Implementation Requirements
+
+These requirements apply to both controller and device implementations. All are normative.
+
+**Point validation (mandatory).** Every received SEC1-encoded point (pA on the device side, pB on the controller side) MUST be validated:
+
+1. The encoding MUST be parseable as SEC1 uncompressed (65 bytes, leading byte `0x04`). Compressed encoding is not used in MASH.
+2. The decoded point MUST satisfy the P-256 curve equation `y² ≡ x³ − 3x + b (mod p)`.
+3. The decoded point MUST NOT be the point at infinity (the identity element of the group).
+
+Failure of any check is a fatal protocol error — the receiver MUST abort the handshake, send `PASEComplete` with `ErrorCode = ErrCodeAuthFailed` (1) per DEC-047, and close the TLS connection. Information about which specific check failed MUST NOT be leaked to the peer.
+
+> **Why identity-element rejection.** SPAKE2+ as defined by RFC 9383 implicitly requires this check; omitting it allows degenerate-point attacks where an attacker who can submit the identity element forces predictable Z and V values, enabling brute-force of the setup code without verifier theft. Both pre-DEC-084 mash-go and the original spec missed this requirement.
+
+**Constant-time MAC comparison.** Confirmation-MAC verification MUST use a constant-time byte-string comparison primitive (e.g., `hmac.compare_digest` in Python, `subtle.ConstantTimeCompare` in Go). Using `==` or `bytes.Equal` short-circuits on the first mismatching byte and leaks timing information.
+
+**Ephemeral scalar handling.** The random ephemeral scalars `x` and `y` are session secrets:
+- They MUST be generated with a cryptographically secure RNG (e.g., `crypto/rand` in Go, `secrets` in Python).
+- They MUST be uniformly distributed over `[1, n − 1]`.
+- They MUST be discarded immediately after the session ends (before the TLS connection closes) and MUST NOT be persisted.
+
+**w0, w1, K_shared, K_main, K_confirm, K_encrypt, KcA, KcB handling.** These are all session secrets derived from the setup code or transcript:
+- They MUST be discarded when the PASE session ends (typically after `CertInstallResponse` is sent / received).
+- They MUST NOT be persisted to non-volatile storage.
+- The verifier values `(salt, w0, L)` are the only SPAKE2+-derived values the device persists.
+
+**Verifier theft as full compromise.** If a device's verifier is exfiltrated (NVS dump via JTAG, glitch attack, side channel, etc.), the attacker can brute-force the setup code in ~3 hours on a high-end GPU (per §2.1). The compromised device MUST be re-paired with a new setup code; the original setup code printed on the label is no longer secret. Devices SHOULD use NVS read protection (e.g., ESP32 flash encryption) and SHOULD support tamper detection where the deployment justifies it.
+
+**No alternative MHF in v1.** Implementations MUST use PBKDF2-HMAC-SHA256 with exactly 100,000 iterations. Argon2id and other MHF candidates are reserved for future protocol versions; mixing MHF choices across v1 implementations would prevent verifier interoperability.
+
+**No PBKDFParameter exchange in v1.** Implementations MUST derive salt from the QR-code contents per §2.3 (not exchange it as a separate message). Per-device iteration negotiation is reserved for future protocol versions.
 
 ---
 
@@ -240,39 +391,59 @@ Controller                                    Device
 
 ### 4.2 PASE Messages
 
-**PASE_X (Controller → Device):**
+> **Codified by DEC-084.** Pre-DEC-084 this section described four messages with placeholder string types and incorrect 32-byte wire sizes for P-256 points (compressed P-256 is 33 bytes, uncompressed is 65; neither is 32). The wire formats below match `mash-go/pkg/commissioning/messages.go` MsgTypes 1–4 and use the correct uncompressed encoding per §2.
+
+PASE messages are CBOR maps with integer keys, framed per `transport.md §4`. Four messages comprise the PASE handshake:
+
+| MsgType | Name | Direction | Carries |
+|---|---|---|---|
+| 1 | `PASERequest` | Controller → Device | `pA` (controller's public value) |
+| 2 | `PASEResponse` | Device → Controller | `pB` (device's public value) |
+| 3 | `PASEConfirm` | Controller → Device | `confirmA` (controller's confirmation MAC) |
+| 4 | `PASEComplete` | Device → Controller | `confirmB` (device's confirmation MAC) + status |
+
+**PASERequest (MsgType 1, Controller → Device):**
 ```cbor
 {
-  1: "pase_x",           // type
-  2: <bytes[32]>,        // X value (P-256 point, compressed)
-  3: <bytes[32]>         // context (session binding data)
+  1: 1,                  // msgType (PASERequest)
+  2: <bytes[65]>,        // pA — controller's public value (SEC1 uncompressed: 0x04 || X || Y)
+  3: <bytes>             // ClientIdentity (currently fixed to b"mash-controller", reserved
+                         //   for future delegated-commissioning use; see DEC-019)
 }
 ```
 
-**PASE_Y (Device → Controller):**
+**PASEResponse (MsgType 2, Device → Controller):**
 ```cbor
 {
-  1: "pase_y",           // type
-  2: <bytes[32]>,        // Y value (P-256 point, compressed)
-  3: <bytes[32]>         // verifier_device (HMAC over transcript)
+  1: 2,                  // msgType (PASEResponse)
+  2: <bytes[65]>         // pB — device's public value (SEC1 uncompressed: 0x04 || X || Y)
 }
 ```
 
-**PASE_VERIFY (Controller → Device):**
+**PASEConfirm (MsgType 3, Controller → Device):**
 ```cbor
 {
-  1: "pase_verify",      // type
-  2: <bytes[32]>         // verifier_controller (HMAC over transcript)
+  1: 3,                  // msgType (PASEConfirm)
+  2: <bytes[32]>         // confirmA = HMAC-SHA256(KcA, pB) — see §2.4
 }
 ```
 
-**PASE_CONFIRM (Device → Controller):**
+**PASEComplete (MsgType 4, Device → Controller):**
 ```cbor
 {
-  1: "pase_confirm",     // type
-  2: <uint8>             // status (0 = success)
+  1: 4,                  // msgType (PASEComplete)
+  2: <bytes[32]>,        // confirmB = HMAC-SHA256(KcB, pA) — see §2.4
+  3: <uint8>             // errorCode (0 = success; see §6.2)
 }
 ```
+
+**Validation requirements:**
+
+- The `ClientIdentity` field in `PASERequest` MUST equal `b"mash-controller"` in MASH v1. Devices MUST reject other values with `ErrCodeAuthFailed`. Reserved for future delegated-commissioning use.
+- Wire sizes are exact: pA and pB MUST be exactly 65 bytes (uncompressed). Confirmation MACs MUST be exactly 32 bytes (HMAC-SHA256 output).
+- Point validation per §2.5 MUST occur before any cryptographic operation involving the received point.
+- On `PASEConfirm` MAC mismatch: device MUST send `PASEComplete` with `errorCode = ErrCodeAuthFailed` (1) and close the connection per DEC-047.
+- On `PASEComplete` errorCode != 0: controller MUST treat the handshake as failed, surface the error to the user, and close the connection.
 
 ### 4.3 Certificate Messages
 

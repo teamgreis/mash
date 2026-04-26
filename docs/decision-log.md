@@ -64,6 +64,7 @@ When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick 
 - [DEC-061: Message-Gated Commissioning Locking](#dec-061-message-gated-commissioning-locking)
 - [DEC-067: Single-Port ALPN-Based Commissioning Routing and Stable Certificate](#dec-067-single-port-alpn-based-commissioning-routing-and-stable-certificate)
 - [DEC-068: Invalid Passcode Validation](#dec-068-invalid-passcode-validation)
+- [DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2)](#dec-084-spake2-algorithm-specification-rfc-9383--pbkdf2)
 - [DEC-076: Retain In-Session Certificate Renewal](#dec-076-retain-in-session-certificate-renewal)
 - [DEC-077: Shorten Renewal Window to 7 Days](#dec-077-shorten-renewal-window-to-7-days)
 - [DEC-078: Commissionable mDNS TXT Schema (canonical)](#dec-078-commissionable-mdns-txt-schema-canonical)
@@ -4569,6 +4570,122 @@ D8 4D A1 01 03               # Close       — 5 bytes (+2)
 
 ---
 
+### DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2)
+
+**Date:** 2026-04-26
+**Status:** Accepted
+
+**Context:**
+DEC-014 ratified SPAKE2+ as the pairing protocol but specified only the high-level shape (8-digit setup code, P-256 curve). The cryptographic primitives — M / N derivation, HKDF chains, transcript composition, confirmation MAC layout, point validation — were left to `docs/testing/behavior/commissioning-pase.md §2`. That section was written prescriptively but never reviewed against a working implementation; the Go reference (`mash-go/pkg/commissioning/spake2plus.go`) was written 4 days later and silently chose different primitives in eight places without amending the spec or filing a DEC.
+
+The mash-py port (Phase 7, 2026-04-26) was the first independent reading. It surfaced that:
+
+- The spec is **unimplementable as written**. `K_shared` is invoked but never defined. `M = G * H(label)` is annotated "with hash-to-curve per RFC 9380" — but RFC 9380 produces points and `G * H(label)` requires `H` to produce a scalar; the formula is type-mismatched. `PASE_X` declares `bytes[32]` for compressed P-256 points, but compressed P-256 is 33 bytes (uncompressed is 65); neither is 32.
+- The Go implementation has **exploitable security weaknesses** that the spec doesn't catch. Most importantly, neither artifact uses a Memory-Hard KDF before HKDF — verifier theft makes the 27-bit setup code brute-forceable in seconds on a GPU. Go's source contains a comment admitting this gap (`spake2plus.go:89`). RFC 9383 §4 *requires* an MHF for low-entropy passwords. The Go transcript also lacks RFC 9383 §3.3 length prefixes (canonicalization attacks); point validation rejects off-curve points but not the identity element (degenerate-point attacks).
+- The eight specific findings are catalogued in `mash-py-spec-issues.md` Issue #5.
+
+`mash-py-tdd-plan.md` Phase 7 was restructured into 7A → 7B → 7C → 7D in response. This decision is the output of 7A.
+
+**Decision:**
+Replace the SPAKE2+ specification in `commissioning-pase.md §2` and `§4.2` with the algorithm defined below. The new spec:
+
+- **Standardizes** on RFC 9383 + Matter conventions where they exist (fixed M/N, length-prefixed transcript, KcA/KcB confirmation MAC keys).
+- **Adds** a Memory-Hard KDF (PBKDF2-HMAC-SHA256, 100,000 iterations) before any HKDF chain. This is the security-critical addition.
+- **Preserves** the spec's MASH-specific HKDF info-string scheme for K_main / K_confirm / K_encrypt (the one place the original spec was clearer than RFC 9383's terse split).
+- **Defines** every previously-undefined primitive (`K_shared`, transcript composition, identity strings, point validation rules).
+
+**Algorithmic specification.** The full text lives in `commissioning-pase.md §2.2 – §2.5` (rewritten in this DEC). Summary:
+
+| Primitive | Specification |
+|---|---|
+| Curve | P-256 (`secp256r1`), per DEC-014 |
+| Hash | SHA-256 |
+| KDF | HKDF-SHA256 (RFC 5869) |
+| MAC | HMAC-SHA256 (RFC 4231) |
+| Memory-Hard KDF | PBKDF2-HMAC-SHA256 (RFC 8018), **100,000 iterations** |
+| **M, N points** | RFC 9383 §4 fixed P-256 constants verbatim. M.x = `886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f`, M.y = `5ff355163e43ce224e0b0e65ff02ac8e5c7be09419c785e0ca547d55a12e2d20`; N.x = `d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49`, N.y = `07d60aa6bfade45008a636337f5168c64d9bd36034808cd564490b1e656edbe7`. |
+| **Salt** | Derived: `salt = SHA-256("MASH PBKDF2 salt v1" \|\| discriminator (2 bytes BE) \|\| setup_code (UTF-8))[:16]`. Both sides compute independently from QR-code data; no exchange required. |
+| **w0, w1** | `mhf_out = PBKDF2-HMAC-SHA256(password=setup_code_utf8, salt, iterations=100000, dkLen=80)`. Then `w0 = mhf_out[0:40] mod n`, `w1 = mhf_out[40:80] mod n`. (40-byte slices reduced mod the P-256 curve order `n` — the Matter pattern, gives near-uniform distribution per RFC 9383 §3.2.) |
+| **L** (verifier point) | `L = w1 · G`. The device stores `(w0, L)` and discards `w1`. |
+| **Identity strings** | Protocol constants: ControllerIdentity = `b"mash-controller"`, DeviceIdentity = `b"mash-device"`. No per-session nonces (session entropy comes from the random ephemeral scalars `x` and `y`). |
+| **Public values** | `pA = x · G + w0 · M` (controller), `pB = y · G + w0 · N` (device). Encoded SEC1 uncompressed (`0x04 \|\| X \|\| Y`, 65 bytes). |
+| **Shared values** | Controller computes `Z = x · (pB - w0 · N)` and `V = w1 · (pB - w0 · N)`. Device computes `Z = y · (pA - w0 · M)` and `V = y · L`. |
+| **Transcript TT** | Per RFC 9383 §3.3 length-prefixed concatenation. Each field prefixed by 8-byte little-endian length: `len(A)‖A‖len(B)‖B‖len(M)‖M‖len(N)‖N‖len(pA)‖pA‖len(pB)‖pB‖len(Z)‖Z‖len(V)‖V‖len(w0)‖w0`. Points are 65-byte uncompressed; `w0` is the 32-byte big-endian scalar. |
+| **K_shared** | `K_shared = SHA-256(TT)`. (32 bytes.) |
+| **Session-key chain** | Three derivations from K_shared per the original spec, with MASH-specific HKDF info strings: <br>`K_main    = HKDF-SHA256(salt="", IKM=K_shared, info="MASH PASE Session Key",  L=32)` <br>`K_confirm = HKDF-SHA256(salt="", IKM=K_shared, info="MASH PASE Confirmation", L=32)` <br>`K_encrypt = HKDF-SHA256(salt="", IKM=K_main,   info="MASH PASE Encryption",   L=32)` |
+| **Confirmation MAC keys** | RFC 9383 §3.4: `KcA‖KcB = HKDF-SHA256(salt="", IKM=K_confirm, info="ConfirmationKeys", L=32)`. KcA = first 16 bytes (controller key); KcB = second 16 bytes (device key). |
+| **Confirmation MACs** | `confirmA = HMAC-SHA256(KcA, pB)` (controller→device); `confirmB = HMAC-SHA256(KcB, pA)` (device→controller). Each side MACs the *peer's* public point with its *own* key. |
+| **Point validation** | All received points (pA, pB) MUST be: (1) parseable as SEC1 uncompressed, (2) on the P-256 curve, (3) **not the point at infinity (identity element)**. Failure of any check is a fatal protocol error — abort with `ErrCodeAuthFailed`. |
+
+**Wire format updates** (`commissioning-pase.md §4.2`):
+
+- `PASERequest`: `pA` is 65 bytes (was incorrectly typed `bytes[32]`).
+- `PASEResponse`: `pB` is 65 bytes (was `bytes[32]`).
+- `PASEConfirm`: `confirmA` is 32 bytes (HMAC-SHA256 output).
+- `PASEComplete`: `confirmB` is 32 bytes; status field unchanged.
+
+PASE message types and CBOR layout otherwise unchanged from current Go implementation (`mash-go/pkg/commissioning/messages.go`). The `PBKDFParam` exchange that Matter uses is **not** added in v1 — the salt-derivation rule above eliminates the need for it.
+
+**Verifier storage on device:**
+The device persists `(discriminator, salt, w0, L)` after factory provisioning and SHOULD discard the setup code. Storage size: 16 + 16 + 32 + 65 = 129 bytes per device. The setup code remains on the printed label (the only place it is needed for re-pairing).
+
+**Threat model and limits:**
+- **Online attack (controller→device with wrong setup code):** Bounded by DEC-047 backoff and DEC-064 connection cap. ~10 attempts per minute steady-state; 10⁸ codes ≈ 19 years. Online brute-force is infeasible.
+- **Offline attack on stolen verifier:** Attacker who extracts `(salt, w0, L)` from device NVS can brute-force the 8-digit setup code by recomputing `mhf_out → w0', L'` for each candidate. PBKDF2 100K-HMAC-SHA256 is ~10⁹ ops/sec on a high-end GPU; 10⁸ codes / 10⁹ ops/sec / 100K iterations ≈ 10⁴ seconds = ~3 hours per device. **Verifier theft is treated as full device compromise** — the device must be re-paired with a new setup code. Mitigations: NVS read protection (ESP32 flash encryption), tamper detection. Argon2id may be specified as an optional MHF in v2 for hardware that can spare 64KB+ memory; PBKDF2 is the v1 floor.
+- **Active man-in-the-middle:** SPAKE2+ guarantees that an MITM cannot derive K_shared without knowing both setup codes; identity-element rejection prevents degenerate-point attacks; length-prefixed transcript prevents canonicalization attacks.
+
+**Sub-decisions and rationale:**
+
+- **PBKDF2 vs Argon2id.** PBKDF2-HMAC-SHA256 chosen for v1. Argon2id has stronger GPU resistance via memory-hardness, but its 64KB minimum memory is too tight on a 256KB MCU shared with Wi-Fi/TLS stacks. PBKDF2 100K is FIPS-approved, runs in ~2 seconds on ESP32, and is what Matter uses. Argon2id is a candidate for v2 via PBKDFParameter negotiation.
+- **100,000 iterations as protocol constant.** Single fixed value avoids the negotiation complexity of Matter's PBKDFParameter exchange. ESP32 budget: PBKDF2 ~2s + ECC ~1s ≈ 3s, within the §5.3 constrained-device budget of 5s typical / 10s max. v2 may add per-device negotiation.
+- **Salt derivation, not exchange.** `SHA-256("MASH PBKDF2 salt v1" || discriminator || setup_code)[:16]` gives a per-device salt without an extra round trip. The discriminator (12 bits) + setup code combine to give a unique salt per (discriminator, setup_code) pair. Salt secrecy is not required — only uniqueness.
+- **Protocol-constant identity strings.** `b"mash-controller"` and `b"mash-device"` instead of TLS-derived material (couples crypto to TLS layer) or random nonces (would require PBKDFParameter exchange). Session entropy comes from the random ephemeral `x` and `y` scalars; identity strings only need to differ between roles.
+- **Three-key chain (K_main / K_confirm / K_encrypt).** Preserved from original spec — clearer separation of concerns than RFC 9383's single K-then-split. K_encrypt derives from K_main (not K_shared) so that K_main can be exposed to other layers without revealing K_encrypt.
+- **RFC 9383 KcA/KcB confirmation MAC keys.** Two distinct MAC keys (KcA for controller, KcB for device) prevent reflection attacks where the controller's confirmation MAC could be replayed as the device's. Standard mutual authentication.
+- **Point validation.** Identity-element rejection is mandatory because forgetting it makes the protocol vulnerable to small-subgroup-style attacks (an attacker who can submit the identity point forces predictable Z and V).
+
+**Cost:**
+
+- **Wire change.** `PASERequest`/`PASEResponse` `bytes[32]` → 65 bytes. +33 bytes per message × 2 messages = +66 bytes per PASE handshake. Negligible.
+- **Spec rewrite.** `commissioning-pase.md §2` (~50 lines → ~150 lines), `§4.2` (~30 lines, no length change).
+- **Reference implementation rewrite.** `mash-go/pkg/commissioning/spake2plus.go` substantively rewritten in 7C; `mash-py/mash_py/commissioning/spake2plus.py` written in 7D. Conformance vectors (7B) ensure byte-identical results.
+- **Verifier storage migration.** Existing `(w0, L)` verifiers regenerate on first commissioning post-7C deploy. No production deployments yet, so no migration required.
+- **No PBKDFParameter exchange.** Saves one round trip per commissioning vs Matter; saves spec complexity.
+
+**Inter-version compatibility:**
+This is a wire-format breaking change. Pre-DEC-084 PASE peers cannot interoperate with post-DEC-084 peers — the verifier `(w0, L)` derivation is different, the wire size of pA/pB is different, the transcript layout is different. Because MASH is pre-1.0 with no external deployments, the change lands in lockstep across mash-go and mash-py (Phases 7C and 7D); future implementers see only the post-DEC-084 form.
+
+**Declined alternatives:**
+
+- **A. "Patch incrementally; no DEC."** Rejected. Leaves the no-MHF security gap as an unaddressed implicit assumption. Each subsequent implementation would have to make the same uncoordinated discovery and choices.
+- **B. "Match Go silently; defer spec rewrite."** Rejected. Defeats the spec-portability validation that mash-py exists to perform. Ships SPAKE2+ with known security holes (no MHF, missing identity-element check, no transcript canonicalization) into a 20-year deployment lifecycle.
+- **C. "Adopt Matter wholesale (PBKDFParameter exchange, full Matter PASE wire format)."** Rejected. PBKDFParameter exchange adds protocol complexity for a feature (per-device iteration negotiation) that v1 doesn't need; full Matter alignment would require renumbering MsgTypes and adding several Matter-specific fields, breaking more than necessary.
+- **D. "Pull a vetted SPAKE2+ library (Cloudflare circl, CircuitMatter)."** Rejected for v1. The implementation independence is part of the project's value (cross-language portability requires that each language has its own implementation, and the algorithm being small enough to hand-roll is a portability check). Revisitable if hand-rolled implementations continue to surface security issues.
+- **E. "Argon2id with low memory (m=8KB) instead of PBKDF2."** Rejected for v1. At low memory parameterizations, Argon2id's GPU advantage shrinks substantially while still requiring an extra dependency on every implementer. PBKDF2 is the cleaner v1 floor; Argon2id ladder is preserved as a v2 option.
+- **F. "Random per-device salt stored in NVS, distributed via QR code."** Rejected. Inflates the QR code from ~30 chars to ~60 chars (16 hex bytes added). The derived salt achieves the same per-device uniqueness without QR code bloat.
+
+**Implementations:**
+
+- **mash-go:** updated in Phase 7C (`mash-py-tdd-plan.md`).
+- **mash-py:** new implementation in Phase 7D.
+- **Conformance vectors:** generated by a third independent Python script `tools/spake2plus_oracle/` in Phase 7B; both mash-go and mash-py validate against these vectors.
+
+**Security review status:**
+This DEC has been reviewed by `mash-py` Phase 7's analysis (which surfaced the original gaps) plus a structured threat model (above). External cryptographic review by a security professional is recommended before MASH 1.0 finalization, particularly for: the 100K iteration count under projected 2030-era GPU performance, the Argon2id-as-v2-option path, and the verifier-theft mitigations.
+
+**Affected files (post-7A):**
+- `docs/decision-log.md` — this entry.
+- `docs/testing/behavior/commissioning-pase.md` — `§2.2` (M/N), `§2.3` (w0/w1 + MHF), `§2.4` (session keys), new `§2.5` (implementation requirements), `§4.2` (PASE wire formats — fix `bytes[32]`).
+- `docs/security.md` — `§4.4` cross-references this DEC.
+- `mash-py-spec-issues.md` — Issue #5 marked Resolved.
+- (Phase 7B) `tools/spake2plus_oracle/`, `mash-go/testdata/spake2plus_vectors.json`.
+- (Phase 7C) `mash-go/pkg/commissioning/spake2plus.go` and call sites.
+- (Phase 7D) `mash-py/mash_py/commissioning/`.
+
+**Related:** DEC-014 (SPAKE2+ adopted — high-level decision; this DEC fills in the algorithmic detail), DEC-018 (setup code reusability — strengthens the case for identity binding and per-device salt), DEC-040 (device identity via cert fingerprint — cert-derived identity considered and rejected here for layering reasons), DEC-047 (commissioning hardening — bounds online attack surface), DEC-064 (connection cap — bounds online attack surface), DEC-068 (invalid passcode validation — complementary entropy floor), `mash-py-spec-issues.md` Issue #5 (resolved by this DEC).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -4710,3 +4827,4 @@ Key learnings:
 | 2026-04-24 | Added DEC-081: Remove `_mashd._udp` commissioner-discovery service. "Device picks controller" flow is architecturally incoherent in a pure server-device model; no production code path used it. Delete service type from specs, Go API, test harness, and TC-MASHD conformance cases. |
 | 2026-04-25 | Added DEC-082: Two-port deployment as conformant alternative to single-port ALPN routing. Surfaced while porting MASH to Python (mash-py): DEC-067's single-port pattern assumed a `GetConfigForClient`-equivalent primitive that isn't available in Python's stdlib `ssl` (or in C/Zig/some Rust TLS stacks). DEC-082 makes both deployment shapes conformant — same wire behavior, observable only as different mDNS SRV ports. Single-port (DEC-067) remains canonical for Go; two-port is canonical for languages without dynamic TLS config callbacks. |
 | 2026-04-25 | Added DEC-083: CBOR tag 77 wrapper for control messages. Surfaced during mash-py Phase 1 — payload-less Responses with msgID ∈ {1,2,3} encode byte-identically to ControlMessages, and audit found no mash-go dispatcher uses session state as a tiebreaker (msgID=3 + no payload silently closes the connection). Wraps all Ping/Pong/Close in `D8 4D <map>` (tag 77 = ASCII 'M'); +2 bytes per control message; eliminates the ambiguity at the wire level. Both mash-go and mash-py updated together; resolves spec-issues Issue #2. |
+| 2026-04-26 | Added DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2). Surfaced during mash-py Phase 7 — the `commissioning-pase.md §2` SPAKE2+ section was unimplementable as written (`K_shared` undefined, `M = G·H(label)` type-mismatched, PASE_X `bytes[32]` impossible) and the Go reference had exploitable security gaps (no MHF before HKDF — verifier theft brute-forces the 8-digit code in seconds; transcript not length-prefixed; identity element not rejected). DEC-084 adopts RFC 9383 + Matter conventions wholesale: fixed RFC 9383 P-256 M/N constants, PBKDF2-HMAC-SHA256 with 100,000 iterations, derived salt (`SHA-256("MASH PBKDF2 salt v1" \|\| discriminator \|\| setup_code)[:16]`), length-prefixed RFC 9383 §3.3 transcript, KcA/KcB confirmation MAC keys per RFC 9383 §3.4, mandatory identity-element rejection. Preserves the original spec's K_main / K_confirm / K_encrypt three-key chain (clearer than RFC 9383's split). Wire-breaking: `pA`/`pB` are now 65 bytes uncompressed (was incorrectly typed `bytes[32]`). Lands in lockstep across mash-go (Phase 7C) and mash-py (Phase 7D); resolves spec-issues Issue #5. |

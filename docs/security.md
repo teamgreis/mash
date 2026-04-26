@@ -210,16 +210,21 @@ The choice between single-port (DEC-067) and two-port (DEC-082) deployments is i
 
 SPAKE2+ provides password-authenticated key exchange:
 
-1. Both sides derive keys from setup code
-2. Exchange commitments
-3. Verify without revealing setup code
-4. Establish shared secret for session encryption
+1. Both sides derive keys from setup code (after PBKDF2 memory-hardening — see §2.3 of the canonical spec)
+2. Exchange commitments (`pA`, `pB` — fresh per session)
+3. Mutually authenticate via HMAC confirmation MACs (KcA / KcB) — neither side reveals the setup code, even to a passive eavesdropper
+4. Establish shared secret (`K_main`) and session encryption key (`K_encrypt`)
+
+**Canonical algorithm specification.** The cryptographic primitives, M/N points, transcript layout, key derivation chain, and confirmation-MAC composition are defined in **`docs/testing/behavior/commissioning-pase.md §2`** and codified by **DEC-084**. That section is normative; this section is an overview.
 
 **Why SPAKE2+:**
-- Resistant to offline dictionary attacks
+- Resistant to **online** dictionary attacks (DEC-047 connection cap + cooldown bound retry rate)
+- Resistant to **offline** dictionary attacks against passive observers (no setup-code-derived bytes ever go on the wire)
 - Setup code never transmitted
-- Forward secrecy
-- Same as Matter (proven, audited)
+- Forward secrecy (fresh ephemeral scalars per session)
+- Standards-aligned (RFC 9383); shares M/N constants with Matter and the broader SPAKE2+ ecosystem
+
+**Threat: verifier theft.** An attacker who exfiltrates a device's stored verifier `(salt, w0, L)` from NVS (e.g., via JTAG, glitch attack, or remote code execution) can offline-brute-force the 8-digit setup code in approximately 3 hours on a high-end GPU. Verifier theft is treated as full device compromise — the device must be re-paired with a new setup code. Mitigations: NVS read protection (e.g., ESP32 flash encryption), tamper detection, prompt re-pairing on suspected compromise. See `commissioning-pase.md §2.5` for normative requirements.
 
 ### 4.5 Commissioning Connection Lifecycle
 

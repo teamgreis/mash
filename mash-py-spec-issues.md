@@ -195,6 +195,80 @@ None directly — both shapes are wire-compatible. But every future two-port imp
 
 **Related:** DEC-082 (two-port deployment), `mash-py-tdd-plan.md` Phase 4 ("Harness coverage caveat") and Phase 22 ("Prerequisite (mash-go harness change — DEC-082 compliance)").
 
+**Update 2026-04-26:** Brought forward into Phase 7B as part of the SPAKE2+ block restructure. The `-srv-resolve` flag is needed before 7C/7D can run live PASE against `mash-py`'s two-port device, so the work moves from Phase 22 to Phase 7B.
+
+---
+
+### Issue #5 — SPAKE2+ specification is incomplete, contradictory, and missing memory-hard KDF
+
+**Status:** ✅ Resolved (spec text) — implementation tracking via `mash-py-tdd-plan.md` Phases 7B / 7C / 7D.
+**Resolution:** **DEC-084** (2026-04-26) — full SPAKE2+ algorithm specification adopting RFC 9383 + Matter conventions: fixed RFC 9383 P-256 M/N constants, PBKDF2-HMAC-SHA256 100K iterations as MHF, derived per-device salt, length-prefixed RFC 9383 §3.3 transcript, KcA/KcB confirmation MAC keys, mandatory identity-element rejection in point validation. Spec sections `commissioning-pase.md §2` and `§4.2` rewritten in Phase 7A. The remaining sub-phases (7B conformance vectors, 7C Go implementation update, 7D Python implementation) implement DEC-084 and validate cross-language byte-equivalence.
+**Surfaced during:** mash-py Phase 7 design / first-pass implementation (2026-04-26).
+
+**Implicit assumption.**
+The SPAKE2+ section of the spec (`docs/testing/behavior/commissioning-pase.md §2.2 – §2.4`) was written prescriptively but assumes a level of cryptographic completeness it does not actually deliver. The Go implementation (`mash-go/pkg/commissioning/spake2plus.go`) was written 4 days later by the same author and silently chose different primitives in eight places without filing a DEC. Both artifacts share security weaknesses that are not language-specific. The Phase 7 audit concludes that neither the spec nor the Go implementation is currently fit to deploy: the spec is *unimplementable as written* (`K_shared` is invoked but never defined; `M = G * H(label)` "with hash-to-curve per RFC 9380" is type-mismatched; PASE_X declares 32-byte points but compressed P-256 is 33 bytes), and the Go implementation has *exploitable security holes* (no MHF before HKDF — verifier theft brute-forces the 8-digit code in seconds; transcript not length-prefixed; identity element not rejected during point validation).
+
+**Languages affected.**
+All — this is a spec-text issue plus a security-design issue. Every future implementer is blocked equally.
+
+**The eight findings.**
+
+| # | Finding | In spec? | In Go? | Severity |
+|---|---|---|---|---|
+| 1 | No Memory-Hard KDF before HKDF — verifier theft makes 27-bit setup code brute-forceable in seconds on a GPU. RFC 9383 §4 *requires* an MHF. Go's source contains a comment admitting this gap (`spake2plus.go:89`). | Yes (omits) | Yes (omits) | **Critical** — exploitable in MASH's deployment model |
+| 2 | `K_shared` invoked in §2.4 but never defined anywhere in the spec. | Yes | N/A | **Critical** — unimplementable |
+| 3 | PASE_X / PASE_Y wire size declared `bytes[32]` in §4.2 but compressed P-256 is 33 bytes, uncompressed is 65 bytes; neither is 32. | Yes | N/A (Go uses uncompressed 65 anyway) | **Critical** — wire-protocol blocker |
+| 4 | M / N derivation formula contradictory: `M = G * H("MASH SPAKE2+ M v1")` requires `H` to produce a scalar, but spec immediately says "where H is SHA-256 with hash-to-curve per RFC 9380" — RFC 9380 produces points, not scalars. Also wrong RFC citation (9382 ≠ 9383). | Yes | No (uses RFC 9383 fixed P-256 constants verbatim — Go's hex matches RFC 9383 §4 byte-for-byte; the source comment claiming derivation from `"SPAKE2+-P256-SHA256-HKDF-SHA256-HMAC-SHA256 M"` is fictional) | **High** — interop blocker |
+| 5 | Transcript not length-prefixed (Go), not specified at all (spec). RFC 9383 §3.3 requires 8-byte LE length prefixes per field to prevent canonicalization attacks (one identity field absorbing bytes from the next). | Yes (silent) | Yes (bare concat) | **Medium** — theoretical attack reachable under crafted identity strings |
+| 6 | No identity-element check during point validation. RFC 9383 §3.2 requires *both* on-curve AND not-the-point-at-infinity; Go's `IsOnCurve` does only the first. Degenerate points force predictable Z and V. | N/A | Yes | **Medium** — exploitable with active attacker control of pA / pB |
+| 7 | No identity binding in `w0` / `w1` derivation (spec); non-standard binding via HKDF salt (Go). RFC 9383 binds identities in the transcript, not in the verifier KDF. Identity binding prevents Unknown-Key-Share attacks under setup-code reuse (DEC-018 explicitly allows reuse). | Yes (omits) | Yes (non-standard placement) | **Low** — defense in depth; not actively reachable in current deployment model |
+| 8 | HKDF salt / IKM inverted in Go: `salt=password, IKM=clientID || serverID`. Both are non-standard placements that don't match RFC 9383. | N/A | Yes | **Low** — non-standard but not insecure |
+
+**Spec options considered.**
+
+A. **Patch incrementally.** Open `commissioning-pase.md`, fix the eight findings one by one, file no DEC. Cost: ~2 hours. Outcome: still no security review; finding #1 (MHF) is left undocumented as a deferred "we should add this someday" without forcing function.
+
+B. **Adopt RFC 9383 + Matter conventions wholesale via DEC-NNN.** Comprehensive rewrite of `§2` and `§4.2`; explicit MHF specification (PBKDF2-HMAC-SHA256, 100k iterations, per-device salt); fixed RFC 9383 M/N; length-prefixed transcript; KcA/KcB confirmation MAC keys per RFC 9383 §3.4; explicit `K_shared = SHA-256(TT)` definition; preserve spec's K_main / K_confirm / K_encrypt naming (the one place the spec is *better* than Go). Cost: ~1 day of spec work + 7B/7C work to follow.
+
+C. **Match Go silently in mash-py and move on.** Cost: ~30 minutes. Outcome: defeats the spec-portability validation that is the entire reason mash-py exists; ships SPAKE2+ with known security holes (#1, #5, #6) into a 20-year deployment lifecycle.
+
+D. **Pull a vetted SPAKE2+ library.** Replace the hand-rolled implementation in mash-go with a vetted one (Cloudflare's `circl` has SPAKE2+; CircuitMatter's `pase.py` is RFC-aligned). Cost: medium (introduces a dependency, requires audit of the library's MASH integration). Outcome: best security; tradeoff is loss of the educational / portability value of a hand-rolled reference. Not chosen because the project explicitly values implementation independence.
+
+**Decision.** Option **B** (adopt RFC 9383 + Matter via DEC-NNN). Codified as Phase 7 block restructure: 7A spec rewrite + DEC, 7B mash-test conformance vectors derived from a third-party oracle, 7C mash-go updated to pass 7B, 7D mash-py implements DEC-NNN and passes 7B. See `mash-py-tdd-plan.md` for the full sub-phase plan including the open sub-decisions the DEC must settle (MHF choice, salt distribution, verifier storage layout, etc.).
+
+**Why B over A, C, D:**
+- A leaves finding #1 (the security-critical MHF gap) without a forcing function. There is no production deployment yet, so the cost of fixing this comprehensively is at its lifetime minimum *now*.
+- C silently buries the most important output of the mash-py project (spec-portability validation) and ships known-broken crypto.
+- D is technically sound but removes the implementation-independence the project values; revisitable later if the hand-rolled implementation continues to surface issues.
+
+**Same-author drift, surfaced by mash-py.** Both spec and Go were written by the same author 4 days apart; neither was reviewed by anyone with prior production PAKE experience; no DEC documents the choices in either. mash-py was the first independent reading; surfacing this divergence is the project doing exactly the job it was designed for. Document this as a process win, not a process failure.
+
+**Affected files.**
+
+7A:
+- `docs/testing/behavior/commissioning-pase.md` — full rewrite of §2.2-§2.4 and §4.2
+- `docs/decision-log.md` — new DEC-NNN
+- `docs/security.md` §4.4 — cross-reference DEC-NNN
+- `mash-py-spec-issues.md` — flip this issue's status to ✅ Resolved
+
+7B:
+- `tools/spake2plus_oracle/` (new) — third-party reference implementation for vector generation
+- `mash-go/testdata/spake2plus_vectors.json` (new)
+- `mash-go/cmd/mash-test/spake2plus_conformance.go` (new) — vector runner
+- `mash-go/cmd/mash-test/cmd_run.go` — `-srv-resolve` flag (also closes Issue #3 above)
+
+7C:
+- `mash-go/pkg/commissioning/spake2plus.go` — substantive rewrite
+- `mash-go/pkg/commissioning/spake2plus_test.go`, `messages.go`, related call sites
+- `mash-go/pkg/cert/store.go` — verifier-storage layout extension
+
+7D:
+- `mash-py/mash_py/commissioning/spake2plus.py` — replaces the uncommitted Phase-7-as-written draft
+- `mash-py/mash_py/commissioning/mhf.py` (new)
+- `mash-py/tests/{unit,vectors,interop}/commissioning/`
+
+**Related decisions.** DEC-014 (SPAKE2+ adopted), DEC-018 (setup code reuse — strengthens the case for identity binding), DEC-NNN (this issue's resolution).
+
 ---
 
 ## Backlog (anticipated; not yet hit)
