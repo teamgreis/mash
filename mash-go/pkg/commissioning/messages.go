@@ -38,20 +38,22 @@ const (
 )
 
 // Commissioning error codes.
+//
+// DEC-047 / spec §2.5 mandate a single generic auth-failure code
+// (ErrCodeAuthFailed = 1) for every SPAKE2+ failure mode, to prevent
+// structural / timing oracles. The pre-DEC-047 codes ErrCodeInvalidPublicKey
+// (= 1, never disambiguable from AuthFailed) and ErrCodeConfirmFailed (= 2,
+// MAC-mismatch leak) were removed in the Issue #6 fix. The legacy numeric
+// value 2 is still recognised on the wire by the runner classifier for
+// backward-compat with pre-fix devices, but no in-tree code emits it.
 const (
 	ErrCodeSuccess           uint8 = 0
-	ErrCodeInvalidPublicKey  uint8 = 1   // Deprecated: use ErrCodeAuthFailed
-	ErrCodeConfirmFailed     uint8 = 2   // Deprecated: use ErrCodeAuthFailed
+	ErrCodeAuthFailed        uint8 = 1   // DEC-047: every SPAKE2+ failure
 	ErrCodeCSRFailed         uint8 = 3
 	ErrCodeCertInstallFailed uint8 = 4
 	ErrCodeBusy              uint8 = 5   // Device busy, retry later (DEC-063)
 	ErrCodeZoneTypeExists    uint8 = 10  // Device already has a zone of this type
 	ErrCodeInternalError     uint8 = 255
-
-	// DEC-047: Generic error code to prevent information leakage.
-	// Replaces ErrCodeInvalidPublicKey and ErrCodeConfirmFailed.
-	// All SPAKE2+ authentication failures should return this code.
-	ErrCodeAuthFailed uint8 = 1
 )
 
 // ErrorCodeString returns a human-readable string for a commissioning error code.
@@ -62,9 +64,6 @@ func ErrorCodeString(code uint8) string {
 	case ErrCodeAuthFailed:
 		// DEC-047: Generic error message for authentication failures.
 		// Intentionally vague to prevent information leakage.
-		return "authentication failed"
-	case ErrCodeConfirmFailed:
-		// Legacy code - same message as AuthFailed
 		return "authentication failed"
 	case ErrCodeCSRFailed:
 		return "CSR generation failed"

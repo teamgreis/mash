@@ -28,10 +28,13 @@ func TestErrorCodeString_AllCodes(t *testing.T) {
 		expected string
 	}{
 		{commissioning.ErrCodeSuccess, "success"},
-		// DEC-047: Authentication errors now return generic "authentication failed"
+		// DEC-047: All SPAKE2+ failures collapse to a single generic
+		// "authentication failed" code (ErrCodeAuthFailed = 1). The
+		// pre-DEC-047 ErrCodeInvalidPublicKey / ErrCodeConfirmFailed
+		// constants were removed in the Issue #6 fix; the legacy
+		// numeric value 2 is still recognised on the wire by the
+		// runner classifier for backward-compat with older devices.
 		{commissioning.ErrCodeAuthFailed, "authentication failed"},
-		{commissioning.ErrCodeInvalidPublicKey, "authentication failed"}, // Same as AuthFailed
-		{commissioning.ErrCodeConfirmFailed, "authentication failed"},    // Generic message
 		{commissioning.ErrCodeCSRFailed, "CSR generation failed"},
 		{commissioning.ErrCodeCertInstallFailed, "certificate installation failed"},
 		{commissioning.ErrCodeBusy, "device busy"},

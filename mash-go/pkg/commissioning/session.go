@@ -169,20 +169,29 @@ func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn
 	const minHandshakeDuration = 200 * time.Millisecond
 	handshakeStart := time.Now()
 
-	// DEC-084 §4.2: ClientIdentity in PASERequest MUST equal b"mash-controller"
-	// in v1; reserved for future delegated-commissioning use (DEC-019).
-	// We treat a wrong identity as ErrCodeAuthFailed and return a generic error
-	// (DEC-047) — never leak which check failed.
+	// DEC-084 §4.2 / §2.5: ClientIdentity in PASERequest MUST equal
+	// b"mash-controller" in v1; reserved for future delegated-commissioning
+	// use (DEC-019). We treat a wrong identity as ErrCodeAuthFailed and
+	// return a generic error (DEC-047) — never leak which check failed.
+	//
+	// Spec §2.5 mandates PASEComplete (NOT CommissioningError) for every
+	// in-PASE failure mode. CommissioningError is reserved for cross-cutting
+	// rejections (DEC-063 device-busy, etc.) — see security.md §13. Mixing
+	// the two envelopes weakens the structural-oracle-resistance property
+	// DEC-047 is supposed to guarantee, since a peer could otherwise
+	// distinguish "wrong identity" (CommissioningError) from "wrong setup
+	// code" (PASEComplete) by message type alone. Confirmation is
+	// zero-padded on the failure path: the SPAKE2 server has not (and on
+	// these paths cannot) compute confirmB.
 	if !bytes.Equal(req.ClientIdentity, ControllerIdentity) {
 		if elapsed := time.Since(handshakeStart); elapsed < minHandshakeDuration {
 			time.Sleep(minHandshakeDuration - elapsed)
 		}
-		errMsg := &CommissioningError{
-			MsgType:   MsgCommissioningError,
-			ErrorCode: ErrCodeAuthFailed,
-			Message:   "authentication failed",
-		}
-		writeMessage(conn, errMsg)
+		writeMessage(conn, &PASEComplete{
+			MsgType:      MsgPASEComplete,
+			Confirmation: make([]byte, 32),
+			ErrorCode:    ErrCodeAuthFailed,
+		})
 		return nil, fmt.Errorf("client identity rejected")
 	}
 
@@ -195,12 +204,14 @@ func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn
 		if elapsed := time.Since(handshakeStart); elapsed < minHandshakeDuration {
 			time.Sleep(minHandshakeDuration - elapsed)
 		}
-		errMsg := &CommissioningError{
-			MsgType:   MsgCommissioningError,
-			ErrorCode: ErrCodeInvalidPublicKey,
-			Message:   "invalid public key",
-		}
-		writeMessage(conn, errMsg)
+		// Spec §2.5: PASEComplete{ErrCodeAuthFailed} (not CommissioningError)
+		// on point-validation / SPAKE2 invariant failure. See the wrong-
+		// identity comment above for the envelope-choice rationale.
+		writeMessage(conn, &PASEComplete{
+			MsgType:      MsgPASEComplete,
+			Confirmation: make([]byte, 32),
+			ErrorCode:    ErrCodeAuthFailed,
+		})
 		return nil, fmt.Errorf("failed to process client value: %w", err)
 	}
 
@@ -232,9 +243,14 @@ func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn
 	}
 
 	// Step 5: Verify client's confirmation
+	//
+	// DEC-047 / spec §2.5: every in-PASE failure mode collapses to a single
+	// generic auth-failure code. Pre-DEC-047 mash-go used ErrCodeConfirmFailed
+	// here, which leaked "this was a MAC mismatch, not point validation"
+	// information to the peer. ErrCodeAuthFailed is correct.
 	var errorCode uint8 = ErrCodeSuccess
 	if err := s.spake.VerifyClientConfirmation(confirm.Confirmation); err != nil {
-		errorCode = ErrCodeConfirmFailed
+		errorCode = ErrCodeAuthFailed
 	}
 
 	// Step 6: Send PASEComplete with our confirmation.

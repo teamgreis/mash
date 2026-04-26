@@ -127,11 +127,18 @@ func TestPASECompleteEncoding(t *testing.T) {
 }
 
 // TestPASEErrorEncoding verifies commissioning error message encoding/decoding.
+//
+// CommissioningError is the spec-defined envelope for cross-cutting
+// commissioning rejections (DEC-063 device busy etc.) — see security.md §13.
+// In-PASE failures use PASEComplete{ErrCodeAuthFailed} per spec §2.5; this
+// round-trip test exercises the busy path because that is the only legitimate
+// use of the CommissioningError envelope.
 func TestPASEErrorEncoding(t *testing.T) {
 	errMsg := &commissioning.CommissioningError{
-		MsgType:   commissioning.MsgCommissioningError,
-		ErrorCode: commissioning.ErrCodeConfirmFailed,
-		Message:   "PASE confirmation failed",
+		MsgType:    commissioning.MsgCommissioningError,
+		ErrorCode:  commissioning.ErrCodeBusy,
+		Message:    "device busy",
+		RetryAfter: 5000,
 	}
 
 	data, err := commissioning.EncodePASEMessage(errMsg)
@@ -154,6 +161,9 @@ func TestPASEErrorEncoding(t *testing.T) {
 	}
 	if decodedErr.Message != errMsg.Message {
 		t.Errorf("Message mismatch")
+	}
+	if decodedErr.RetryAfter != errMsg.RetryAfter {
+		t.Errorf("RetryAfter mismatch: expected %d, got %d", errMsg.RetryAfter, decodedErr.RetryAfter)
 	}
 }
 

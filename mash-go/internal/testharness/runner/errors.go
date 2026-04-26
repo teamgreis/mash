@@ -107,7 +107,9 @@ func classifyPASEError(err error) error {
 			return Infrastructure(err)
 		case commissioning.ErrCodeAuthFailed: // 1
 			return Device(err)
-		case commissioning.ErrCodeConfirmFailed: // 2
+		case 2: // legacy ErrCodeConfirmFailed — pre-DEC-047 mash-go emitted
+			// this on MAC mismatch where spec §2.5 mandates ErrCodeAuthFailed.
+			// Kept for backward-compat classification; new devices send 1.
 			return Device(err)
 		case commissioning.ErrCodeCSRFailed: // 3
 			return Device(err)

@@ -788,7 +788,9 @@ func paseErrorCodeName(code uint8) string {
 		return PASEErrorSuccess
 	case commissioning.ErrCodeAuthFailed: // 1
 		return PASEErrorAuthFailed
-	case commissioning.ErrCodeConfirmFailed: // 2
+	case 2: // legacy ErrCodeConfirmFailed — pre-DEC-047 mash-go emitted
+		// this on MAC mismatch where spec §2.5 mandates ErrCodeAuthFailed.
+		// Kept for backward-compat parsing of older devices' error strings.
 		return PASEErrorVerificationFailed
 	case commissioning.ErrCodeCSRFailed: // 3
 		return PASEErrorCSRFailed
