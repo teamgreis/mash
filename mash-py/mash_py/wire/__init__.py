@@ -22,6 +22,21 @@ from mash_py.wire.codec import (
     encode_request,
     encode_response,
 )
+from mash_py.wire.framing import (
+    DEFAULT_MAX_MESSAGE_SIZE,
+    LENGTH_PREFIX_SIZE,
+    MIN_MESSAGE_SIZE,
+    AsyncFrameReader,
+    AsyncFrameWriter,
+    Framer,
+    FrameReader,
+    FrameTruncatedError,
+    FrameWriter,
+    FramingError,
+    MessageEmptyError,
+    MessageTooLargeError,
+    frame_size,
+)
 from mash_py.wire.operations import (
     NOTIFICATION_MESSAGE_ID,
     ControlMessageType,
@@ -45,11 +60,23 @@ from mash_py.wire.peek import peek_message_type
 
 __all__ = [
     "CONTROL_MESSAGE_TAG",
+    "DEFAULT_MAX_MESSAGE_SIZE",
+    "LENGTH_PREFIX_SIZE",
+    "MIN_MESSAGE_SIZE",
     "NOTIFICATION_MESSAGE_ID",
+    "AsyncFrameReader",
+    "AsyncFrameWriter",
     "ControlMessage",
     "ControlMessageType",
     "ErrorPayload",
+    "FrameReader",
+    "FrameTruncatedError",
+    "FrameWriter",
+    "Framer",
+    "FramingError",
     "InvokePayload",
+    "MessageEmptyError",
+    "MessageTooLargeError",
     "MessageType",
     "Notification",
     "Operation",
@@ -68,5 +95,6 @@ __all__ = [
     "encode_notification",
     "encode_request",
     "encode_response",
+    "frame_size",
     "peek_message_type",
 ]

@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -26,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -55,6 +57,7 @@ func main() {
 	writeFile(filepath.Join(*out, "control_vectors.json"), buildControls())
 	writeFile(filepath.Join(*out, "peek_vectors.json"), buildPeekVectors())
 	writeFile(filepath.Join(*out, "strict_vectors.json"), buildStrictVectors())
+	writeFramingFile(filepath.Join(*out, "framing_vectors.json"), buildFramingVectors())
 
 	fmt.Println("vectors written to", *out)
 }
@@ -656,6 +659,126 @@ func mkControl(name, desc, repr string, m wire.ControlMessage, expected any) Vec
 		MessageType: "control", CBORHex: hex.EncodeToString(data),
 		ExpectedFields: expected,
 	}
+}
+
+// ---------- Framing vectors (Phase 2) ----------
+
+// FramingVector mirrors the on-disk format expected by
+// mash-py/tests/vectors/wire/test_framing_vectors.py. We keep it
+// separate from Vector because framing vectors carry both the unframed
+// payload (so Python can re-frame it) and the wire bytes (so Python
+// can also exercise the read path), which the codec Vector struct
+// can't express cleanly.
+type FramingVector struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// PayloadHex is the unframed payload — what Python passes to
+	// FrameWriter.write_frame and what FrameReader is expected to
+	// return.
+	PayloadHex string `json:"payload_hex"`
+	// WireHex is the full framed wire bytes (length prefix + payload)
+	// as emitted by Go's transport.NewFrameWriter. Python must
+	// produce byte-identical bytes when framing PayloadHex.
+	WireHex string `json:"wire_hex"`
+	// MultiPayloadsHex (optional) carries the unframed payloads of a
+	// multi-frame stream. When set, WireHex is the concatenation of
+	// all frames in order.
+	MultiPayloadsHex []string `json:"multi_payloads_hex,omitempty"`
+}
+
+func buildFramingVectors() []FramingVector {
+	out := []FramingVector{}
+
+	// 1. Single-byte payload — minimum valid frame size.
+	out = append(out, mkFramingVector(
+		"frame_single_byte",
+		"Smallest valid frame: 1-byte payload, 5-byte wire",
+		[]byte{0x42},
+	))
+
+	// 2. Small ASCII payload — easy to eyeball in test failures.
+	out = append(out, mkFramingVector(
+		"frame_hello",
+		"5-byte ASCII payload",
+		[]byte("hello"),
+	))
+
+	// 3. Boundary: payload at the exact 8 KB cap (DEC-069).
+	maxPayload := bytes.Repeat([]byte("z"), transport.DefaultMaxMessageSize)
+	out = append(out, mkFramingVector(
+		"frame_at_8192_boundary",
+		"Payload at exactly DEC-069 max (8192 bytes) — must succeed",
+		maxPayload,
+	))
+
+	// 4. A real CBOR-encoded Read request — verifies the codec→framing
+	// composition is byte-stable across languages, not just synthetic
+	// fillers.
+	readReq := wire.Request{
+		MessageID: 1, Operation: wire.OpRead, EndpointID: 1, FeatureID: 2,
+		Payload: []uint16{1, 2, 3},
+	}
+	cborBytes, err := wire.EncodeRequest(&readReq)
+	if err != nil {
+		fail("encode read request for framing vector: %v", err)
+	}
+	out = append(out, mkFramingVector(
+		"frame_cbor_read_request",
+		"Real CBOR Read request wrapped in a frame — codec×framing composition",
+		cborBytes,
+	))
+
+	// 5. Multi-frame stream: three back-to-back frames of varying sizes.
+	multi := [][]byte{
+		[]byte("first"),
+		[]byte("second-frame"),
+		bytes.Repeat([]byte("X"), 256),
+	}
+	wireBuf := new(bytes.Buffer)
+	writer := transport.NewFrameWriter(wireBuf)
+	hexParts := make([]string, 0, len(multi))
+	for _, m := range multi {
+		if err := writer.WriteFrame(m); err != nil {
+			fail("write multi-frame vector: %v", err)
+		}
+		hexParts = append(hexParts, hex.EncodeToString(m))
+	}
+	out = append(out, FramingVector{
+		Name:             "frame_multi_back_to_back",
+		Description:      "Three frames concatenated in one stream — checks back-to-back framing",
+		PayloadHex:       "", // sentinel: this is a multi-frame vector
+		WireHex:          hex.EncodeToString(wireBuf.Bytes()),
+		MultiPayloadsHex: hexParts,
+	})
+
+	return out
+}
+
+// mkFramingVector frames a single payload with Go's NewFrameWriter and
+// captures both the payload and the wire bytes.
+func mkFramingVector(name, desc string, payload []byte) FramingVector {
+	buf := new(bytes.Buffer)
+	if err := transport.NewFrameWriter(buf).WriteFrame(payload); err != nil {
+		fail("frame %s: %v", name, err)
+	}
+	return FramingVector{
+		Name:        name,
+		Description: desc,
+		PayloadHex:  hex.EncodeToString(payload),
+		WireHex:     hex.EncodeToString(buf.Bytes()),
+	}
+}
+
+func writeFramingFile(path string, vectors []FramingVector) {
+	data, err := json.MarshalIndent(vectors, "", "  ")
+	if err != nil {
+		fail("marshal %s: %v", path, err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		fail("write %s: %v", path, err)
+	}
+	fmt.Printf("  wrote %d vectors to %s\n", len(vectors), filepath.Base(path))
 }
 
 func writeFile(path string, vectors []Vector) {
