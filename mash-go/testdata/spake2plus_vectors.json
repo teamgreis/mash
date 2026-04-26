@@ -1,0 +1,179 @@
+{
+  "schema_version": "1.0",
+  "spec": "DEC-084",
+  "spec_section": "docs/testing/behavior/commissioning-pase.md \u00a72 (DEC-084)",
+  "generated_by": "tools/spake2plus_oracle/gen_vectors.py",
+  "note": "Algorithmic conformance vectors. mash-go and mash-py SPAKE2+ implementations MUST reproduce every output byte-for-byte. Regenerate only when DEC-084 changes.",
+  "vectors": [
+    {
+      "id": "mhf_basic",
+      "description": "PBKDF2-HMAC-SHA256(setup_code, all-zero salt, 100k iters, 80B output).",
+      "inputs": {
+        "setup_code": "20202021",
+        "salt_hex": "00000000000000000000000000000000",
+        "iterations": 100000,
+        "dklen": 80
+      },
+      "outputs": {
+        "mhf_out_hex": "a76766a29b7f027bdc994744c1dbd6154de81d38746093bee06934ec2d7aa0a63e63d54f92ac9fd6afb5db756c0fa7471d2076578f276b8ae71da8d9887436768c1dd98c3167521d5941594c6c96db14"
+      }
+    },
+    {
+      "id": "derive_w0_w1",
+      "description": "Split 80B MHF output into two 40B halves; reduce each modulo P-256 order n.",
+      "inputs": {
+        "mhf_out_hex": "a76766a29b7f027bdc994744c1dbd6154de81d38746093bee06934ec2d7aa0a63e63d54f92ac9fd6afb5db756c0fa7471d2076578f276b8ae71da8d9887436768c1dd98c3167521d5941594c6c96db14"
+      },
+      "outputs": {
+        "w0_hex": "781849bf7ef56cf779c889a91317fb17b3bf3a2a393aa1f5fb9dbfabebfa0758",
+        "w1_hex": "89301d9d7361e8cf152b6db2f2d13b7f1ed55e868d0ec1f5834a425f787f5198"
+      }
+    },
+    {
+      "id": "compute_L",
+      "description": "L = w1 * G (verifier point, SEC1 uncompressed 65 bytes).",
+      "inputs": {
+        "w1_hex": "89301d9d7361e8cf152b6db2f2d13b7f1ed55e868d0ec1f5834a425f787f5198"
+      },
+      "outputs": {
+        "L_hex": "04f06fd0b9508b2f9c9049c81bab75e9333d869a788d3ca5e3f86a88e53ed38987e25fda05cfe98f8812c977cd475875c05f5613d0a6aba620918a0c40d30552ac"
+      }
+    },
+    {
+      "id": "client_init_fixed_x",
+      "description": "pA = x*G + w0*M with fixed x = 0x42 repeated 32 bytes (mod n).",
+      "inputs": {
+        "w0_hex": "781849bf7ef56cf779c889a91317fb17b3bf3a2a393aa1f5fb9dbfabebfa0758",
+        "x_hex": "4242424242424242424242424242424242424242424242424242424242424242"
+      },
+      "outputs": {
+        "pA_hex": "04338fb61a835bc2cdb5b97bc43efc8b33fae417875db3e1e76184effaa1034e445f0eb633e961e53a7dfabb777762e1378c7b58f35f5e116b6a85be274b17f83a"
+      }
+    },
+    {
+      "id": "server_init_fixed_y",
+      "description": "pB = y*G + w0*N with fixed y = 0x84 repeated 32 bytes (mod n).",
+      "inputs": {
+        "w0_hex": "781849bf7ef56cf779c889a91317fb17b3bf3a2a393aa1f5fb9dbfabebfa0758",
+        "L_hex": "04f06fd0b9508b2f9c9049c81bab75e9333d869a788d3ca5e3f86a88e53ed38987e25fda05cfe98f8812c977cd475875c05f5613d0a6aba620918a0c40d30552ac",
+        "y_hex": "8484848484848484848484848484848484848484848484848484848484848484"
+      },
+      "outputs": {
+        "pB_hex": "04132bcdf1cdf76b1a8bcd4e265e6969f1bfcc1922d6f301ac8ab2b5d534a78dbd5f10106c20a3c53e81bd2126c5efe31c06245fe4a5db478f5df8213e68272469"
+      }
+    },
+    {
+      "id": "transcript",
+      "description": "RFC 9383 \u00a73.3 length-prefixed transcript TT.",
+      "inputs": {
+        "controller_identity": "mash-controller",
+        "device_identity": "mash-device",
+        "M_hex": "04886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f5ff355163e43ce224e0b0e65ff02ac8e5c7be09419c785e0ca547d55a12e2d20",
+        "N_hex": "04d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b4907d60aa6bfade45008a636337f5168c64d9bd36034808cd564490b1e656edbe7",
+        "pA_hex": "04338fb61a835bc2cdb5b97bc43efc8b33fae417875db3e1e76184effaa1034e445f0eb633e961e53a7dfabb777762e1378c7b58f35f5e116b6a85be274b17f83a",
+        "pB_hex": "04132bcdf1cdf76b1a8bcd4e265e6969f1bfcc1922d6f301ac8ab2b5d534a78dbd5f10106c20a3c53e81bd2126c5efe31c06245fe4a5db478f5df8213e68272469",
+        "Z_hex": "04ffbe1183bdb59326abd2a42a8a7ed90f3cb96cea29079c5524fa93a58f22fa9b8eeecafc7979d1505067886cb2a7db12ebeefe91a1e7fec00dc592b7d9099c7e",
+        "V_hex": "048d6693e710f3bef15c1cace507aab5a3fe54a0ce1b167c65921a8b815e125005f2ec411ad1f2ec0dd30044e931b18f955af7bc41daef852a5401d0a75ff35aa3",
+        "w0_hex": "781849bf7ef56cf779c889a91317fb17b3bf3a2a393aa1f5fb9dbfabebfa0758"
+      },
+      "outputs": {
+        "TT_hex": "0f000000000000006d6173682d636f6e74726f6c6c65720b000000000000006d6173682d646576696365410000000000000004886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f5ff355163e43ce224e0b0e65ff02ac8e5c7be09419c785e0ca547d55a12e2d20410000000000000004d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b4907d60aa6bfade45008a636337f5168c64d9bd36034808cd564490b1e656edbe7410000000000000004338fb61a835bc2cdb5b97bc43efc8b33fae417875db3e1e76184effaa1034e445f0eb633e961e53a7dfabb777762e1378c7b58f35f5e116b6a85be274b17f83a410000000000000004132bcdf1cdf76b1a8bcd4e265e6969f1bfcc1922d6f301ac8ab2b5d534a78dbd5f10106c20a3c53e81bd2126c5efe31c06245fe4a5db478f5df8213e68272469410000000000000004ffbe1183bdb59326abd2a42a8a7ed90f3cb96cea29079c5524fa93a58f22fa9b8eeecafc7979d1505067886cb2a7db12ebeefe91a1e7fec00dc592b7d9099c7e4100000000000000048d6693e710f3bef15c1cace507aab5a3fe54a0ce1b167c65921a8b815e125005f2ec411ad1f2ec0dd30044e931b18f955af7bc41daef852a5401d0a75ff35aa32000000000000000781849bf7ef56cf779c889a91317fb17b3bf3a2a393aa1f5fb9dbfabebfa0758",
+        "TT_len": 520
+      }
+    },
+    {
+      "id": "k_shared",
+      "description": "K_shared = SHA-256(TT).",
+      "inputs": {
+        "TT_hex": "0f000000000000006d6173682d636f6e74726f6c6c65720b000000000000006d6173682d646576696365410000000000000004886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f5ff355163e43ce224e0b0e65ff02ac8e5c7be09419c785e0ca547d55a12e2d20410000000000000004d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b4907d60aa6bfade45008a636337f5168c64d9bd36034808cd564490b1e656edbe7410000000000000004338fb61a835bc2cdb5b97bc43efc8b33fae417875db3e1e76184effaa1034e445f0eb633e961e53a7dfabb777762e1378c7b58f35f5e116b6a85be274b17f83a410000000000000004132bcdf1cdf76b1a8bcd4e265e6969f1bfcc1922d6f301ac8ab2b5d534a78dbd5f10106c20a3c53e81bd2126c5efe31c06245fe4a5db478f5df8213e68272469410000000000000004ffbe1183bdb59326abd2a42a8a7ed90f3cb96cea29079c5524fa93a58f22fa9b8eeecafc7979d1505067886cb2a7db12ebeefe91a1e7fec00dc592b7d9099c7e4100000000000000048d6693e710f3bef15c1cace507aab5a3fe54a0ce1b167c65921a8b815e125005f2ec411ad1f2ec0dd30044e931b18f955af7bc41daef852a5401d0a75ff35aa32000000000000000781849bf7ef56cf779c889a91317fb17b3bf3a2a393aa1f5fb9dbfabebfa0758"
+      },
+      "outputs": {
+        "K_shared_hex": "d6e273c8db4c1bfc4946d2a38ce3d7af4f9cbd29b0c1c5c786bf87a5a5d85a0c"
+      }
+    },
+    {
+      "id": "key_chain",
+      "description": "Three-key HKDF chain from K_shared with MASH-specific info strings.",
+      "inputs": {
+        "K_shared_hex": "d6e273c8db4c1bfc4946d2a38ce3d7af4f9cbd29b0c1c5c786bf87a5a5d85a0c"
+      },
+      "outputs": {
+        "K_main_hex": "415cbfc972993f43f7dd19877e10129c68e45b2125a5c63fe104ab0c3504cd89",
+        "K_confirm_hex": "0486b1a3386a765357f4da65f20d24285677d6dbc9ec4594dadf5a5254340db9",
+        "K_encrypt_hex": "4e9f94f5ee7c5924fa1fb0dee2f090274d357c85ddb1fa484e34bbee73450d10"
+      }
+    },
+    {
+      "id": "confirmation_keys",
+      "description": "RFC 9383 \u00a73.4: KcA||KcB = HKDF(K_confirm, \"ConfirmationKeys\", 32).",
+      "inputs": {
+        "K_confirm_hex": "0486b1a3386a765357f4da65f20d24285677d6dbc9ec4594dadf5a5254340db9"
+      },
+      "outputs": {
+        "KcA_hex": "87ef34e38f7bcc8ba135e0429425ca7d",
+        "KcB_hex": "ec603fe370719c2ba6ce9edc66a2c1d2"
+      }
+    },
+    {
+      "id": "confirm_macs",
+      "description": "confirmA = HMAC-SHA256(KcA, pB); confirmB = HMAC-SHA256(KcB, pA).",
+      "inputs": {
+        "KcA_hex": "87ef34e38f7bcc8ba135e0429425ca7d",
+        "KcB_hex": "ec603fe370719c2ba6ce9edc66a2c1d2",
+        "pA_hex": "04338fb61a835bc2cdb5b97bc43efc8b33fae417875db3e1e76184effaa1034e445f0eb633e961e53a7dfabb777762e1378c7b58f35f5e116b6a85be274b17f83a",
+        "pB_hex": "04132bcdf1cdf76b1a8bcd4e265e6969f1bfcc1922d6f301ac8ab2b5d534a78dbd5f10106c20a3c53e81bd2126c5efe31c06245fe4a5db478f5df8213e68272469"
+      },
+      "outputs": {
+        "confirmA_hex": "9a44d9fec00e3f72e4db5dfc768133d233f5d30604b483287c4b464ba5e4acbb",
+        "confirmB_hex": "0acf9343035ca66828514e260408480f993ccbe22f8f294bc811887bf72360eb"
+      }
+    },
+    {
+      "id": "full_handshake",
+      "description": "End-to-end DEC-084 handshake from setup code + discriminator + fixed x,y.",
+      "inputs": {
+        "setup_code": "20202021",
+        "discriminator": 3840,
+        "x_hex": "4242424242424242424242424242424242424242424242424242424242424242",
+        "y_hex": "8484848484848484848484848484848484848484848484848484848484848484",
+        "iterations": 100000
+      },
+      "outputs": {
+        "salt_hex": "232ee5ceb8c71c39e0fb040c519bac74",
+        "mhf_out_hex": "e82c8ba2bb903e01ce299af89fe8e8675a66595bf0b65880d12b8c683bd5d4aa98ce2d5c401b3689d9fc599ab6ebdb141e8b4eaf326abb178e4301c92aae606d8849c32916274d28385ac1d5831d6c59",
+        "w0_hex": "89b9d8f8fc2c1ec39740b314f52cbc1ad69f7b03f5ca678a2d60f923bdceb5a5",
+        "w1_hex": "d57729c1a1828669c7655b69ae15a90d3e21c9a03d7520d3b77a162772bd9b4b",
+        "L_hex": "04b7547eb6e7fba248b3d1f3b877bf9e693137349090eb4a035d751be33b0195d223451ce32e4b7ff64fdfeef3727a0fc35b5259b19235efd1b7c9fda13db023f9",
+        "pA_hex": "04deb776895688fbf0dc3fa587ffd11e3372e94b07db6d4a49838dd5492fbae9e4bd846663a125dcc0053e02e47e530d3be66f1d7d317097db1ed8b63a460becaf",
+        "pB_hex": "0464505a83e789545269b0ff2179adcfae87817d0eca816b240e231f8fbd3ca6d664935868d307d60fb63444ce76251953b61d06a4795a496b97c43500d42f5c8b",
+        "Z_hex": "04ffbe1183bdb59326abd2a42a8a7ed90f3cb96cea29079c5524fa93a58f22fa9b8eeecafc7979d1505067886cb2a7db12ebeefe91a1e7fec00dc592b7d9099c7e",
+        "V_hex": "04b52981957e8bc9971dab7bc1013134158451293f7824bcc9c0c6350659c9d8406c27094dba22e75ae6f16392e0c40b4ff3092626c989e318b5f7adc2c1acdb97",
+        "TT_hex": "0f000000000000006d6173682d636f6e74726f6c6c65720b000000000000006d6173682d646576696365410000000000000004886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f5ff355163e43ce224e0b0e65ff02ac8e5c7be09419c785e0ca547d55a12e2d20410000000000000004d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b4907d60aa6bfade45008a636337f5168c64d9bd36034808cd564490b1e656edbe7410000000000000004deb776895688fbf0dc3fa587ffd11e3372e94b07db6d4a49838dd5492fbae9e4bd846663a125dcc0053e02e47e530d3be66f1d7d317097db1ed8b63a460becaf41000000000000000464505a83e789545269b0ff2179adcfae87817d0eca816b240e231f8fbd3ca6d664935868d307d60fb63444ce76251953b61d06a4795a496b97c43500d42f5c8b410000000000000004ffbe1183bdb59326abd2a42a8a7ed90f3cb96cea29079c5524fa93a58f22fa9b8eeecafc7979d1505067886cb2a7db12ebeefe91a1e7fec00dc592b7d9099c7e410000000000000004b52981957e8bc9971dab7bc1013134158451293f7824bcc9c0c6350659c9d8406c27094dba22e75ae6f16392e0c40b4ff3092626c989e318b5f7adc2c1acdb97200000000000000089b9d8f8fc2c1ec39740b314f52cbc1ad69f7b03f5ca678a2d60f923bdceb5a5",
+        "K_shared_hex": "9ea83256f0b48bdc39f4427cbf3dccd8cac9b7ceecfaa06381d9d095f44b9ba1",
+        "K_main_hex": "20d55f40eefa4e5813808a02071db0816175fc5de7dfee2895a29765fa0cee9e",
+        "K_confirm_hex": "0a4e9f8a2a2caebdc240f37f4ad6ce294360ab7d1cc1f2019e03a5db4316dfcd",
+        "K_encrypt_hex": "64863fdf84b536cb01b4e51308dd82ddd2c6c048c8d0944f12262aea0991a24c",
+        "KcA_hex": "1f8dae6f4c041368d136e22edc54130e",
+        "KcB_hex": "5c1c4194bb7918079fe2f4ff282f0866",
+        "confirmA_hex": "c285d91b5e987dc28beb49bf0a5eb48872b6dc797b317eb1b6fc407eed2266a9",
+        "confirmB_hex": "9ba968e520222564e19eaaaae444de0cb3d507c46eb843761d424f625823d815"
+      }
+    },
+    {
+      "id": "point_validation_identity",
+      "description": "Receiving the identity element as pA MUST be rejected (DEC-084 \u00a72.5).",
+      "inputs": {
+        "point_hex": "0400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected_error": "point at infinity / identity element"
+    },
+    {
+      "id": "point_validation_off_curve",
+      "description": "Receiving an off-curve point as pA MUST be rejected (DEC-084 \u00a72.5).",
+      "inputs": {
+        "point_hex": "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f6"
+      },
+      "expected_error": "point not on curve"
+    }
+  ]
+}

@@ -93,6 +93,8 @@ var (
 	shuffle         = flag.Bool("shuffle", false, "Randomize test order within each precondition level")
 	shuffleSeed     = flag.Int64("shuffle-seed", 0, "Seed for shuffle randomization (0 = auto-generate)")
 	strictLifecycle = flag.Bool("strict-lifecycle", false, "Fail tests when teardown cleanup invariants are violated")
+	srvResolve      = flag.Bool("srv-resolve", false, "Resolve TCP port via mDNS SRV records per ALPN before each dial (required for DEC-082 two-port devices; falls back to -target on mDNS failure)")
+	spake2plusVecs  = flag.String("spake2plus-vectors", "", "Run SPAKE2+ algorithmic conformance vectors from the given JSON file and exit (Phase 7B). When set, all other flags except -verbose are ignored.")
 )
 
 func main() {
@@ -101,6 +103,13 @@ func main() {
 
 func run() int {
 	flag.Parse()
+
+	// SPAKE2+ conformance mode short-circuits the network-driven test path:
+	// the vectors are pure algorithmic crypto, so a target/PICS/setup-code
+	// is irrelevant. See Phase 7B of mash-py-tdd-plan.md.
+	if *spake2plusVecs != "" {
+		return runSPAKE2PlusConformance(*spake2plusVecs, os.Stdout)
+	}
 
 	// Get optional test pattern (from -filter flag or positional argument)
 	pattern := *filter
@@ -205,6 +214,7 @@ func run() int {
 		Shuffle:            *shuffle,
 		ShuffleSeed:        *shuffleSeed,
 		StrictLifecycle:    *strictLifecycle,
+		SRVResolve:         *srvResolve,
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
 	if protocolLogger != nil {

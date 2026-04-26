@@ -147,6 +147,14 @@ type Config struct {
 	// StrictLifecycle enables strict teardown/lifecycle invariant enforcement.
 	// When false, invariant violations are recorded but do not fail the test.
 	StrictLifecycle bool
+
+	// SRVResolve, when true, resolves the device's actual TCP port via mDNS
+	// SRV records before each dial instead of trusting Target's port. This
+	// is required to drive a DEC-082 two-port deployment from the test
+	// harness (mash-py-spec-issues Issue #3). On mDNS-lookup failure the
+	// dialer falls back to the literal Target so the flag is strictly
+	// safer than its absence.
+	SRVResolve bool
 }
 
 // ConnState represents the connection lifecycle state.
@@ -340,8 +348,13 @@ func New(config *Config) *Runner {
 	})
 	r.pool.SetMain(&Connection{})
 
-	// Initialize dialer for TLS connection establishment.
+	// Initialize dialer for TLS connection establishment. With -srv-resolve,
+	// wrap the base dialer so each dial first resolves the SRV-advertised
+	// port via mDNS (DEC-082 two-port support).
 	r.dialer = NewDialer(config.InsecureSkipVerify, r.debugf)
+	if config.SRVResolve {
+		r.dialer = NewSRVResolvingDialer(r.dialer, r.debugf)
+	}
 
 	// Initialize connection manager with callbacks into Runner for
 	// handler-dependent operations (PASE, mDNS, message IDs).
