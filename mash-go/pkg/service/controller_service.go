@@ -372,16 +372,11 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 		return nil, fmt.Errorf("%w: connection failed: %v", ErrCommissionFailed, err)
 	}
 
-	// Create client and server identities for PASE
-	// These must match the identities used by the device's verifier
-	clientIdentity := []byte("mash-controller")
-	serverIdentity := []byte("mash-device")
-
-	// Create PASE client session
+	// Create PASE client session. DEC-084 §2.3 requires the discriminator for
+	// salt derivation; identities are protocol constants per §2.4.
 	session, err := commissioning.NewPASEClientSession(
 		commissioning.SetupCode(code),
-		clientIdentity,
-		serverIdentity,
+		service.Discriminator,
 	)
 	if err != nil {
 		conn.Close()

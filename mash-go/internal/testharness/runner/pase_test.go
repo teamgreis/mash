@@ -94,54 +94,6 @@ func TestDeriveSetupCodeFromPassword(t *testing.T) {
 	}
 }
 
-func TestGetClientIdentity(t *testing.T) {
-	r := &Runner{config: &Config{}}
-
-	// Default when nothing set - should match mash-device expectation
-	result := r.getClientIdentity(nil)
-	if result != "mash-controller" {
-		t.Errorf("expected default 'mash-controller', got %q", result)
-	}
-
-	// Config override
-	r.config.ClientIdentity = "config-client"
-	result = r.getClientIdentity(nil)
-	if result != "config-client" {
-		t.Errorf("expected 'config-client', got %q", result)
-	}
-
-	// Params override config
-	params := map[string]any{"client_identity": "param-client"}
-	result = r.getClientIdentity(params)
-	if result != "param-client" {
-		t.Errorf("expected 'param-client', got %q", result)
-	}
-}
-
-func TestGetServerIdentity(t *testing.T) {
-	r := &Runner{config: &Config{}}
-
-	// Default when nothing set - should match mash-device identity
-	result := r.getServerIdentity(nil)
-	if result != "mash-device" {
-		t.Errorf("expected default 'mash-device', got %q", result)
-	}
-
-	// Config override
-	r.config.ServerIdentity = "config-device"
-	result = r.getServerIdentity(nil)
-	if result != "config-device" {
-		t.Errorf("expected 'config-device', got %q", result)
-	}
-
-	// Params override config
-	params := map[string]any{"server_identity": "param-device"}
-	result = r.getServerIdentity(params)
-	if result != "param-device" {
-		t.Errorf("expected 'param-device', got %q", result)
-	}
-}
-
 func TestGetSetupCode(t *testing.T) {
 	r := &Runner{config: &Config{}}
 

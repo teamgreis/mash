@@ -39,7 +39,9 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	// Use a fixed identity for commissioning that both sides agree on
 	s.serverID = []byte("mash-device")
 
-	// Generate verifier from setup code
+	// Generate verifier from setup code + discriminator (DEC-084 §2.3 derives
+	// the PBKDF2 salt from those two inputs; identity strings are protocol
+	// constants, not parameters).
 	setupCode, err := strconv.ParseUint(s.config.SetupCode, 10, 32)
 	if err != nil {
 		s.mu.Lock()
@@ -48,13 +50,9 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Client identity is generic for commissioning (controller will provide its own)
-	// Both sides must use the same identities for PASE to work
-	clientIdentity := []byte("mash-controller")
 	s.verifier, err = commissioning.GenerateVerifier(
 		commissioning.SetupCode(setupCode),
-		clientIdentity,
-		s.serverID,
+		s.config.Discriminator,
 	)
 	if err != nil {
 		s.mu.Lock()

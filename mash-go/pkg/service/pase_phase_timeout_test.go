@@ -54,7 +54,10 @@ func sendRealPASERequest(t *testing.T, conn net.Conn, setupCode string) {
 	t.Helper()
 
 	code := commissioning.MustParseSetupCode(setupCode)
-	spake, err := commissioning.NewSPAKE2PlusClient(code, []byte("test-client"), []byte("test-device"))
+	// Discriminator and ClientIdentity per DEC-084: only ClientIdentity must
+	// equal the protocol-constant for the device to proceed past §4.2 check;
+	// discriminator is irrelevant for this timeout test.
+	spake, err := commissioning.NewSPAKE2PlusClient(code, 0)
 	if err != nil {
 		t.Fatalf("create SPAKE2+ client: %v", err)
 	}
@@ -62,7 +65,7 @@ func sendRealPASERequest(t *testing.T, conn net.Conn, setupCode string) {
 	req := &commissioning.PASERequest{
 		MsgType:        commissioning.MsgPASERequest,
 		PublicValue:    spake.PublicValue(),
-		ClientIdentity: []byte("test-client"),
+		ClientIdentity: commissioning.ControllerIdentity,
 	}
 	data, err := cbor.Marshal(req)
 	if err != nil {

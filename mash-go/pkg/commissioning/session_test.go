@@ -42,13 +42,13 @@ func (c *mockConn) SetWriteDeadline(t time.Time) error { return nil }
 
 // TestPASESessionSuccess verifies successful PASE handshake between client and server.
 func TestPASESessionSuccess(t *testing.T) {
-	// Setup
+	// Setup. DEC-084 §2.4 fixes the SPAKE2+ identity strings; the salt is
+	// derived from the discriminator + setup code instead.
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-001")
-	serverIdentity := []byte("device-001")
+	const discriminator uint16 = 1234
 
 	// Device generates verifier from setup code (done during manufacturing)
-	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	verifier, err := commissioning.GenerateVerifier(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to generate verifier: %v", err)
 	}
@@ -59,12 +59,12 @@ func TestPASESessionSuccess(t *testing.T) {
 	defer serverConn.Close()
 
 	// Create sessions
-	clientSession, err := commissioning.NewPASEClientSession(setupCode, clientIdentity, serverIdentity)
+	clientSession, err := commissioning.NewPASEClientSession(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to create client session: %v", err)
 	}
 
-	serverSession, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	serverSession, err := commissioning.NewPASEServerSession(verifier)
 	if err != nil {
 		t.Fatalf("Failed to create server session: %v", err)
 	}
@@ -116,11 +116,10 @@ func TestPASESessionWrongPassword(t *testing.T) {
 	// Setup with correct code
 	correctCode := commissioning.MustParseSetupCode("20202021")
 	wrongCode := commissioning.MustParseSetupCode("87654321")
-	clientIdentity := []byte("controller-001")
-	serverIdentity := []byte("device-001")
+	const discriminator uint16 = 1234
 
 	// Device has verifier for correct code
-	verifier, err := commissioning.GenerateVerifier(correctCode, clientIdentity, serverIdentity)
+	verifier, err := commissioning.GenerateVerifier(correctCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to generate verifier: %v", err)
 	}
@@ -131,8 +130,8 @@ func TestPASESessionWrongPassword(t *testing.T) {
 	defer serverConn.Close()
 
 	// Client uses wrong code
-	clientSession, _ := commissioning.NewPASEClientSession(wrongCode, clientIdentity, serverIdentity)
-	serverSession, _ := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	clientSession, _ := commissioning.NewPASEClientSession(wrongCode, discriminator)
+	serverSession, _ := commissioning.NewPASEServerSession(verifier)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -163,15 +162,14 @@ func TestPASESessionWrongPassword(t *testing.T) {
 // TestPASESessionTimeout verifies PASE times out properly.
 func TestPASESessionTimeout(t *testing.T) {
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-001")
-	serverIdentity := []byte("device-001")
+	const discriminator uint16 = 1234
 
 	// Create connection pair but only use client side (server won't respond)
 	clientConn, serverConn := newMockConnPair()
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	clientSession, err := commissioning.NewPASEClientSession(setupCode, clientIdentity, serverIdentity)
+	clientSession, err := commissioning.NewPASEClientSession(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to create client session: %v", err)
 	}
@@ -197,19 +195,18 @@ func TestPASESessionTimeout(t *testing.T) {
 	}
 }
 
-// TestPASEClientIdentity verifies client identity is properly included.
+// TestPASEClientIdentity verifies the protocol-constant client identity is
+// returned. Per DEC-084 §2.4 v1 always uses b"mash-controller".
 func TestPASEClientIdentity(t *testing.T) {
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-test-identity")
-	serverIdentity := []byte("device-test-identity")
-
-	clientSession, err := commissioning.NewPASEClientSession(setupCode, clientIdentity, serverIdentity)
+	clientSession, err := commissioning.NewPASEClientSession(setupCode, 1234)
 	if err != nil {
 		t.Fatalf("Failed to create client session: %v", err)
 	}
 
-	if !bytes.Equal(clientSession.ClientIdentity(), clientIdentity) {
-		t.Error("Client identity not preserved")
+	if !bytes.Equal(clientSession.ClientIdentity(), commissioning.ControllerIdentity) {
+		t.Errorf("ClientIdentity = %q, want %q",
+			clientSession.ClientIdentity(), commissioning.ControllerIdentity)
 	}
 }
 
@@ -218,10 +215,9 @@ func TestPASEClientIdentity(t *testing.T) {
 // Both sides should derive the same shared secret.
 func TestPASEServerSplitHandshake(t *testing.T) {
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-001")
-	serverIdentity := []byte("device-001")
+	const discriminator uint16 = 1234
 
-	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	verifier, err := commissioning.GenerateVerifier(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to generate verifier: %v", err)
 	}
@@ -230,12 +226,12 @@ func TestPASEServerSplitHandshake(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	clientSession, err := commissioning.NewPASEClientSession(setupCode, clientIdentity, serverIdentity)
+	clientSession, err := commissioning.NewPASEClientSession(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to create client session: %v", err)
 	}
 
-	serverSession, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	serverSession, err := commissioning.NewPASEServerSession(verifier)
 	if err != nil {
 		t.Fatalf("Failed to create server session: %v", err)
 	}
@@ -288,10 +284,9 @@ func TestPASEServerSplitHandshake(t *testing.T) {
 // context.DeadlineExceeded when no message arrives within the timeout.
 func TestWaitForPASERequest_Timeout(t *testing.T) {
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-001")
-	serverIdentity := []byte("device-001")
+	const discriminator uint16 = 1234
 
-	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	verifier, err := commissioning.GenerateVerifier(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to generate verifier: %v", err)
 	}
@@ -299,7 +294,7 @@ func TestWaitForPASERequest_Timeout(t *testing.T) {
 	_, serverConn := newMockConnPair()
 	defer serverConn.Close()
 
-	serverSession, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	serverSession, err := commissioning.NewPASEServerSession(verifier)
 	if err != nil {
 		t.Fatalf("Failed to create server session: %v", err)
 	}
@@ -321,10 +316,9 @@ func TestWaitForPASERequest_Timeout(t *testing.T) {
 // an error when the client closes the connection immediately.
 func TestWaitForPASERequest_ConnectionClosed(t *testing.T) {
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-001")
-	serverIdentity := []byte("device-001")
+	const discriminator uint16 = 1234
 
-	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	verifier, err := commissioning.GenerateVerifier(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to generate verifier: %v", err)
 	}
@@ -332,7 +326,7 @@ func TestWaitForPASERequest_ConnectionClosed(t *testing.T) {
 	clientConn, serverConn := newMockConnPair()
 	defer serverConn.Close()
 
-	serverSession, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	serverSession, err := commissioning.NewPASEServerSession(verifier)
 	if err != nil {
 		t.Fatalf("Failed to create server session: %v", err)
 	}
@@ -473,13 +467,14 @@ func readLengthPrefixedMessage(conn net.Conn) (interface{}, error) {
 }
 
 // TestVerifierPersistence verifies verifier can be serialized and restored.
+// DEC-084 §2.3 stores (discriminator, salt, w0, L); the post-DEC-084 Verifier
+// struct now persists those plus iterations for forward compatibility.
 func TestVerifierPersistence(t *testing.T) {
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-001")
-	serverIdentity := []byte("device-001")
+	const discriminator uint16 = 1234
 
 	// Generate verifier
-	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	verifier, err := commissioning.GenerateVerifier(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to generate verifier: %v", err)
 	}
@@ -496,14 +491,20 @@ func TestVerifierPersistence(t *testing.T) {
 		t.Fatalf("Failed to unmarshal verifier: %v", err)
 	}
 
-	// Verify equality
+	// Verify equality across every persisted field.
+	if restored.Discriminator != verifier.Discriminator {
+		t.Errorf("Discriminator mismatch: got %d, want %d", restored.Discriminator, verifier.Discriminator)
+	}
+	if !bytes.Equal(verifier.Salt, restored.Salt) {
+		t.Error("Salt mismatch after restore")
+	}
 	if !bytes.Equal(verifier.W0, restored.W0) {
 		t.Error("W0 mismatch after restore")
 	}
 	if !bytes.Equal(verifier.L, restored.L) {
 		t.Error("L mismatch after restore")
 	}
-	if !bytes.Equal(verifier.Identity, restored.Identity) {
-		t.Error("Identity mismatch after restore")
+	if restored.Iterations != verifier.Iterations {
+		t.Errorf("Iterations mismatch: got %d, want %d", restored.Iterations, verifier.Iterations)
 	}
 }

@@ -80,8 +80,6 @@ var (
 	junitOut        = flag.Bool("junit", false, "Output results as JUnit XML")
 	insecure        = flag.Bool("insecure", false, "Skip TLS certificate verification")
 	setupCode       = flag.String("setup-code", "", "PASE setup code (8-digit numeric string)")
-	clientIdentity  = flag.String("client-identity", "", "Client identity for PASE (default: test-client)")
-	serverIdentity  = flag.String("server-identity", "", "Server identity for PASE (default: test-device)")
 	protocolLog     = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
 	enableKey       = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
 	debug           = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
@@ -205,8 +203,6 @@ func run() int {
 		OutputFormat:       outputFormat,
 		InsecureSkipVerify: *insecure,
 		SetupCode:          *setupCode,
-		ClientIdentity:     *clientIdentity,
-		ServerIdentity:     *serverIdentity,
 		EnableKey:          *enableKey,
 		AutoPICS:           autoPICS,
 		Debug:              *debug,

@@ -1,21 +1,16 @@
 package main
 
-// SPAKE2+ algorithmic-conformance vector runner (Phase 7B).
+// SPAKE2+ algorithmic-conformance vector runner (Phase 7B / 7C).
 //
 // When mash-test is invoked with -spake2plus-vectors <path>, it skips the
 // normal network-driven test suite and instead loads the JSON vectors at
-// <path>, dispatches each one through the DEC-084 primitive boundary in
-// pkg/commissioning/conformance.go, and reports pass/fail per vector.
-//
-// Today every vector fails because the conformance.go primitives are stubs;
-// that's the Phase 7B forcing function for Phase 7C ("update mash-go SPAKE2+
-// to DEC-084"). After 7C lands, the same runner passes every vector.
+// <path>, dispatches each one through the DEC-084 primitive boundary
+// exported by pkg/commissioning, and reports pass/fail per vector.
 
 import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -167,11 +162,7 @@ func mustStr(m map[string]any, key string) (string, error) {
 }
 
 // classifyErr converts a primitive error into a stable per-result reason.
-// ErrPrimitiveNotImplemented is the dominant case during Phase 7B.
 func classifyErr(prefix string, err error) string {
-	if errors.Is(err, commissioning.ErrPrimitiveNotImplemented) {
-		return "primitive not implemented (Phase 7C pending)"
-	}
 	return prefix + ": " + err.Error()
 }
 
@@ -590,14 +581,7 @@ func checkPointValidationNegative(v vector) vectorResult {
 			Reason: "expected ValidatePoint to reject, got nil error",
 		}
 	}
-	if errors.Is(got, commissioning.ErrPrimitiveNotImplemented) {
-		return vectorResult{
-			ID:     v.ID,
-			Status: "fail",
-			Reason: "primitive not implemented (Phase 7C pending)",
-		}
-	}
-	// We don't pin the *specific* error wording -- 7C may return an
-	// implementation-defined error. The spec only requires rejection.
+	// We don't pin the *specific* error wording — DEC-084 §2.5 only requires
+	// rejection. Surface the concrete error in the result string for triage.
 	return vectorResult{ID: v.ID, Status: "pass", Reason: "rejected: " + got.Error()}
 }

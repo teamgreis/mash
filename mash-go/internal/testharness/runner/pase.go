@@ -117,9 +117,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}, nil
 	}
 
-	// Get identities from params or use defaults
-	clientIdentity := r.getClientIdentity(params)
-	serverIdentity := r.getServerIdentity(params)
+	// DEC-084 §2.4: SPAKE2+ identity strings are protocol constants. The salt
+	// derives from the discriminator instead — captured during mDNS browse and
+	// stored on the connection manager.
+	discriminator := r.connMgr.DiscoveredDiscriminator()
 
 	// If the connection is operational (either from a completed commission or
 	// from suite zone reuse with cleared PASE state), the device won't accept
@@ -199,11 +200,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Create PASE client session
-	session, err := commissioning.NewPASEClientSession(
-		setupCode,
-		[]byte(clientIdentity),
-		[]byte(serverIdentity),
-	)
+	session, err := commissioning.NewPASEClientSession(setupCode, discriminator)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create PASE session: %w", err)
 	}
@@ -235,11 +232,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			r.pool.Main().hadConnection = true
 			conn = tlsConn
 
-			retrySession, retryErr := commissioning.NewPASEClientSession(
-				setupCode,
-				[]byte(clientIdentity),
-				[]byte(serverIdentity),
-			)
+			retrySession, retryErr := commissioning.NewPASEClientSession(setupCode, discriminator)
 			if retryErr != nil {
 				return nil, fmt.Errorf("cooldown retry PASE session failed: %w", retryErr)
 			}
@@ -269,11 +262,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 				r.pool.Main().hadConnection = true
 				conn = tlsConn
 
-				retrySession, retryErr := commissioning.NewPASEClientSession(
-					setupCode,
-					[]byte(clientIdentity),
-					[]byte(serverIdentity),
-				)
+				retrySession, retryErr := commissioning.NewPASEClientSession(setupCode, discriminator)
 				if retryErr == nil {
 					session = retrySession
 					sessionKey, err = session.Handshake(ctx, conn)
@@ -594,15 +583,12 @@ func (r *Runner) handlePASERequest(ctx context.Context, step *loader.Step, state
 		return nil, fmt.Errorf("invalid setup code: %w", err)
 	}
 
-	clientIdentity := r.getClientIdentity(step.Params)
-	serverIdentity := r.getServerIdentity(step.Params)
+	// DEC-084 §2.4: identities are protocol constants; salt comes from the
+	// discriminator captured during mDNS browse.
+	discriminator := r.connMgr.DiscoveredDiscriminator()
 
 	// Create session but don't handshake yet - store for subsequent steps
-	session, err := commissioning.NewPASEClientSession(
-		setupCode,
-		[]byte(clientIdentity),
-		[]byte(serverIdentity),
-	)
+	session, err := commissioning.NewPASEClientSession(setupCode, discriminator)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create PASE session: %w", err)
 	}
@@ -726,30 +712,6 @@ func (r *Runner) getSetupCodeFromLegacyParams(params map[string]any) (commission
 
 	// Fall back to standard setup code handling
 	return r.getSetupCode(params)
-}
-
-// getClientIdentity returns the client identity from params or default.
-// Default matches the identity used by mash-controller and expected by mash-device.
-func (r *Runner) getClientIdentity(params map[string]any) string {
-	if ci, ok := params[ParamClientIdentity].(string); ok && ci != "" {
-		return ci
-	}
-	if r.config.ClientIdentity != "" {
-		return r.config.ClientIdentity
-	}
-	return "mash-controller"
-}
-
-// getServerIdentity returns the server identity from params or default.
-// Default matches the identity used by mash-device.
-func (r *Runner) getServerIdentity(params map[string]any) string {
-	if si, ok := params[ParamServerIdentity].(string); ok && si != "" {
-		return si
-	}
-	if r.config.ServerIdentity != "" {
-		return r.config.ServerIdentity
-	}
-	return "mash-device"
 }
 
 // isZeroKey checks if a key is all zeros.

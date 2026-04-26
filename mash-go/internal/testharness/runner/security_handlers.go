@@ -876,12 +876,9 @@ func (r *Runner) measurePASEAttempt(ctx context.Context, setupCode string) (time
 		return 0, nil, fmt.Errorf("invalid setup code: %w", err)
 	}
 
-	// Create session
-	session, err := commissioning.NewPASEClientSession(
-		sc,
-		[]byte("test-client"),
-		[]byte("test-device"),
-	)
+	// Create session. DEC-084 §2.4 fixes the SPAKE2+ identity strings; salt
+	// derives from the discriminator captured during mDNS discovery.
+	session, err := commissioning.NewPASEClientSession(sc, r.connMgr.DiscoveredDiscriminator())
 	if err != nil {
 		return 0, nil, fmt.Errorf("session creation failed: %w", err)
 	}
@@ -1360,24 +1357,26 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 }
 
 // sendPASERequestRaw sends a PASERequest with a valid SPAKE2+ public value over
-// a length-prefixed CBOR connection. The setup code doesn't need to match the
-// device -- any valid P-256 point passes ProcessClientValue. The device then
-// proceeds to send PASEResponse and blocks waiting for PASEConfirm, keeping the
-// commissioning lock held.
+// a length-prefixed CBOR connection. The setup code / discriminator don't need
+// to match the device -- any valid P-256 point passes ProcessClientValue. The
+// device then proceeds to send PASEResponse and blocks waiting for PASEConfirm,
+// keeping the commissioning lock held.
 func sendPASERequestRaw(conn net.Conn) error {
 	spakeClient, err := commissioning.NewSPAKE2PlusClient(
 		commissioning.SetupCode(20202021),
-		[]byte("test-harness"),
-		[]byte("mash-device"),
+		0, // discriminator: irrelevant — only pA validity matters here.
 	)
 	if err != nil {
 		return fmt.Errorf("create SPAKE2+ client: %w", err)
 	}
 
+	// DEC-084 §4.2: ClientIdentity MUST be the protocol-constant
+	// "mash-controller" or the device aborts before reaching step 2 — which
+	// would defeat the lock-holding purpose of this raw-request helper.
 	req := &commissioning.PASERequest{
 		MsgType:        commissioning.MsgPASERequest,
 		PublicValue:    spakeClient.PublicValue(),
-		ClientIdentity: []byte("test-harness"),
+		ClientIdentity: commissioning.ControllerIdentity,
 	}
 	data, err := cbor.Marshal(req)
 	if err != nil {

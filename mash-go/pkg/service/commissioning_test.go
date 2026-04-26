@@ -109,15 +109,12 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Perform PASE handshake with correct setup code
-	// Use the fixed identities that match what the device verifier was set up with
-	clientIdentity := []byte("mash-controller")
-	serverIdentity := []byte("mash-device")
-
+	// Perform PASE handshake with correct setup code. DEC-084 §2.4: identity
+	// strings are protocol constants. Discriminator must match the device's
+	// configured value (1234 in validDeviceConfig).
 	session, err := commissioning.NewPASEClientSession(
 		commissioning.SetupCode(20202021),
-		clientIdentity,
-		serverIdentity,
+		1234,
 	)
 	if err != nil {
 		t.Fatalf("NewPASEClientSession failed: %v", err)
@@ -188,15 +185,12 @@ func TestDeviceServicePASEWrongSetupCode(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Perform PASE handshake with WRONG setup code
-	// Use the fixed identities that match what the device verifier was set up with
-	clientIdentity := []byte("mash-controller")
-	serverIdentity := []byte("mash-device")
-
+	// Perform PASE handshake with WRONG setup code. Discriminator matches
+	// the device's so the salt+w0 derivation matches; only the setup code
+	// digits differ — same failure profile as the pre-DEC-084 test.
 	session, err := commissioning.NewPASEClientSession(
 		commissioning.SetupCode(87654321), // Wrong code!
-		clientIdentity,
-		serverIdentity,
+		1234,
 	)
 	if err != nil {
 		t.Fatalf("NewPASEClientSession failed: %v", err)
@@ -602,12 +596,9 @@ func TestMessageGatedLocking_IdleConnectionDoesNotBlock(t *testing.T) {
 	}
 	defer conn2.Close()
 
-	clientIdentity := []byte("mash-controller")
-	serverIdentity := []byte("mash-device")
 	session, err := commissioning.NewPASEClientSession(
 		commissioning.SetupCode(20202021),
-		clientIdentity,
-		serverIdentity,
+		1234,
 	)
 	if err != nil {
 		t.Fatalf("NewPASEClientSession failed: %v", err)
@@ -721,12 +712,9 @@ func TestMessageGatedLocking_BackwardCompat(t *testing.T) {
 	}
 	defer conn.Close()
 
-	clientIdentity := []byte("mash-controller")
-	serverIdentity := []byte("mash-device")
 	session, err := commissioning.NewPASEClientSession(
 		commissioning.SetupCode(20202021),
-		clientIdentity,
-		serverIdentity,
+		1234,
 	)
 	if err != nil {
 		t.Fatalf("NewPASEClientSession failed: %v", err)

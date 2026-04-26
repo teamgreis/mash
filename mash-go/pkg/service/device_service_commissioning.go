@@ -341,8 +341,9 @@ func (s *DeviceService) exitCommissioningForEpoch(epoch uint64) error {
 func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tls.Conn, releaseActiveConn func()) {
 	s.debugLog("handleCommissioningConnection: entered", "remoteAddr", conn.RemoteAddr().String())
 
-	// Phase 1: Create PASE session and wait for first message (no lock held)
-	paseSession, err := commissioning.NewPASEServerSession(s.verifier, s.serverID)
+	// Phase 1: Create PASE session and wait for first message (no lock held).
+	// DEC-084 §2.4: identity strings are protocol constants, no longer params.
+	paseSession, err := commissioning.NewPASEServerSession(s.verifier)
 	if err != nil {
 		s.debugLog("handleCommissioningConnection: NewPASEServerSession failed", "error", err)
 		conn.Close()

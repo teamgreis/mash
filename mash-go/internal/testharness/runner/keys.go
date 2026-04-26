@@ -868,12 +868,10 @@ const (
 	ParamDisconnectBeforeResponse = "disconnect_before_response"
 
 	// PASE/identity params.
-	ParamPassword       = "password"
-	ParamClientIdentity = "client_identity"
-	ParamServerIdentity = "server_identity"
-	ParamInvalidPoint   = "invalid_point"
-	ParamXValue         = "x_value"
-	ParamEnableKey      = "enable_key"
+	ParamPassword     = "password"
+	ParamInvalidPoint = "invalid_point"
+	ParamXValue       = "x_value"
+	ParamEnableKey    = "enable_key"
 
 	// Keepalive/network params.
 	ParamBlockPong  = "block_pong"

@@ -116,12 +116,6 @@ type Config struct {
 	// SetupCode is the PASE password/setup code (8-digit numeric string).
 	SetupCode string
 
-	// ClientIdentity for PASE (defaults to "test-client").
-	ClientIdentity string
-
-	// ServerIdentity for PASE (defaults to "test-device").
-	ServerIdentity string
-
 	// EnableKey is the hex-encoded 128-bit key for TestControl triggers.
 	// Defaults to "00112233445566778899aabbccddeeff" (well-known test key).
 	EnableKey string

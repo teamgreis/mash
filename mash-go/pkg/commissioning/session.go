@@ -1,6 +1,7 @@
 package commissioning
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -14,39 +15,42 @@ import (
 )
 
 // PASEClientSession manages the client side of a PASE handshake.
+//
+// Per DEC-084 §2.4 the SPAKE2+ identity strings are protocol constants
+// (b"mash-controller" / b"mash-device") and need not be passed in. The
+// discriminator is required because it participates in salt derivation
+// (DEC-084 §2.3).
 type PASEClientSession struct {
-	spake          *SPAKE2PlusClient
-	clientIdentity []byte
-	serverIdentity []byte
+	spake *SPAKE2PlusClient
 }
 
 // NewPASEClientSession creates a new PASE client session.
-func NewPASEClientSession(setupCode SetupCode, clientIdentity, serverIdentity []byte) (*PASEClientSession, error) {
-	spake, err := NewSPAKE2PlusClient(setupCode, clientIdentity, serverIdentity)
+func NewPASEClientSession(setupCode SetupCode, discriminator uint16) (*PASEClientSession, error) {
+	spake, err := NewSPAKE2PlusClient(setupCode, discriminator)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SPAKE2+ client: %w", err)
 	}
 
-	return &PASEClientSession{
-		spake:          spake,
-		clientIdentity: clientIdentity,
-		serverIdentity: serverIdentity,
-	}, nil
+	return &PASEClientSession{spake: spake}, nil
 }
 
-// ClientIdentity returns the client identity.
+// ClientIdentity returns the protocol-constant controller identity.
+// DEC-084 §2.4 fixes this to b"mash-controller".
 func (s *PASEClientSession) ClientIdentity() []byte {
-	return s.clientIdentity
+	out := make([]byte, len(ControllerIdentity))
+	copy(out, ControllerIdentity)
+	return out
 }
 
 // Handshake performs the PASE handshake and returns the derived session key.
 // The connection should be a TLS connection in commissioning mode.
 func (s *PASEClientSession) Handshake(ctx context.Context, conn net.Conn) ([]byte, error) {
-	// Step 1: Send PASERequest with our public value
+	// Step 1: Send PASERequest with our public value. ClientIdentity is the
+	// protocol-constant b"mash-controller" per DEC-084 §2.4 / §4.2.
 	req := &PASERequest{
 		MsgType:        MsgPASERequest,
 		PublicValue:    s.spake.PublicValue(),
-		ClientIdentity: s.clientIdentity,
+		ClientIdentity: ControllerIdentity,
 	}
 
 	if err := writeMessage(conn, req); err != nil {
@@ -111,9 +115,8 @@ func (s *PASEClientSession) Handshake(ctx context.Context, conn net.Conn) ([]byt
 
 // PASEServerSession manages the server side of a PASE handshake.
 type PASEServerSession struct {
-	verifier       *Verifier
-	spake          *SPAKE2PlusServer
-	serverIdentity []byte
+	verifier *Verifier
+	spake    *SPAKE2PlusServer
 
 	// PhaseTimeout, if non-zero, overrides the parent context deadline for
 	// individual read phases (e.g. waiting for PASEConfirm after sending
@@ -122,17 +125,17 @@ type PASEServerSession struct {
 	PhaseTimeout time.Duration
 }
 
-// NewPASEServerSession creates a new PASE server session.
-func NewPASEServerSession(verifier *Verifier, serverIdentity []byte) (*PASEServerSession, error) {
-	spake, err := NewSPAKE2PlusServer(verifier, serverIdentity)
+// NewPASEServerSession creates a new PASE server session. Identity strings
+// are protocol constants per DEC-084 §2.4 and need not be passed.
+func NewPASEServerSession(verifier *Verifier) (*PASEServerSession, error) {
+	spake, err := NewSPAKE2PlusServer(verifier)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SPAKE2+ server: %w", err)
 	}
 
 	return &PASEServerSession{
-		verifier:       verifier,
-		spake:          spake,
-		serverIdentity: serverIdentity,
+		verifier: verifier,
+		spake:    spake,
 	}, nil
 }
 
@@ -165,6 +168,23 @@ func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn
 	// (full handshake).
 	const minHandshakeDuration = 200 * time.Millisecond
 	handshakeStart := time.Now()
+
+	// DEC-084 §4.2: ClientIdentity in PASERequest MUST equal b"mash-controller"
+	// in v1; reserved for future delegated-commissioning use (DEC-019).
+	// We treat a wrong identity as ErrCodeAuthFailed and return a generic error
+	// (DEC-047) — never leak which check failed.
+	if !bytes.Equal(req.ClientIdentity, ControllerIdentity) {
+		if elapsed := time.Since(handshakeStart); elapsed < minHandshakeDuration {
+			time.Sleep(minHandshakeDuration - elapsed)
+		}
+		errMsg := &CommissioningError{
+			MsgType:   MsgCommissioningError,
+			ErrorCode: ErrCodeAuthFailed,
+			Message:   "authentication failed",
+		}
+		writeMessage(conn, errMsg)
+		return nil, fmt.Errorf("client identity rejected")
+	}
 
 	// Step 2: Process client's public value
 	if err := s.spake.ProcessClientValue(req.PublicValue); err != nil {

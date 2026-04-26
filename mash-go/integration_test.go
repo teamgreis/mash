@@ -185,13 +185,12 @@ func TestE2E_CommissioningHandshake(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Setup code and identities
+	// Setup code + discriminator (DEC-084 §2.3 derives the salt from these).
 	setupCode := commissioning.MustParseSetupCode("20202021")
-	clientIdentity := []byte("controller-test")
-	serverIdentity := []byte("device-test")
+	const discriminator uint16 = 1234
 
 	// Generate verifier (device does this during manufacturing)
-	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	verifier, err := commissioning.GenerateVerifier(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to generate verifier: %v", err)
 	}
@@ -236,7 +235,7 @@ func TestE2E_CommissioningHandshake(t *testing.T) {
 		defer conn.Close()
 
 		// Create server PASE session
-		session, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+		session, err := commissioning.NewPASEServerSession(verifier)
 		if err != nil {
 			serverErr = fmt.Errorf("failed to create server session: %w", err)
 			return
@@ -266,7 +265,7 @@ func TestE2E_CommissioningHandshake(t *testing.T) {
 	defer conn.Close()
 
 	// Create client PASE session
-	clientSession, err := commissioning.NewPASEClientSession(setupCode, clientIdentity, serverIdentity)
+	clientSession, err := commissioning.NewPASEClientSession(setupCode, discriminator)
 	if err != nil {
 		t.Fatalf("Failed to create client session: %v", err)
 	}
