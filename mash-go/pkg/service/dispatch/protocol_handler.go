@@ -444,8 +444,10 @@ func (h *ProtocolHandler) handleWrite(req *wire.Request) *wire.Response {
 
 // handleSubscribe processes a Subscribe or Unsubscribe request.
 func (h *ProtocolHandler) handleSubscribe(req *wire.Request) *wire.Response {
-	// Check for unsubscribe (featureID = 0)
-	if req.FeatureID == 0 {
+	// Per docs/interaction-model.md §6.4 the unsubscribe sentinel is
+	// BOTH endpointID == 0 AND featureID == 0. A subscribe with feature 0
+	// on a real endpoint is a malformed request, not an unsubscribe.
+	if req.EndpointID == 0 && req.FeatureID == 0 {
 		return h.handleUnsubscribe(req)
 	}
 

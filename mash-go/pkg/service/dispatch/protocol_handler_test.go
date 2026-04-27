@@ -1075,3 +1075,84 @@ func TestProtocolHandler_HandleSubscribe_PrimingUsesContext(t *testing.T) {
 		t.Errorf("expected zone ID 'zone-beta' for specific subscribe, got %q", capturedZoneID)
 	}
 }
+
+
+// TestProtocolHandler_UnsubscribeRequiresBothEndpointAndFeatureZero
+// guards the spec §6.4 invariant: only requests with BOTH endpointID == 0
+// AND featureID == 0 enter the unsubscribe path. A pre-fix request with
+// endpoint != 0 / feature == 0 was misrouted as unsubscribe.
+func TestProtocolHandler_UnsubscribeRequiresBothEndpointAndFeatureZero(t *testing.T) {
+	device := createTestDevice()
+	handler := dispatch.NewProtocolHandler(device)
+
+	// Subscribe with featureID=0 on a real endpoint must NOT be treated as
+	// unsubscribe. The dispatcher should fall through to the normal subscribe
+	// path and reject feature 0 as INVALID_FEATURE.
+	req := &wire.Request{
+		MessageID:  101,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 1, // non-zero — not the unsubscribe sentinel
+		FeatureID:  0, // would have triggered the bug pre-fix
+		Payload:    &wire.SubscribePayload{},
+	}
+
+	resp := handler.HandleRequest(req)
+
+	if resp.IsSuccess() {
+		t.Errorf("expected non-success for endpoint=1 feature=0; got status %d (was misrouted as unsubscribe?)", resp.Status)
+	}
+	if resp.Status != wire.StatusInvalidFeature {
+		t.Errorf("expected StatusInvalidFeature for feature=0 subscribe; got %d", resp.Status)
+	}
+}
+
+
+// TestProtocolHandler_HandleRead_BareArrayWireForm verifies the spec §4.1
+// wire form: request key 5 is a bare CBOR array (the shape mash-go\x27s own
+// interaction.Client.Read sends and the shape mash-py controllers send).
+// Pre-fix, ExtractReadAttributeIDs returned nil for this shape and the
+// dispatcher silently degraded a Read-with-IDs into a Read-all.
+func TestProtocolHandler_HandleRead_BareArrayWireForm(t *testing.T) {
+	device := createTestDevice()
+	handler := dispatch.NewProtocolHandler(device)
+
+	// Encode + decode a Request that carries Payload: []uint16{1, 2}
+	// (the shape interaction.Client.Read emits) so the test exercises the
+	// real wire-decoded payload, not the typed-form short-circuit.
+	original := &wire.Request{
+		MessageID:  201,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+		Payload:    []uint16{1, 2}, // DeviceID + VendorName
+	}
+	data, err := wire.EncodeRequest(original)
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	decoded, err := wire.DecodeRequest(data)
+	if err != nil {
+		t.Fatalf("DecodeRequest: %v", err)
+	}
+
+	resp := handler.HandleRequest(decoded)
+
+	if !resp.IsSuccess() {
+		t.Fatalf("expected success; got status %d", resp.Status)
+	}
+	payload, ok := resp.Payload.(map[uint16]any)
+	if !ok {
+		t.Fatalf("expected map[uint16]any payload, got %T", resp.Payload)
+	}
+	// Pre-fix, the dispatcher would have returned ALL DeviceInfo attributes
+	// because ExtractReadAttributeIDs silently saw zero IDs.
+	if len(payload) != 2 {
+		t.Errorf("expected exactly 2 requested attributes; got %d (keys %v)", len(payload), payload)
+	}
+	if _, ok := payload[1]; !ok {
+		t.Errorf("expected DeviceID (attr 1) in response; got %v", payload)
+	}
+	if _, ok := payload[2]; !ok {
+		t.Errorf("expected VendorName (attr 2) in response; got %v", payload)
+	}
+}

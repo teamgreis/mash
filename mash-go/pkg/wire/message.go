@@ -97,21 +97,30 @@ type ReadPayload struct {
 }
 
 // ExtractReadAttributeIDs extracts attribute IDs from a read request payload.
-// After CBOR round-trip the Payload is a raw map (map[any]any), not
-// *ReadPayload, so this function handles both typed and untyped forms.
+//
+// Per docs/interaction-model.md §4.1 the canonical wire form is a bare CBOR
+// array at request key 5 (`5: [1, 2, 3]`, empty = "read all"). interaction
+// Client.Read sends `Payload: []uint16{...}`, which after CBOR roundtrip is
+// `[]any` of `uint64`. This function also accepts the legacy *ReadPayload
+// typed form (`{1: [...]}`) so existing callers and tests keep working.
 func ExtractReadAttributeIDs(payload any) []uint16 {
 	if payload == nil {
 		return nil
 	}
 
-	// Typed form (used before encoding)
+	// Typed forms (used pre-encoding by Go callers).
 	if rp, ok := payload.(*ReadPayload); ok {
 		return rp.AttributeIDs
 	}
+	if ids, ok := payload.([]uint16); ok {
+		return ids
+	}
 
-	// Raw CBOR map: {uint64(1): []any{uint64(id), ...}}
+	// Bare CBOR array (spec §4.1) or legacy {1: [...]} map.
 	var arr []any
 	switch m := payload.(type) {
+	case []any:
+		arr = m
 	case map[any]any:
 		if v, ok := m[uint64(1)]; ok {
 			arr, _ = v.([]any)
