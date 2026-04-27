@@ -60,8 +60,11 @@ func TestCommissioning_CertNotPersisted(t *testing.T) {
 }
 
 // TC-IMPL-COMM-CERT-002: Test cert exchange flow after PASE handshake.
-// After PASE completes, controller should send CertRenewalRequest with Zone CA,
-// device generates new key pair for CSR, and receives operational cert.
+// After PASE completes, controller sends CSRRequest (MsgType 10), device
+// generates new key pair and returns CSRResponse (11), controller signs and
+// sends CertInstall (12) with Zone CA + zoneType + priority, device installs
+// and acks via CertInstallResponse (13) + CommissioningComplete (20).
+// (DEC-085 spec-strict commissioning envelope.)
 func TestCommissioning_CertExchangeAfterPASE(t *testing.T) {
 	// Set up device service
 	device := model.NewDevice("test-device-certex", 0x1234, 0x5678)

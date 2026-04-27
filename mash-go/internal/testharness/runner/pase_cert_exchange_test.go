@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/service"
@@ -89,9 +88,11 @@ func TestFramerSyncConn_ImplementsSyncConnection(t *testing.T) {
 	var _ service.SyncConnection = (*framerSyncConn)(nil)
 }
 
-// TestCertExchange_FullFlow simulates the 4-message cert exchange after PASE.
-// It creates a mock device on the other end of a pipe that receives
-// CertRenewalRequest, responds with a CSR, receives Install, and sends Ack.
+// TestCertExchange_FullFlow simulates the 5-message cert exchange after PASE
+// using the spec-strict commissioning envelope (DEC-085): CSRRequest (10) →
+// CSRResponse (11) → CertInstall (12) → CertInstallResponse (13) →
+// CommissioningComplete (20). It creates a mock device on the other end of a
+// pipe that drives the device-side half of that flow.
 func TestCertExchange_FullFlow(t *testing.T) {
 	// Create two pipes: one for each direction.
 	clientR, serverW := io.Pipe()
@@ -181,7 +182,11 @@ func TestCertExchange_FullFlow(t *testing.T) {
 	}
 }
 
-func TestCertExchange_FailsWhenAckMissing(t *testing.T) {
+// TestCertExchange_FailsWhenCommissioningCompleteMissing verifies the
+// controller errors when the device acks CertInstall (13) but skips the
+// terminator CommissioningComplete (20). Per DEC-085 the controller MUST
+// read both before considering the device commissioned.
+func TestCertExchange_FailsWhenCommissioningCompleteMissing(t *testing.T) {
 	clientR, serverW := io.Pipe()
 	serverR, clientW := io.Pipe()
 	defer clientR.Close()
@@ -199,7 +204,7 @@ func TestCertExchange_FailsWhenAckMissing(t *testing.T) {
 
 	deviceErr := make(chan error, 1)
 	go func() {
-		deviceErr <- mockDeviceCertExchangeNoAck(serverFramer, deviceKeyPair)
+		deviceErr <- mockDeviceCertExchangeNoComplete(serverFramer, deviceKeyPair)
 		_ = serverW.Close()
 	}()
 
@@ -221,10 +226,10 @@ func TestCertExchange_FailsWhenAckMissing(t *testing.T) {
 
 	_, err = r.performCertExchange(context.Background())
 	if err == nil {
-		t.Fatal("expected performCertExchange to fail when ack is missing")
+		t.Fatal("expected performCertExchange to fail when CommissioningComplete is missing")
 	}
-	if !strings.Contains(err.Error(), "read ack") {
-		t.Fatalf("expected read ack error, got %v", err)
+	if !strings.Contains(err.Error(), "CommissioningComplete") {
+		t.Fatalf("expected CommissioningComplete error, got %v", err)
 	}
 
 	if devErr := <-deviceErr; devErr != nil {
@@ -232,39 +237,41 @@ func TestCertExchange_FailsWhenAckMissing(t *testing.T) {
 	}
 }
 
-// mockDeviceCertExchange simulates the device side of the cert exchange.
-// Receives CertRenewalRequest, responds with CSR, receives Install, sends Ack.
+// mockDeviceCertExchange simulates the device side of the spec-strict
+// commissioning cert install (DEC-085). It receives CSRRequest (10),
+// responds with CSRResponse (11), receives CertInstall (12), and emits
+// CertInstallResponse (13) + CommissioningComplete (20).
 func mockDeviceCertExchange(framer *transport.Framer, keyPair *cert.KeyPair) error {
-	// Step 1: Read CertRenewalRequest
+	// Step 1: Read CSRRequest (MsgType 10).
 	reqData, err := framer.ReadFrame()
 	if err != nil {
 		return err
 	}
-
-	msg, err := commissioning.DecodeRenewalMessage(reqData)
+	msg, err := commissioning.DecodePASEMessage(reqData)
 	if err != nil {
 		return err
 	}
-
-	req, ok := msg.(*commissioning.CertRenewalRequest)
+	req, ok := msg.(*commissioning.CSRRequest)
 	if !ok {
-		return err
+		return io.ErrUnexpectedEOF
 	}
-	_ = req // Used for zone CA verification in real device
+	if len(req.Nonce) != 32 {
+		return io.ErrShortBuffer
+	}
 
-	// Step 2: Generate and send CSR
+	// Step 2: Build PKCS#10 CSR using the device's key pair, send CSRResponse.
 	csrDER, err := cert.CreateCSR(keyPair, &cert.CSRInfo{
 		Identity: cert.DeviceIdentity{DeviceID: "mock-device"},
 	})
 	if err != nil {
 		return err
 	}
-
-	csrResp := &commissioning.CertRenewalCSR{
-		MsgType: commissioning.MsgCertRenewalCSR,
-		CSR:     csrDER,
+	csrResp := &commissioning.CSRResponse{
+		MsgType:   commissioning.MsgCSRResponse,
+		CSR:       csrDER,
+		ErrorCode: commissioning.ErrCodeSuccess,
 	}
-	csrData, err := cbor.Marshal(csrResp)
+	csrData, err := commissioning.EncodePASEMessage(csrResp)
 	if err != nil {
 		return err
 	}
@@ -272,46 +279,56 @@ func mockDeviceCertExchange(framer *transport.Framer, keyPair *cert.KeyPair) err
 		return err
 	}
 
-	// Step 3: Read CertRenewalInstall
+	// Step 3: Read CertInstall (MsgType 12).
 	installData, err := framer.ReadFrame()
 	if err != nil {
 		return err
 	}
-
-	msg, err = commissioning.DecodeRenewalMessage(installData)
+	msg, err = commissioning.DecodePASEMessage(installData)
 	if err != nil {
 		return err
 	}
-
-	_, ok = msg.(*commissioning.CertRenewalInstall)
-	if !ok {
-		return err
+	if _, ok := msg.(*commissioning.CertInstall); !ok {
+		return io.ErrUnexpectedEOF
 	}
 
-	// Step 4: Send Ack
-	ack := &commissioning.CertRenewalAck{
-		MsgType:        commissioning.MsgCertRenewalAck,
-		Status:         commissioning.RenewalStatusSuccess,
-		ActiveSequence: 2,
+	// Step 4: Send CertInstallResponse{Status: 0} (MsgType 13).
+	resp := &commissioning.CertInstallResponse{
+		MsgType:   commissioning.MsgCertInstallResponse,
+		ErrorCode: commissioning.ErrCodeSuccess,
 	}
-	ackData, err := cbor.Marshal(ack)
+	respData, err := commissioning.EncodePASEMessage(resp)
 	if err != nil {
 		return err
 	}
-	return framer.WriteFrame(ackData)
+	if err := framer.WriteFrame(respData); err != nil {
+		return err
+	}
+
+	// Step 5: Send CommissioningComplete (MsgType 20).
+	complete := &commissioning.CommissioningComplete{
+		MsgType: commissioning.MsgCommissioningComplete,
+	}
+	completeData, err := commissioning.EncodePASEMessage(complete)
+	if err != nil {
+		return err
+	}
+	return framer.WriteFrame(completeData)
 }
 
-func mockDeviceCertExchangeNoAck(framer *transport.Framer, keyPair *cert.KeyPair) error {
+// mockDeviceCertExchangeNoComplete acks CertInstall (13) but skips the
+// CommissioningComplete (20) terminator. Used to verify the controller
+// errors out when the spec's required terminator is missing.
+func mockDeviceCertExchangeNoComplete(framer *transport.Framer, keyPair *cert.KeyPair) error {
 	reqData, err := framer.ReadFrame()
 	if err != nil {
 		return err
 	}
-
-	msg, err := commissioning.DecodeRenewalMessage(reqData)
+	msg, err := commissioning.DecodePASEMessage(reqData)
 	if err != nil {
 		return err
 	}
-	if _, ok := msg.(*commissioning.CertRenewalRequest); !ok {
+	if _, ok := msg.(*commissioning.CSRRequest); !ok {
 		return io.ErrUnexpectedEOF
 	}
 
@@ -321,11 +338,12 @@ func mockDeviceCertExchangeNoAck(framer *transport.Framer, keyPair *cert.KeyPair
 	if err != nil {
 		return err
 	}
-	csrResp := &commissioning.CertRenewalCSR{
-		MsgType: commissioning.MsgCertRenewalCSR,
-		CSR:     csrDER,
+	csrResp := &commissioning.CSRResponse{
+		MsgType:   commissioning.MsgCSRResponse,
+		CSR:       csrDER,
+		ErrorCode: commissioning.ErrCodeSuccess,
 	}
-	csrData, err := cbor.Marshal(csrResp)
+	csrData, err := commissioning.EncodePASEMessage(csrResp)
 	if err != nil {
 		return err
 	}
@@ -337,13 +355,23 @@ func mockDeviceCertExchangeNoAck(framer *transport.Framer, keyPair *cert.KeyPair
 	if err != nil {
 		return err
 	}
-	msg, err = commissioning.DecodeRenewalMessage(installData)
+	msg, err = commissioning.DecodePASEMessage(installData)
 	if err != nil {
 		return err
 	}
-	if _, ok := msg.(*commissioning.CertRenewalInstall); !ok {
+	if _, ok := msg.(*commissioning.CertInstall); !ok {
 		return io.ErrUnexpectedEOF
 	}
 
-	return nil
+	// Send CertInstallResponse{Status: 0} but deliberately omit
+	// CommissioningComplete to exercise the controller's error path.
+	resp := &commissioning.CertInstallResponse{
+		MsgType:   commissioning.MsgCertInstallResponse,
+		ErrorCode: commissioning.ErrCodeSuccess,
+	}
+	respData, err := commissioning.EncodePASEMessage(resp)
+	if err != nil {
+		return err
+	}
+	return framer.WriteFrame(respData)
 }

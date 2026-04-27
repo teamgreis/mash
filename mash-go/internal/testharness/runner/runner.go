@@ -614,8 +614,8 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 }
 
 // framerSyncConn adapts a transport.Framer to the service.SyncConnection interface.
-// This allows the cert exchange protocol (IssueInitialCertSync) to use the
-// existing PASE connection's framer for synchronous send/receive.
+// This allows the commissioning cert-install flow (PerformCommissioningCertInstall)
+// to use the existing PASE connection's framer for synchronous send/receive.
 type framerSyncConn struct {
 	framer *transport.Framer
 }

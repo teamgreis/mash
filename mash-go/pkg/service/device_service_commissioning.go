@@ -12,7 +12,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 )
@@ -474,14 +473,24 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	// Create framed connection FIRST - needed for cert exchange messages
 	framedConn := newFramedConnection(conn)
 
-	// Perform certificate exchange with controller
-	// This is the critical step that gives us an operational cert from the Zone CA
+	// Perform certificate exchange with controller using the spec-strict
+	// commissioning envelope (MsgTypes 10/11/12/13/20 per DEC-085).
+	// Zone validation runs against CertInstall.ZoneType (explicit field),
+	// with the Zone CA cert's OU as a sanity cross-check; on rejection
+	// performCertExchange emits CertInstallResponse{errorCode != 0} on the
+	// wire before returning the typed error.
 	zoneType := cert.ZoneTypeLocal
-	operationalCert, zoneCA, err := s.performCertExchange(framedConn, zoneID, func(zoneCA *x509.Certificate) error {
-		// Extract zone type from the Zone CA certificate's OU field.
-		// Falls back to LOCAL if extraction fails (backward compatibility).
-		if zt, parseErr := cert.ExtractZoneTypeFromCert(zoneCA); parseErr == nil {
-			zoneType = zt
+	operationalCert, zoneCA, err := s.performCertExchange(framedConn, zoneID, func(installZoneType cert.ZoneType, zoneCA *x509.Certificate) error {
+		// Prefer the explicit CertInstall.ZoneType (DEC-085); fall back to
+		// the Zone CA cert's OU if the explicit field is unset/zero, for
+		// defense-in-depth against a controller that ships only the cert.
+		zoneType = installZoneType
+		if zoneType == 0 {
+			if zt, parseErr := cert.ExtractZoneTypeFromCert(zoneCA); parseErr == nil {
+				zoneType = zt
+			} else {
+				zoneType = cert.ZoneTypeLocal
+			}
 		}
 
 		// Reject TEST zones unless a valid enable-key is configured (DEC-060).
@@ -514,25 +523,20 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, errCommissionTestZoneDisabled) {
+		// performCertExchange has already emitted CertInstallResponse with
+		// the appropriate non-zero error code on validation failure paths
+		// (ZoneTypeExists, Busy/SlotsFull, CertInstallFailed). The caller
+		// just logs and closes; it does NOT also emit a CommissioningError.
+		switch {
+		case errors.Is(err, errCommissionTestZoneDisabled):
 			s.debugLog("handleCommissioningConnection: TEST zone rejected (no valid enable-key)", "zoneID", zoneID)
-			conn.Close()
-			return
-		}
-		if errors.Is(err, errCommissionZoneTypeExists) {
+		case errors.Is(err, errCommissionZoneTypeExists):
 			s.debugLog("handleCommissioningConnection: zone type already exists", "zoneID", zoneID, "zoneType", zoneType)
-			_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeZoneTypeExists, "zone type already exists", 0)
-			conn.Close()
-			return
-		}
-		if errors.Is(err, errCommissionZoneSlotsFull) {
+		case errors.Is(err, errCommissionZoneSlotsFull):
 			s.debugLog("handleCommissioningConnection: GRID/LOCAL zone rejected (slots full)", "zoneID", zoneID, "zoneType", zoneType)
-			retryAfterMs := s.computeBusyRetryAfter()
-			_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeBusy, "zone slots full", retryAfterMs)
-			conn.Close()
-			return
+		default:
+			s.debugLog("handleCommissioningConnection: cert exchange failed", "error", err)
 		}
-		s.debugLog("handleCommissioningConnection: cert exchange failed", "error", err)
 		conn.Close()
 		return
 	}
@@ -650,69 +654,62 @@ func (s *DeviceService) rollbackCommissioningCertArtifacts(zoneID string) {
 	}
 }
 
-// performCertExchange handles the certificate exchange protocol with the controller.
-// It receives the Zone CA, generates a new key pair, sends a CSR, and installs
-// the signed operational certificate.
+// performCertExchange handles the post-PASE certificate-install protocol on
+// the device side using the spec-strict commissioning envelope (DEC-085):
+// MsgTypes 10 / 11 / 12 / 13 / 20.
 //
-// Protocol flow:
-// 1. Receive CertRenewalRequest with ZoneCA from controller
-// 2. Generate NEW key pair (not reusing commissioning key)
-// 3. Send CertRenewalCSR with device's CSR
-// 4. Receive CertRenewalInstall with signed operational cert
-// 5. Verify and store operational cert + Zone CA
-// 6. Send CertRenewalAck
+// Wire sequence:
+//
+//  1. Receive CSRRequest{nonce[32]}                                        (MsgType 10)
+//  2. Generate fresh P-256 key pair and PKCS#10 CSR
+//  3. Send CSRResponse{csr, errorCode = 0}                                 (MsgType 11)
+//  4. Receive CertInstall{operationalCert, caCert, zoneType, zonePriority} (MsgType 12)
+//  5. Verify operational cert chain + pubkey match; run zone-slot validation
+//  6. On success: store cert + ZoneCA; send CertInstallResponse{0} +
+//     CommissioningComplete (MsgTypes 13 + 20)
+//     On failure: send CertInstallResponse{errorCode != 0} (MsgType 13);
+//     do NOT send CommissioningComplete.
+//
+// validateZone is called with the ZoneType decoded from CertInstall (the
+// explicit field — preferred over re-extracting from the cert OU). It must
+// return one of the typed sentinel errors (errCommissionZoneTypeExists,
+// errCommissionZoneSlotsFull, errCommissionTestZoneDisabled) or nil.
 func (s *DeviceService) performCertExchange(
 	conn *framedConnection,
 	zoneID string,
-	validateZone func(*x509.Certificate) error,
+	validateZone func(zoneType cert.ZoneType, zoneCA *x509.Certificate) error,
 ) (*cert.OperationalCert, *x509.Certificate, error) {
-	// Step 1: Wait for CertRenewalRequest from controller
+	// Step 1: Wait for CSRRequest from controller.
 	data, err := conn.ReadFrame()
 	if err != nil {
-		return nil, nil, fmt.Errorf("read cert renewal request: %w", err)
+		return nil, nil, fmt.Errorf("read CSRRequest: %w", err)
 	}
 
-	msg, err := commissioning.DecodeRenewalMessage(data)
+	msg, err := commissioning.DecodePASEMessage(data)
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode cert renewal request: %w", err)
+		return nil, nil, fmt.Errorf("decode CSRRequest: %w", err)
 	}
 
-	certReq, ok := msg.(*commissioning.CertRenewalRequest)
+	csrReq, ok := msg.(*commissioning.CSRRequest)
 	if !ok {
-		return nil, nil, fmt.Errorf("expected CertRenewalRequest, got %T", msg)
+		return nil, nil, fmt.Errorf("expected CSRRequest, got %T", msg)
 	}
 
-	// Verify we received the Zone CA
-	if len(certReq.ZoneCA) == 0 {
-		return nil, nil, fmt.Errorf("CertRenewalRequest missing Zone CA")
+	// Spec: nonce MUST be exactly 32 bytes (commissioning-pase.md §4.3).
+	if len(csrReq.Nonce) != 32 {
+		return nil, nil, fmt.Errorf("CSRRequest nonce must be 32 bytes, got %d", len(csrReq.Nonce))
 	}
 
-	// Parse the Zone CA certificate
-	zoneCA, err := x509.ParseCertificate(certReq.ZoneCA)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse Zone CA: %w", err)
-	}
-
-	s.debugLog("performCertExchange: received Zone CA",
-		"issuer", zoneCA.Issuer.String(),
-		"notAfter", zoneCA.NotAfter)
-	if validateZone != nil {
-		if err := validateZone(zoneCA); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	// Step 2: Generate NEW key pair for this zone
-	// Important: We generate a fresh key pair, NOT reusing the commissioning key
+	// Step 2: Generate fresh key pair (not reusing the commissioning key).
 	keyPair, err := cert.GenerateKeyPair()
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate key pair: %w", err)
 	}
 
-	// Step 3: Create and send CSR
+	// Step 3: Build PKCS#10 CSR and send CSRResponse.
 	csrInfo := &cert.CSRInfo{
 		Identity: cert.DeviceIdentity{
-			DeviceID:  "", // Will be derived from cert
+			DeviceID:  "", // Controller derives device ID from CSR public key
 			VendorID:  s.device.VendorID(),
 			ProductID: s.device.ProductID(),
 		},
@@ -723,50 +720,105 @@ func (s *DeviceService) performCertExchange(
 		return nil, nil, fmt.Errorf("create CSR: %w", err)
 	}
 
-	csrResp := &commissioning.CertRenewalCSR{
-		MsgType: commissioning.MsgCertRenewalCSR,
-		CSR:     csrDER,
+	csrResp := &commissioning.CSRResponse{
+		MsgType:   commissioning.MsgCSRResponse,
+		CSR:       csrDER,
+		ErrorCode: commissioning.ErrCodeSuccess,
 	}
-
-	csrData, err := cbor.Marshal(csrResp)
+	csrData, err := commissioning.EncodePASEMessage(csrResp)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode CSR: %w", err)
+		return nil, nil, fmt.Errorf("encode CSRResponse: %w", err)
 	}
-
 	if err := conn.Send(csrData); err != nil {
-		return nil, nil, fmt.Errorf("send CSR: %w", err)
+		return nil, nil, fmt.Errorf("send CSRResponse: %w", err)
 	}
 
-	// Step 4: Wait for signed certificate
+	// Step 4: Wait for CertInstall.
 	data, err = conn.ReadFrame()
 	if err != nil {
-		return nil, nil, fmt.Errorf("read cert install: %w", err)
+		return nil, nil, fmt.Errorf("read CertInstall: %w", err)
 	}
 
-	msg, err = commissioning.DecodeRenewalMessage(data)
+	msg, err = commissioning.DecodePASEMessage(data)
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode cert install: %w", err)
+		return nil, nil, fmt.Errorf("decode CertInstall: %w", err)
 	}
 
-	certInstall, ok := msg.(*commissioning.CertRenewalInstall)
+	install, ok := msg.(*commissioning.CertInstall)
 	if !ok {
-		return nil, nil, fmt.Errorf("expected CertRenewalInstall, got %T", msg)
+		return nil, nil, fmt.Errorf("expected CertInstall, got %T", msg)
 	}
 
-	// Parse the new operational certificate
-	newCert, err := x509.ParseCertificate(certInstall.NewCert)
+	// Step 5: Parse Zone CA and operational cert.
+	zoneCA, err := x509.ParseCertificate(install.CACert)
 	if err != nil {
+		s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
+		return nil, nil, fmt.Errorf("parse Zone CA: %w", err)
+	}
+	newCert, err := x509.ParseCertificate(install.OperationalCert)
+	if err != nil {
+		s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
 		return nil, nil, fmt.Errorf("parse operational cert: %w", err)
 	}
 
-	// Verify the certificate is signed by the Zone CA
+	// Step 5a: Verify operational cert chain.
 	roots := x509.NewCertPool()
 	roots.AddCert(zoneCA)
 	if _, err := newCert.Verify(x509.VerifyOptions{Roots: roots}); err != nil {
+		s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
 		return nil, nil, fmt.Errorf("verify operational cert: %w", err)
 	}
 
-	// Step 5: Store operational cert and Zone CA
+	// Step 5b: Verify the operational cert's public key matches the key pair
+	// the device generated for this CSR. Without this check, a malicious
+	// controller could install a cert for a different keypair, leaving the
+	// device unable to use the cert it just stored.
+	gotPub, err := x509.MarshalPKIXPublicKey(newCert.PublicKey)
+	if err != nil {
+		s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
+		return nil, nil, fmt.Errorf("marshal cert public key: %w", err)
+	}
+	wantPub, err := x509.MarshalPKIXPublicKey(keyPair.PublicKey)
+	if err != nil {
+		s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
+		return nil, nil, fmt.Errorf("marshal keypair public key: %w", err)
+	}
+	if !bytesEqual(gotPub, wantPub) {
+		s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
+		return nil, nil, fmt.Errorf("operational cert public key does not match CSR public key")
+	}
+
+	// Step 5c: Validate zone — uses the explicit ZoneType from CertInstall
+	// (preferred over re-extracting from the cert OU per DEC-085).
+	zoneType := cert.ZoneType(install.ZoneType)
+	s.debugLog("performCertExchange: received CertInstall",
+		"issuer", zoneCA.Issuer.String(),
+		"zoneType", zoneType,
+		"zonePriority", install.ZonePriority,
+		"notAfter", newCert.NotAfter)
+
+	if validateZone != nil {
+		if err := validateZone(zoneType, zoneCA); err != nil {
+			// Map zone-validation sentinel errors to wire-level error codes
+			// and emit CertInstallResponse{errorCode != 0}. CommissioningComplete
+			// is NOT sent on the failure path. The caller observes the typed
+			// error and performs cleanup (rollback artifacts, log, close conn).
+			switch {
+			case errors.Is(err, errCommissionZoneTypeExists):
+				s.sendCertInstallFailure(conn, commissioning.ErrCodeZoneTypeExists)
+			case errors.Is(err, errCommissionZoneSlotsFull):
+				s.sendCertInstallFailure(conn, commissioning.ErrCodeBusy)
+			case errors.Is(err, errCommissionTestZoneDisabled):
+				// TEST zones with no enable-key: silent close per existing
+				// behavior (no observable error message on the wire).
+			default:
+				s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
+			}
+			return nil, nil, err
+		}
+	}
+
+	// Step 6: Store operational cert + Zone CA.
 	operationalCert := &cert.OperationalCert{
 		Certificate: newCert,
 		PrivateKey:  keyPair.PrivateKey,
@@ -778,41 +830,80 @@ func (s *DeviceService) performCertExchange(
 	s.mu.RUnlock()
 
 	if certStore != nil {
-		// Store operational cert for this zone
 		if err := certStore.SetOperationalCert(operationalCert); err != nil {
+			s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
 			return nil, nil, fmt.Errorf("store operational cert: %w", err)
 		}
-
-		// Store Zone CA for this zone
 		if err := certStore.SetZoneCACert(zoneID, zoneCA); err != nil {
+			s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
 			return nil, nil, fmt.Errorf("store Zone CA: %w", err)
 		}
-
-		// Persist to disk
 		if err := certStore.Save(); err != nil {
+			s.sendCertInstallFailure(conn, commissioning.ErrCodeCertInstallFailed)
 			return nil, nil, fmt.Errorf("save cert store: %w", err)
 		}
 	}
 
-	// Step 6: Send acknowledgment
-	ack := &commissioning.CertRenewalAck{
-		MsgType:        commissioning.MsgCertRenewalAck,
-		Status:         commissioning.RenewalStatusSuccess,
-		ActiveSequence: certInstall.Sequence,
+	// Step 7: Send CertInstallResponse{Status: 0}.
+	resp := &commissioning.CertInstallResponse{
+		MsgType:   commissioning.MsgCertInstallResponse,
+		ErrorCode: commissioning.ErrCodeSuccess,
 	}
-
-	ackData, err := cbor.Marshal(ack)
+	respData, err := commissioning.EncodePASEMessage(resp)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode ack: %w", err)
+		return nil, nil, fmt.Errorf("encode CertInstallResponse: %w", err)
+	}
+	if err := conn.Send(respData); err != nil {
+		return nil, nil, fmt.Errorf("send CertInstallResponse: %w", err)
 	}
 
-	if err := conn.Send(ackData); err != nil {
-		return nil, nil, fmt.Errorf("send ack: %w", err)
+	// Step 8: Send CommissioningComplete{}.
+	complete := &commissioning.CommissioningComplete{
+		MsgType: commissioning.MsgCommissioningComplete,
+	}
+	completeData, err := commissioning.EncodePASEMessage(complete)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode CommissioningComplete: %w", err)
+	}
+	if err := conn.Send(completeData); err != nil {
+		return nil, nil, fmt.Errorf("send CommissioningComplete: %w", err)
 	}
 
 	s.debugLog("performCertExchange: complete",
 		"zoneID", zoneID,
+		"zoneType", zoneType,
 		"certExpires", newCert.NotAfter)
 
 	return operationalCert, zoneCA, nil
+}
+
+// sendCertInstallFailure emits a CertInstallResponse with a non-zero error code.
+// Best-effort — write errors are logged but not surfaced (the caller is
+// already on a failure path and is going to close the connection).
+func (s *DeviceService) sendCertInstallFailure(conn *framedConnection, errorCode uint8) {
+	resp := &commissioning.CertInstallResponse{
+		MsgType:   commissioning.MsgCertInstallResponse,
+		ErrorCode: errorCode,
+	}
+	data, err := commissioning.EncodePASEMessage(resp)
+	if err != nil {
+		s.debugLog("sendCertInstallFailure: encode failed", "error", err)
+		return
+	}
+	if err := conn.Send(data); err != nil {
+		s.debugLog("sendCertInstallFailure: send failed", "error", err)
+	}
+}
+
+// bytesEqual is a small helper to avoid importing "bytes" just for one call.
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

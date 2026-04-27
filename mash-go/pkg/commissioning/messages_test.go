@@ -209,6 +209,57 @@ func TestCommissioningError_BackwardCompat_NoRetryAfter(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// DEC-085 namespace separation: commissioning decoder rejects renewal MsgTypes
+// and vice versa. These tests pin the invariant that `mash-comm/1` carries
+// only MsgTypes 1-4, 10-13, 20, 255 and `mash/1` renewal carries only 30-33.
+// =============================================================================
+
+// TestDecodePASEMessage_RejectsRenewalMsgTypes verifies that the commissioning
+// decoder treats MsgTypes in the renewal range (30-33) as unknown. Prevents
+// an attacker (or a buggy controller) from emitting a renewal-shaped frame
+// on the commissioning ALPN to exploit a dual-purpose envelope.
+func TestDecodePASEMessage_RejectsRenewalMsgTypes(t *testing.T) {
+	for _, msgType := range []uint8{30, 31, 32, 33} {
+		t.Run("MsgType_"+commissioning.ErrorCodeString(msgType), func(t *testing.T) {
+			// Hand-build a flat CBOR map with key 1 = msgType. A trivial
+			// payload (CSR-shaped, with bytes at key 2) that would decode
+			// fine as CertRenewalCSR via DecodeRenewalMessage.
+			data, err := commissioning.EncodePASEMessage(map[int]any{
+				1: msgType,
+				2: []byte{0xde, 0xad},
+			})
+			if err != nil {
+				t.Fatalf("encode helper map: %v", err)
+			}
+			if _, err := commissioning.DecodePASEMessage(data); err == nil {
+				t.Fatalf("DecodePASEMessage accepted renewal MsgType %d on commissioning plane", msgType)
+			}
+		})
+	}
+}
+
+// TestDecodeRenewalMessage_RejectsCommissioningMsgTypes verifies the symmetric
+// invariant: a commissioning MsgType (1-4, 10-13, 20, 255) on the renewal
+// decoder is unknown. Prevents an out-of-channel commissioning frame from
+// being processed by the operational dispatcher's renewal sub-handler.
+func TestDecodeRenewalMessage_RejectsCommissioningMsgTypes(t *testing.T) {
+	for _, msgType := range []uint8{1, 2, 3, 4, 10, 11, 12, 13, 20, 255} {
+		t.Run("MsgType_"+commissioning.ErrorCodeString(msgType), func(t *testing.T) {
+			data, err := commissioning.EncodePASEMessage(map[int]any{
+				1: msgType,
+				2: []byte{0xde, 0xad},
+			})
+			if err != nil {
+				t.Fatalf("encode helper map: %v", err)
+			}
+			if _, err := commissioning.DecodeRenewalMessage(data); err == nil {
+				t.Fatalf("DecodeRenewalMessage accepted commissioning MsgType %d on renewal plane", msgType)
+			}
+		})
+	}
+}
+
 // TestCommissioningError_ZoneTypeExists verifies CommissioningError can use ZONE_TYPE_EXISTS.
 func TestCommissioningError_ZoneTypeExists(t *testing.T) {
 	errMsg := &commissioning.CommissioningError{

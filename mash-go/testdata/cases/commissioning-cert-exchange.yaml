@@ -6,16 +6,23 @@ id: TC-COMM-002
 name: Certificate Exchange After PASE
 description: |
   Verifies that after successful PASE handshake, the controller and device
-  perform certificate exchange:
+  perform certificate exchange using the spec-strict commissioning envelope
+  (DEC-085, MsgTypes 10/11/12/13/20):
 
-  1. Controller sends CertRenewalRequest with Zone CA certificate
-  2. Device generates new key pair and sends CSR
-  3. Controller signs CSR, assigns device ID, embeds in cert CommonName
-  4. Device receives operational cert, extracts device ID from CommonName
-  5. Device stores operational cert and Zone CA for future verification
+  1. Controller sends CSRRequest (MsgType 10) with a 32-byte nonce
+  2. Device generates fresh P-256 key pair and sends CSRResponse (MsgType 11)
+  3. Controller signs CSR with Zone CA, derives device ID from CSR pubkey,
+     sends CertInstall (MsgType 12) with operationalCert + caCert + zoneType
+     + zonePriority
+  4. Device verifies cert chain + pubkey match, stores cert + Zone CA, and
+     emits CertInstallResponse{Status: 0} (MsgType 13)
+  5. Device emits CommissioningComplete (MsgType 20) and closes the
+     commissioning connection
 
   This follows the Matter pattern where the commissioner assigns the Node ID
-  and embeds it in the certificate subject during signing.
+  and embeds it in the certificate subject during signing. The renewal
+  envelope (MsgTypes 30-33) is reserved for in-session renewal on the
+  operational ALPN; cross-plane usage is rejected.
 
 pics_requirements:
   - D.COMM.SC          # Device supports secure connection

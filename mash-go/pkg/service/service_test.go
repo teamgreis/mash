@@ -5,8 +5,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1849,8 +1849,14 @@ func TestRollbackCommissioningCertArtifacts_RemovesRejectedZoneCerts(t *testing.
 	}
 }
 
-func TestPerformCertExchange_RejectsZoneBeforeCSRWhenValidationFails(t *testing.T) {
-	device := model.NewDevice("test-early-zone-validation", 0x1234, 0x5678)
+// TestPerformCertExchange_RejectsZoneOnCertInstallWithErrorResponse exercises
+// DEC-085's failure path: the device generates a CSR (validation cannot run
+// before CSR generation in the new envelope, since Zone CA arrives in
+// CertInstall), then on a zone-validation failure it MUST emit
+// CertInstallResponse with a non-zero errorCode and MUST NOT send
+// CommissioningComplete.
+func TestPerformCertExchange_RejectsZoneOnCertInstallWithErrorResponse(t *testing.T) {
+	device := model.NewDevice("test-cert-install-zone-rejection", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	svc, err := NewDeviceService(device, config)
 	if err != nil {
@@ -1864,42 +1870,130 @@ func TestPerformCertExchange_RejectsZoneBeforeCSRWhenValidationFails(t *testing.
 	deviceFramed := newFramedConnection(serverConn)
 	clientFramer := transport.NewFramer(clientConn)
 
-	zoneCA, err := cert.GenerateZoneCA("zone-test", cert.ZoneTypeTest)
+	// Drive the controller side of the protocol by hand on a goroutine so
+	// performCertExchange has someone to talk to.
+	zoneCA, err := cert.GenerateZoneCA("zone-test", cert.ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("GenerateZoneCA: %v", err)
 	}
-	reqData, err := commissioning.EncodeRenewalMessage(&commissioning.CertRenewalRequest{
-		MsgType: commissioning.MsgCertRenewalRequest,
+
+	csrRequestData, err := commissioning.EncodePASEMessage(&commissioning.CSRRequest{
+		MsgType: commissioning.MsgCSRRequest,
 		Nonce:   make([]byte, 32),
-		ZoneCA:  zoneCA.Certificate.Raw,
 	})
 	if err != nil {
-		t.Fatalf("EncodeRenewalMessage: %v", err)
+		t.Fatalf("encode CSRRequest: %v", err)
 	}
 
-	writeDone := make(chan error, 1)
+	clientDone := make(chan error, 1)
+	gotCSR := make(chan struct{}, 1)
+	gotResp := make(chan *commissioning.CertInstallResponse, 1)
+	gotComplete := make(chan struct{}, 1)
 	go func() {
-		writeDone <- clientFramer.WriteFrame(reqData)
+		// 1. Send CSRRequest.
+		if err := clientFramer.WriteFrame(csrRequestData); err != nil {
+			clientDone <- fmt.Errorf("write CSRRequest: %w", err)
+			return
+		}
+		// 2. Read CSRResponse from device.
+		csrFrame, err := clientFramer.ReadFrame()
+		if err != nil {
+			clientDone <- fmt.Errorf("read CSRResponse: %w", err)
+			return
+		}
+		csrMsg, err := commissioning.DecodePASEMessage(csrFrame)
+		if err != nil {
+			clientDone <- fmt.Errorf("decode CSRResponse: %w", err)
+			return
+		}
+		csrResp, ok := csrMsg.(*commissioning.CSRResponse)
+		if !ok {
+			clientDone <- fmt.Errorf("expected CSRResponse, got %T", csrMsg)
+			return
+		}
+		if len(csrResp.CSR) == 0 {
+			clientDone <- fmt.Errorf("device returned empty CSR")
+			return
+		}
+		gotCSR <- struct{}{}
+
+		// 3. Send a CertInstall — the device's validateZone callback in this
+		//    test rejects with errCommissionZoneTypeExists, so the device
+		//    should reply with CertInstallResponse{ErrCodeZoneTypeExists}
+		//    and NOT send CommissioningComplete.
+		newCert, err := cert.SignCSR(zoneCA, csrResp.CSR)
+		if err != nil {
+			clientDone <- fmt.Errorf("sign CSR: %w", err)
+			return
+		}
+		installData, err := commissioning.EncodePASEMessage(&commissioning.CertInstall{
+			MsgType:         commissioning.MsgCertInstall,
+			OperationalCert: newCert.Raw,
+			CACert:          zoneCA.Certificate.Raw,
+			ZoneType:        uint8(cert.ZoneTypeLocal),
+			ZonePriority:    1,
+		})
+		if err != nil {
+			clientDone <- fmt.Errorf("encode CertInstall: %w", err)
+			return
+		}
+		if err := clientFramer.WriteFrame(installData); err != nil {
+			clientDone <- fmt.Errorf("write CertInstall: %w", err)
+			return
+		}
+
+		// 4. Read CertInstallResponse — expect errorCode = ZoneTypeExists.
+		respFrame, err := clientFramer.ReadFrame()
+		if err != nil {
+			clientDone <- fmt.Errorf("read CertInstallResponse: %w", err)
+			return
+		}
+		respMsg, err := commissioning.DecodePASEMessage(respFrame)
+		if err != nil {
+			clientDone <- fmt.Errorf("decode CertInstallResponse: %w", err)
+			return
+		}
+		resp, ok := respMsg.(*commissioning.CertInstallResponse)
+		if !ok {
+			clientDone <- fmt.Errorf("expected CertInstallResponse, got %T", respMsg)
+			return
+		}
+		gotResp <- resp
+
+		// 5. Verify NO CommissioningComplete arrives within a deadline.
+		_ = clientConn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+		if _, err := clientFramer.ReadFrame(); err == nil {
+			clientDone <- fmt.Errorf("unexpected frame after CertInstallResponse on failure path")
+			return
+		}
+		gotComplete <- struct{}{}
+		clientDone <- nil
 	}()
 
-	_, _, err = svc.performCertExchange(deviceFramed, "zone-test", func(_ *x509.Certificate) error {
+	_, _, err = svc.performCertExchange(deviceFramed, "zone-test", func(_ cert.ZoneType, _ *x509.Certificate) error {
 		return errCommissionZoneTypeExists
 	})
 	if !errors.Is(err, errCommissionZoneTypeExists) {
-		t.Fatalf("expected zone type rejection, got %v", err)
-	}
-	if err := <-writeDone; err != nil {
-		t.Fatalf("failed writing request frame: %v", err)
+		t.Fatalf("expected errCommissionZoneTypeExists, got %v", err)
 	}
 
-	// Critical proof: no CSR should be sent when zone validation rejects.
-	_ = clientConn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
-	_, err = clientFramer.ReadFrame()
-	if err == nil {
-		t.Fatal("expected no CSR frame after early zone validation rejection")
+	if err := <-clientDone; err != nil {
+		t.Fatalf("client side: %v", err)
 	}
-	if !strings.Contains(err.Error(), "i/o timeout") {
-		t.Fatalf("expected timeout waiting for CSR (none should be sent), got %v", err)
+	select {
+	case <-gotCSR:
+	default:
+		t.Fatal("CSRResponse never observed")
+	}
+	resp := <-gotResp
+	if resp.ErrorCode != commissioning.ErrCodeZoneTypeExists {
+		t.Errorf("CertInstallResponse.ErrorCode: expected %d (ZoneTypeExists), got %d",
+			commissioning.ErrCodeZoneTypeExists, resp.ErrorCode)
+	}
+	select {
+	case <-gotComplete:
+	default:
+		t.Fatal("CommissioningComplete must NOT be sent on failure path; got one or never reached the deadline")
 	}
 }
 

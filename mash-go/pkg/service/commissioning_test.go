@@ -130,8 +130,9 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 	}
 
 	// Note: EventConnected is NOT emitted after PASE alone.
-	// The full commissioning flow requires cert exchange (CertRenewalRequest/CSR/Install/Ack)
-	// after PASE completes. See TestControllerServiceCommission for the full flow test.
+	// The full commissioning flow requires cert exchange (CSRRequest/CSRResponse/
+	// CertInstall/CertInstallResponse/CommissioningComplete — DEC-085) after PASE
+	// completes. See TestControllerServiceCommission for the full flow test.
 }
 
 // TestDeviceServicePASEWrongSetupCode verifies PASE fails with wrong setup code.

@@ -501,9 +501,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	return outputs, nil
 }
 
-// performCertExchange executes the 4-message cert exchange after PASE.
-// It generates a Zone CA, uses IssueInitialCertSync to exchange certs with
-// the device, and stores the resulting certs on the runner for later TLS use.
+// performCertExchange executes the post-PASE commissioning cert install
+// using the spec-strict envelope (MsgTypes 10/11/12/13/20 per DEC-085).
+// It generates a Zone CA, drives PerformCommissioningCertInstall, and stores
+// the resulting certs on the runner for later TLS use.
 func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	if r.connMgr.PASEState() == nil || r.connMgr.PASEState().sessionKey == nil {
 		return "", fmt.Errorf("no PASE session key")
@@ -530,12 +531,11 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	// Create a SyncConnection adapter wrapping the framer.
 	syncConn := &framerSyncConn{framer: r.pool.Main().framer}
 
-	// Create the renewal handler and perform the 4-message cert exchange.
+	// Drive the spec-strict commissioning cert install (DEC-085).
 	r.debugf("performCertExchange: issuing cert for zone %s (type=%d)", zoneID, zt)
-	renewalHandler := service.NewControllerRenewalHandler(zoneCA, syncConn)
-	deviceCert, err := renewalHandler.IssueInitialCertSync(ctx, syncConn)
+	deviceCert, err := service.PerformCommissioningCertInstall(ctx, zoneCA, syncConn, zt, 1)
 	if err != nil {
-		r.debugf("performCertExchange: IssueInitialCertSync failed: %v", err)
+		r.debugf("performCertExchange: PerformCommissioningCertInstall failed: %v", err)
 		return "", fmt.Errorf("cert exchange: %w", err)
 	}
 

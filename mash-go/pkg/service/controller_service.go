@@ -413,10 +413,16 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 		return nil, fmt.Errorf("%w: failed to get Zone CA: %v", ErrCommissionFailed, err)
 	}
 
-	// Create renewal handler and perform initial cert exchange
-	// Use IssueInitialCertSync because we don't have a message loop yet
-	renewalHandler := NewControllerRenewalHandler(zoneCA, framedConn)
-	operationalCert, err := renewalHandler.IssueInitialCertSync(ctx, framedConn)
+	// Perform commissioning cert install on the commissioning ALPN.
+	// Per DEC-085, this uses MsgTypes 10/11/12/13/20 — distinct from in-session
+	// renewal (30–33 on operational ALPN), which is in controller_renewal.go.
+	operationalCert, err := PerformCommissioningCertInstall(
+		ctx,
+		zoneCA,
+		framedConn,
+		s.config.ZoneType,
+		1, // zonePriority — controller uses priority 1 for the first zone in this controller's set
+	)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("%w: certificate exchange failed: %v", ErrCommissionFailed, err)
