@@ -27,14 +27,20 @@ from mash_py.interaction.client import (
     StatusError,
     Subscription,
 )
+from mash_py.interaction.server import (
+    CommandError,
+    OperationalServer,
+)
 
 __all__ = [
     "DEFAULT_REQUEST_TIMEOUT",
+    "CommandError",
     "InteractionClient",
     "InteractionClientClosedError",
     "InteractionError",
     "InteractionTimeoutError",
     "NotificationHandler",
+    "OperationalServer",
     "StatusError",
     "Subscription",
 ]

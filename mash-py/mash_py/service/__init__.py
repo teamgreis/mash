@@ -17,6 +17,10 @@ from mash_py.service.controller import (
     read_device_info,
     reconnect_and_read_device_info,
 )
+from mash_py.service.device import (
+    DeviceService,
+    DeviceServiceConfig,
+)
 from mash_py.service.listeners import (
     ConnectionCapExceededError,
     ListenerConfig,
@@ -31,6 +35,8 @@ __all__ = [
     "ConnectionCapExceededError",
     "DeviceInfoReadError",
     "DeviceInfoSnapshot",
+    "DeviceService",
+    "DeviceServiceConfig",
     "ListenerConfig",
     "OperationalConnectionError",
     "OperationalHandshakeError",
