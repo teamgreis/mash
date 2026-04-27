@@ -620,6 +620,168 @@ This is a small YAML migration touching every command in every feature; the code
 
 ---
 
+### Issue #12 — `EndpointInfo.featureMap` (spec field 5): spec text predates DEC-074
+
+**Status:** 🟡 Open — likely a **spec-text fix**, not a mash-go fix (see DEC-074 analysis below)
+**Surfaced in:** Phase 13 — drafting `mash_py.model.Endpoint` against `docs/features/device-info.md` (2026-04-27)
+**Blocks:** mash-py Phase 15 (operational server) acceptance — pick a side before emitting `EndpointInfo`
+**Recent context:** DEC-074 (2026-04-23, 4 days old) reframes featureMap bit semantics in a way that undermines field 5; the spec example in device-info.md hasn't been updated yet.
+
+**The divergence.**
+
+`docs/features/device-info.md` declares the `EndpointInfo` shape returned in `DeviceInfo.endpoints` (attribute id 20):
+
+```cbor
+EndpointInfo:
+{
+  1: id,                     // uint8: endpoint ID
+  2: type,                   // EndpointTypeEnum
+  3: label,                  // string?: user-friendly name
+  4: features,               // uint16[]: feature IDs on this endpoint
+  5: featureMap,             // uint32: feature flags bitmap
+}
+```
+
+mash-go's `pkg/model/endpoint.go:151` defines:
+
+```go
+type EndpointInfo struct {
+    ID       uint8        `cbor:"1,keyasint"`
+    Type     EndpointType `cbor:"2,keyasint"`
+    Label    string       `cbor:"3,keyasint,omitempty"`
+    Features []uint16     `cbor:"4,keyasint"`
+}
+```
+
+Field 5 (`featureMap`) is absent. `Endpoint.Info()` populates the four fields above and never writes a featureMap. A spec-conformant controller reading `DeviceInfo.endpoints` therefore sees nothing where field 5 should be.
+
+**Why field 5 *would* matter, naively.** The point of `EndpointInfo` is one-shot capability discovery: a controller reads `DeviceInfo` once and learns the entire endpoint topology in a single round-trip. With field 5 absent, a controller still gets the per-feature `featureMap` (0xFFFC, scoped to *one* feature) by reading each feature individually — but that's an extra read per feature per endpoint.
+
+Note: the *per-feature* `featureMap` global attribute (id 0xFFFC) IS populated correctly on the wire (handled by `Feature.SetFeatureMap` and the global-attribute machinery). The gap is the spec's *aggregated per-endpoint* `featureMap` slot.
+
+**Why DEC-074 is the load-bearing context.**
+
+Four days before this issue surfaced, **DEC-074 (2026-04-23, commit `2ccc270`)** redefined what `featureMap` bits actually mean:
+
+> `featureMap` bits encode **capability variants within a feature**. Same feature type (e.g. Electrical) can carry different bits on different devices: EVSE → `CORE|FLEX|EMOB|V2X`, battery inverter → `CORE|FLEX|BATTERY`. […]
+>
+> **Feature presence** is discovered via the endpoint's `featureList` and the per-feature existence check, NOT by inspecting featureMap bits.
+
+DEC-074's stated rationale specifically calls out cross-feature aggregation as a category error:
+
+> Matter's featureMap is scoped to a cluster (feature), not a device. DEC-035's cross-feature unification was a premature flattening.
+
+In the same commit, DEC-074 dropped the device-level `FM` key from operational mDNS TXT records for exactly this reason ("[a] single device-level 'FM' hex number is lossy" because "bit semantics differ per feature").
+
+**`EndpointInfo.featureMap` (field 5) is the same kind of cross-feature aggregation that DEC-074 rejected at the mDNS-TXT level.** The spec example payload in device-info.md (lines 97-119) shows `featureMap: 0x0001` and `featureMap: 0x0009` per endpoint — values that under DEC-074 have no well-defined cross-feature semantics. The numbers in the example are leftovers from DEC-035's superseded device-level framing.
+
+**The actual divergence is in the spec, not in mash-go.** mash-go's omission of field 5 from `EndpointInfo` is DEC-074-aligned: don't advertise an aggregated bitmap because there's no consistent per-bit semantic. The spec text in `docs/features/device-info.md` predates DEC-074 by three weeks and hasn't been updated to reflect it.
+
+**Spec options considered.**
+
+A. **Honor the example — add field 5 to mash-go.** Wire-compatible but fights DEC-074. Would re-introduce the cross-feature ambiguity that DEC-074 explicitly removed from mDNS TXT. **Rejected.**
+B. **Drop field 5 from the spec.** Update `docs/features/device-info.md`:
+   - Remove `5: featureMap, // uint32` from the `EndpointInfo` shape.
+   - Update the example payload to four-field endpoint records.
+   - Add a one-line note pointing to DEC-074 + the per-feature `featureMap` (0xFFFC) read for capability variant discovery.
+C. **Reframe field 5 as "feature-presence bitmap."** A 64-bit map where bit N is set iff feature ID N is on this endpoint. Disjoint from per-feature variant semantics. But this duplicates field 4 (`features: uint16[]`) for no clear benefit; sorted-uint16-array beats sparse bitmap when you have <64 features.
+
+**Recommendation.** **B.** mash-go is already there. mash-py's Phase 13 model exposes `Feature.feature_map` / `Feature.set_feature_map()` (per-feature, DEC-074-aligned) but deliberately does NOT expose an `Endpoint.feature_map` aggregator slot — the omission is intentional and matches Option B.
+
+**Disposition (proposed).**
+
+1. Spec edit in `docs/features/device-info.md`:
+   - Drop `5: featureMap, // uint32: feature flags bitmap` from the `EndpointInfo` shape (lines 68-76 region).
+   - Remove the `featureMap: 0x0001` / `0x0009` lines from the example payload (lines 97-119 region).
+   - Add a one-sentence note: "Per-feature capability variants are discovered by reading global attribute `featureMap` (0xFFFC) per feature; see DEC-074."
+2. Add to DEC-074's "Implementation notes" that `EndpointInfo` field 5 is also dropped (the mDNS TXT precedent generalizes).
+3. mash-go: no change. Existing `EndpointInfo` 4-field struct is correct.
+4. mash-py: no change. Phase 13's `Endpoint` does not aggregate, by design.
+5. Add a one-line mash-py-tdd-plan.md note in Phase 15 ("emit four-field `EndpointInfo` per DEC-074-extension").
+
+**No code change required in either implementation.** This issue resolves with a single spec PR.
+
+**Affected files (when resolved).**
+- `docs/features/device-info.md` — drop field 5 from EndpointInfo shape + example.
+- `docs/decision-log.md` — DEC-074 implementation-notes addendum.
+- `mash-py-tdd-plan.md` — Phase 15 emission note.
+
+**Related.** **DEC-074** (commit `2ccc270`, 2026-04-23 — featureMap bit semantics, dropped mDNS TXT FM key); DEC-035 (superseded device-level framing); Phase 13 of the TDD plan.
+
+---
+
+### Issue #13 — `device-info.md` example uses 16-bit feature IDs that contradict `protocol-versions.yaml`
+
+**Status:** 🟡 Open (doc drift — no implementation impact)
+**Surfaced in:** Phase 13 — auditing the spec for endpoint/feature ID widths (2026-04-27)
+**Blocks:** Nothing today; flagged so a spec edit isn't held back when the next port asks "which is right?"
+
+**The divergence.**
+
+`docs/features/device-info.md` lines 97-119 illustrate `DeviceInfo.endpoints` with 16-bit feature IDs:
+
+```cbor
+endpoints: [
+  { id: 0, type: DEVICE_ROOT, features: [0x0006], featureMap: 0x0001 },
+  { id: 1, type: EV_CHARGER, label: "Port 1",
+    features: [0x0001, 0x0002, 0x0003, 0x0005, 0x0007], featureMap: 0x0009 },
+  ...
+]
+```
+
+And the prose registry directly below (lines 124-137):
+
+```
+| ID | Name |
+|----|------|
+| 0x0001 | Electrical |
+| 0x0002 | Measurement |
+| 0x0003 | EnergyControl |
+| 0x0005 | Status |
+| 0x0006 | DeviceInfo |
+| 0x0007 | ChargingSession |
+| 0x0008 | Signals |
+| 0x0009 | Tariff |
+| 0x000A | Plan |
+```
+
+But the canonical machine-readable registry — `docs/features/protocol-versions.yaml`, the source codegen consumes for both Go and Python — assigns:
+
+```yaml
+DEVICE_INFO:      0x01
+STATUS:           0x02
+ELECTRICAL:       0x03
+MEASUREMENT:      0x04
+ENERGY_CONTROL:   0x05
+CHARGING_SESSION: 0x06
+TARIFF:           0x07
+SIGNALS:          0x08
+PLAN:             0x09
+TEST_CONTROL:     0x0A
+```
+
+The example payload in device-info.md is therefore wrong on **two** axes simultaneously:
+
+1. **Width mismatch.** Example uses `0x0006` (`uint16`-shaped); registry assigns `0x06` (`uint8`). The wire format in `EndpointInfo.features` is declared as `uint16[]` (device-info.md §EndpointInfo line 73), so the width itself is correct — but writing `0x0006` instead of `0x06` in the prose example is misleading.
+2. **Value mismatch.** Even after width-normalizing, the example claims `DeviceInfo = 0x06`, `Electrical = 0x01`, `Status = 0x05`, `ChargingSession = 0x07`. The registry says `DeviceInfo = 0x01`, `Electrical = 0x03`, `Status = 0x02`, `ChargingSession = 0x06`. **All seven mappings disagree.**
+
+**Severity.** Documentation-only. No implementation reads the prose example — both Go and Python codegen consume `protocol-versions.yaml`, which is internally consistent. A new-language porter who reads the prose first and the YAML second will lose ~30 minutes reconciling, and may file a spurious bug against whichever registry they read first.
+
+**Recent context.** Commit `58e9a4b` (2026-04-25, "docs+docgen: reconcile YAML drift and expand onboarding") swept several YAML-vs-prose drifts (charging-session `sessionId`, `evMin`/`evTargetStateOfCharge`, energy-control `optionalProcess` flattening, three-doc `max_zones` mismatch). The `device-info.md` feature-ID example/registry drift was missed in that pass — surfacing it here so it's queued for the next one.
+
+**Disposition.** Doc fix in `docs/features/device-info.md`:
+1. Re-do the example endpoint payload with the registry's actual IDs (`features: [0x03, 0x04, 0x05, 0x02, 0x06]` for an EV_CHARGER with Electrical/Measurement/EnergyControl/Status/ChargingSession). Resolve Issue #12's field-5 question first so the example doesn't carry forward `featureMap: 0x0009`.
+2. Either drop the embedded "Feature ID Registry" table from device-info.md (replace with a pointer to `protocol-versions.yaml`) or auto-generate it from the YAML via the `mash-docgen` pipeline so it can't drift again — same approach commit `58e9a4b` used for other normative tables.
+3. Add a one-line note in `docs/features/README.md` that the YAML registry is canonical and prose tables are illustrative only (commit `58e9a4b` already added a normative-reference banner to per-feature pages; extend it to README).
+
+**Recommendation.** Auto-generate from the YAML. The prose table will drift again the moment a new feature is added; the YAML registry has machinery (`mash-docgen` per `58e9a4b`) that already handles regeneration.
+
+**No code action required.** mash-py and mash-go are both registry-faithful as of Phase 12 codegen.
+
+**Related.** Phase 12 codegen (YAML as single source of truth); commit `58e9a4b` (the doc/YAML drift sweep that this slot belongs in); Issue #12 (resolve first to avoid re-encoding the spec example with a stale field 5); DEC-074 (featureMap).
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.
