@@ -415,13 +415,13 @@ The conventions in each phase:
 | 7B | mash-test Conformance Vectors + Harness | Done (2026-04-26) |
 | 7C | mash-go SPAKE2+ Update to DEC-084 | Done (2026-04-26) |
 | 7D | mash-py SPAKE2+ Implementation | Done (2026-04-26) |
-| 8 | PASE Message Exchange (Client Side) | Pending |
-| 9 | CSR & Certificate Install | Pending |
-| 10 | Operational Connection (Post-Commissioning) | Pending |
-| 11 | Interaction Model Client | Pending |
-| 12 | Code Generation (Python from YAML) | Pending |
-| 13 | Device Model | Pending |
-| 14 | PASE Server (Device Side) | Pending |
+| 8 | PASE Message Exchange (Client Side) | Done (2026-04-26) |
+| 9 | CSR & Certificate Install | Done (2026-04-27) |
+| 10 | Operational Connection (Post-Commissioning) | Done (2026-04-27) |
+| 11 | Interaction Model Client | Done (2026-04-27) |
+| 12 | Code Generation (Python from YAML) | Done (2026-04-27) |
+| 13 | Device Model | Done (2026-04-27) |
+| 14 | PASE Server (Device Side) | Done (2026-04-27) |
 | 15 | Operational Server (Device Side) | Pending |
 | 16 | Subscriptions & Notifications | Pending |
 | 17 | TestControl Feature & Trigger Handlers | Pending |
@@ -1177,7 +1177,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 14 — PASE Server (Device Side)
 
-**Status.** Pending.
+**Status.** ✅ Complete (2026-04-27). `mash_py.commissioning.PASEServer` shipped — async device-side state machine mirroring `PASEClient`'s shape. 12 new unit tests under `tests/unit/commissioning/test_pase_server.py` (PASEClient ↔ PASEServer loopback + hand-crafted bad-frame paths); 2 new live-interop tests under `tests/interop/commissioning/test_pase_server_with_go_controller.py` against a focused Go helper (`tools/run_pase_client/`) that drives `commissioning.PASEClientSession` over TLS commissioning channel. Live byte-equality verified: Python server K_main = Go client K_main = `a4f522e5…01d9` for setup_code=20202021, discriminator=3840. Spec-strict on the failure envelope: every in-PASE failure (wrong identity, invalid pA, MAC mismatch) emits `PASEComplete{ErrCodeAuthFailed}` with zero-padded confirmation — `CommissioningError` is never sent from inside the handshake (Issue #6 closed on both sides). Issue #14 filed (`mash-py-spec-issues.md`) proposing §6.5 spec edit to allow constant-time minimum-duration floor as a conformant alternative to random 100-500 ms delay. Total suite: 459 unit + 536 full (excluding `slow`); mypy + ruff clean.
 
 **Goal.** A Python device can receive PASE handshake from a Go controller and complete it.
 
