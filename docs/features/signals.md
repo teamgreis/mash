@@ -2,7 +2,7 @@
 
 > Time-slotted incentive signals: prices, limits, forecasts
 
-**Feature ID:** 0x0008
+**Feature ID:** 0x08
 **Direction:** IN (controller sends to device)
 **FeatureMap Bit:** SIGNALS (0x0010)
 **Status:** Draft

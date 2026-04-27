@@ -2,7 +2,7 @@
 
 > Price structure, components, and power-dependent tiers
 
-**Feature ID:** 0x0007
+**Feature ID:** 0x07
 **Direction:** IN (controller sends to device)
 **FeatureMap Bit:** TARIFF (0x0020)
 **Status:** Draft

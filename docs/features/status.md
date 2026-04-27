@@ -2,7 +2,7 @@
 
 > Per-endpoint operating state and health
 
-**Feature ID:** 0x0002
+**Feature ID:** 0x02
 **Direction:** OUT (device reports to controller)
 **Status:** Draft
 **Last Updated:** 2025-01-25

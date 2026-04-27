@@ -2,7 +2,7 @@
 
 > Real-time telemetry - power, energy, voltage, current readings
 
-**Feature ID:** 0x0004
+**Feature ID:** 0x04
 **Direction:** OUT (device reports to controller)
 **Status:** Draft
 **Last Updated:** 2025-01-25

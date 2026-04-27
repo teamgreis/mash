@@ -43,18 +43,7 @@ MASH features are organized by concern:
 
 ## Feature Registry
 
-| ID | Name | Direction | Description | Document |
-|----|------|-----------|-------------|----------|
-| 0x0001 | DeviceInfo | OUT | Device identity and structure | [device-info.md](device-info.md) |
-| 0x0002 | Status | OUT | Operating state, faults | [status.md](status.md) |
-| 0x0003 | Electrical | - | Dynamic electrical configuration | [electrical.md](electrical.md) |
-| 0x0004 | Measurement | OUT | Power, energy, voltage, current telemetry | [measurement.md](measurement.md) |
-| 0x0005 | EnergyControl | IN | Limits, setpoints, control commands | [energy-control.md](energy-control.md) |
-| 0x0006 | ChargingSession | OUT | EV charging session data | [charging-session.md](charging-session.md) |
-| 0x0007 | Tariff | IN | Price structure, components, power tiers | [tariff.md](tariff.md) |
-| 0x0008 | Signals | IN | Time-slotted prices, limits, forecasts | [signals.md](signals.md) |
-| 0x0009 | Plan | OUT | Device's intended behavior | [plan.md](plan.md) |
-| 0x0100+ | (vendor) | - | Vendor-specific features | |
+See [`protocol-versions.yaml`](protocol-versions.yaml) for the canonical Feature ID registry — both `mash-go` and `mash-py` codegen consume it directly. Per-feature data-flow direction is declared on each feature's hand-written page (`**Direction:**` header).
 
 **Direction (data flow):**
 - **IN** = Data flows TO device (controller sends)

@@ -2,7 +2,7 @@
 
 > Device identity, manufacturer information, and device structure
 
-**Feature ID:** 0x0001
+**Feature ID:** 0x01
 **Direction:** OUT (device reports to controller)
 **Status:** Draft
 **Last Updated:** 2025-01-25

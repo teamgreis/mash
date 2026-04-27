@@ -2,7 +2,7 @@
 
 > EV charging session state, energy demands, and vehicle identification
 
-**Feature ID:** 0x0006
+**Feature ID:** 0x06
 **Direction:** OUT (device reports to controller)
 **FeatureMap Bit:** EMOB (0x0008)
 **Status:** Draft

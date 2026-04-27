@@ -2,7 +2,7 @@
 
 > Device's intended power behavior over time
 
-**Feature ID:** 0x0009
+**Feature ID:** 0x09
 **Direction:** OUT (device reports to controller)
 **FeatureMap Bit:** PLAN (0x0040)
 **Status:** Draft
