@@ -170,7 +170,7 @@ class Tariff(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(TARIFF_ATTR_TARIFF_ID, value)
+        self.set_attribute_internal(TARIFF_ATTR_TARIFF_ID, value)
 
     def currency(self) -> str:
         """ISO 4217 currency code (EUR, USD, etc.)"""
@@ -183,7 +183,7 @@ class Tariff(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(TARIFF_ATTR_CURRENCY, value)
+        self.set_attribute_internal(TARIFF_ATTR_CURRENCY, value)
 
     def price_unit(self) -> PriceUnit:
         """Unit for price values in Signals"""
@@ -196,7 +196,7 @@ class Tariff(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(TARIFF_ATTR_PRICE_UNIT, value)
+        self.set_attribute_internal(TARIFF_ATTR_PRICE_UNIT, value)
 
     def tariff_description(self) -> str | None:
         """Human-readable tariff name"""
@@ -209,9 +209,9 @@ class Tariff(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(TARIFF_ATTR_TARIFF_DESCRIPTION, value)
+        self.set_attribute_internal(TARIFF_ATTR_TARIFF_DESCRIPTION, value)
 
     def clear_tariff_description(self) -> None:
         """Clear ``tariffDescription`` (set to ``None``)."""
-        self.write_attribute(TARIFF_ATTR_TARIFF_DESCRIPTION, None)
+        self.set_attribute_internal(TARIFF_ATTR_TARIFF_DESCRIPTION, None)
 

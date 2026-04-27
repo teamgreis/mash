@@ -127,7 +127,7 @@ class Status(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(STATUS_ATTR_OPERATING_STATE, value)
+        self.set_attribute_internal(STATUS_ATTR_OPERATING_STATE, value)
 
     def state_detail(self) -> int | None:
         """Vendor-specific state detail code"""
@@ -140,11 +140,11 @@ class Status(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(STATUS_ATTR_STATE_DETAIL, value)
+        self.set_attribute_internal(STATUS_ATTR_STATE_DETAIL, value)
 
     def clear_state_detail(self) -> None:
         """Clear ``stateDetail`` (set to ``None``)."""
-        self.write_attribute(STATUS_ATTR_STATE_DETAIL, None)
+        self.set_attribute_internal(STATUS_ATTR_STATE_DETAIL, None)
 
     def fault_code(self) -> int | None:
         """Fault/error code when state=FAULT"""
@@ -157,11 +157,11 @@ class Status(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(STATUS_ATTR_FAULT_CODE, value)
+        self.set_attribute_internal(STATUS_ATTR_FAULT_CODE, value)
 
     def clear_fault_code(self) -> None:
         """Clear ``faultCode`` (set to ``None``)."""
-        self.write_attribute(STATUS_ATTR_FAULT_CODE, None)
+        self.set_attribute_internal(STATUS_ATTR_FAULT_CODE, None)
 
     def fault_message(self) -> str | None:
         """Human-readable fault description"""
@@ -174,9 +174,9 @@ class Status(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(STATUS_ATTR_FAULT_MESSAGE, value)
+        self.set_attribute_internal(STATUS_ATTR_FAULT_MESSAGE, value)
 
     def clear_fault_message(self) -> None:
         """Clear ``faultMessage`` (set to ``None``)."""
-        self.write_attribute(STATUS_ATTR_FAULT_MESSAGE, None)
+        self.set_attribute_internal(STATUS_ATTR_FAULT_MESSAGE, None)
 

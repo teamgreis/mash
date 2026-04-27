@@ -280,7 +280,7 @@ class Plan(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(PLAN_ATTR_PLAN_ID, value)
+        self.set_attribute_internal(PLAN_ATTR_PLAN_ID, value)
 
     def plan_version(self) -> int:
         """Increments on each plan update"""
@@ -293,7 +293,7 @@ class Plan(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(PLAN_ATTR_PLAN_VERSION, value)
+        self.set_attribute_internal(PLAN_ATTR_PLAN_VERSION, value)
 
     def commitment(self) -> Commitment:
         """How firm this plan is"""
@@ -306,7 +306,7 @@ class Plan(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(PLAN_ATTR_COMMITMENT, value)
+        self.set_attribute_internal(PLAN_ATTR_COMMITMENT, value)
 
     def start_time(self) -> int | None:
         """When the plan starts (Unix timestamp)"""
@@ -319,11 +319,11 @@ class Plan(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(PLAN_ATTR_START_TIME, value)
+        self.set_attribute_internal(PLAN_ATTR_START_TIME, value)
 
     def clear_start_time(self) -> None:
         """Clear ``startTime`` (set to ``None``)."""
-        self.write_attribute(PLAN_ATTR_START_TIME, None)
+        self.set_attribute_internal(PLAN_ATTR_START_TIME, None)
 
     def end_time(self) -> int | None:
         """When the plan ends (Unix timestamp)"""
@@ -336,11 +336,11 @@ class Plan(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(PLAN_ATTR_END_TIME, value)
+        self.set_attribute_internal(PLAN_ATTR_END_TIME, value)
 
     def clear_end_time(self) -> None:
         """Clear ``endTime`` (set to ``None``)."""
-        self.write_attribute(PLAN_ATTR_END_TIME, None)
+        self.set_attribute_internal(PLAN_ATTR_END_TIME, None)
 
     def total_energy_planned(self) -> int | None:
         """Total planned energy (positive=consumption, negative=production)"""
@@ -353,11 +353,11 @@ class Plan(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(PLAN_ATTR_TOTAL_ENERGY_PLANNED, value)
+        self.set_attribute_internal(PLAN_ATTR_TOTAL_ENERGY_PLANNED, value)
 
     def clear_total_energy_planned(self) -> None:
         """Clear ``totalEnergyPlanned`` (set to ``None``)."""
-        self.write_attribute(PLAN_ATTR_TOTAL_ENERGY_PLANNED, None)
+        self.set_attribute_internal(PLAN_ATTR_TOTAL_ENERGY_PLANNED, None)
 
     def slots(self) -> list[PlanSlot] | None:
         """Planned power behavior slots"""
@@ -370,9 +370,9 @@ class Plan(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(PLAN_ATTR_SLOTS, value)
+        self.set_attribute_internal(PLAN_ATTR_SLOTS, value)
 
     def clear_slots(self) -> None:
         """Clear ``slots`` (set to ``None``)."""
-        self.write_attribute(PLAN_ATTR_SLOTS, None)
+        self.set_attribute_internal(PLAN_ATTR_SLOTS, None)
 

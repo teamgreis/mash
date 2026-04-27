@@ -285,7 +285,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_DEVICE_ID, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_DEVICE_ID, value)
 
     def vendor_name(self) -> str:
         """Manufacturer name"""
@@ -298,7 +298,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_VENDOR_NAME, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_VENDOR_NAME, value)
 
     def product_name(self) -> str:
         """Product name"""
@@ -311,7 +311,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_PRODUCT_NAME, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_PRODUCT_NAME, value)
 
     def serial_number(self) -> str:
         """Device serial number"""
@@ -324,7 +324,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_SERIAL_NUMBER, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_SERIAL_NUMBER, value)
 
     def vendor_id(self) -> int | None:
         """IANA Private Enterprise Number"""
@@ -337,11 +337,11 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_VENDOR_ID, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_VENDOR_ID, value)
 
     def clear_vendor_id(self) -> None:
         """Clear ``vendorId`` (set to ``None``)."""
-        self.write_attribute(DEVICE_INFO_ATTR_VENDOR_ID, None)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_VENDOR_ID, None)
 
     def product_id(self) -> int | None:
         """Vendor's product ID"""
@@ -354,11 +354,11 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_PRODUCT_ID, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_PRODUCT_ID, value)
 
     def clear_product_id(self) -> None:
         """Clear ``productId`` (set to ``None``)."""
-        self.write_attribute(DEVICE_INFO_ATTR_PRODUCT_ID, None)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_PRODUCT_ID, None)
 
     def software_version(self) -> str:
         """Firmware/software version"""
@@ -371,7 +371,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_SOFTWARE_VERSION, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_SOFTWARE_VERSION, value)
 
     def hardware_version(self) -> str | None:
         """Hardware revision"""
@@ -384,11 +384,11 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_HARDWARE_VERSION, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_HARDWARE_VERSION, value)
 
     def clear_hardware_version(self) -> None:
         """Clear ``hardwareVersion`` (set to ``None``)."""
-        self.write_attribute(DEVICE_INFO_ATTR_HARDWARE_VERSION, None)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_HARDWARE_VERSION, None)
 
     def spec_version(self) -> str:
         """MASH specification version"""
@@ -401,7 +401,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_SPEC_VERSION, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_SPEC_VERSION, value)
 
     def endpoints(self) -> list[Any]:
         """Complete device endpoint structure"""
@@ -414,7 +414,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_ENDPOINTS, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_ENDPOINTS, value)
 
     def use_cases(self) -> list[Any]:
         """Use cases supported by this device"""
@@ -427,7 +427,7 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_USE_CASES, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_USE_CASES, value)
 
     def location(self) -> str | None:
         """Installation location"""
@@ -466,5 +466,5 @@ class DeviceInfo(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(DEVICE_INFO_ATTR_ZONE_COUNT, value)
+        self.set_attribute_internal(DEVICE_INFO_ATTR_ZONE_COUNT, value)
 

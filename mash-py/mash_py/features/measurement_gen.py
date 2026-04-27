@@ -395,11 +395,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_ACTIVE_POWER, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ACTIVE_POWER, value)
 
     def clear_ac_active_power(self) -> None:
         """Clear ``acActivePower`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_ACTIVE_POWER, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ACTIVE_POWER, None)
 
     def ac_reactive_power(self) -> int | None:
         """Reactive power"""
@@ -412,11 +412,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_REACTIVE_POWER, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_REACTIVE_POWER, value)
 
     def clear_ac_reactive_power(self) -> None:
         """Clear ``acReactivePower`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_REACTIVE_POWER, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_REACTIVE_POWER, None)
 
     def ac_apparent_power(self) -> int | None:
         """Apparent power (always positive)"""
@@ -429,11 +429,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_APPARENT_POWER, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_APPARENT_POWER, value)
 
     def clear_ac_apparent_power(self) -> None:
         """Clear ``acApparentPower`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_APPARENT_POWER, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_APPARENT_POWER, None)
 
     def ac_active_power_per_phase(self) -> dict[Phase, int] | None:
         """Active power per phase (Phase -> mW)"""
@@ -446,11 +446,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_ACTIVE_POWER_PER_PHASE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ACTIVE_POWER_PER_PHASE, value)
 
     def clear_ac_active_power_per_phase(self) -> None:
         """Clear ``acActivePowerPerPhase`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_ACTIVE_POWER_PER_PHASE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ACTIVE_POWER_PER_PHASE, None)
 
     def ac_reactive_power_per_phase(self) -> dict[Phase, int] | None:
         """Reactive power per phase (Phase -> mVAR)"""
@@ -463,11 +463,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_REACTIVE_POWER_PER_PHASE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_REACTIVE_POWER_PER_PHASE, value)
 
     def clear_ac_reactive_power_per_phase(self) -> None:
         """Clear ``acReactivePowerPerPhase`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_REACTIVE_POWER_PER_PHASE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_REACTIVE_POWER_PER_PHASE, None)
 
     def ac_apparent_power_per_phase(self) -> dict[Phase, int] | None:
         """Apparent power per phase (Phase -> mVA)"""
@@ -480,11 +480,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_APPARENT_POWER_PER_PHASE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_APPARENT_POWER_PER_PHASE, value)
 
     def clear_ac_apparent_power_per_phase(self) -> None:
         """Clear ``acApparentPowerPerPhase`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_APPARENT_POWER_PER_PHASE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_APPARENT_POWER_PER_PHASE, None)
 
     def ac_current_per_phase(self) -> dict[Phase, int] | None:
         """Current per phase (Phase -> mA, signed)"""
@@ -497,11 +497,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_CURRENT_PER_PHASE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_CURRENT_PER_PHASE, value)
 
     def clear_ac_current_per_phase(self) -> None:
         """Clear ``acCurrentPerPhase`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_CURRENT_PER_PHASE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_CURRENT_PER_PHASE, None)
 
     def ac_voltage_per_phase(self) -> dict[Phase, int] | None:
         """Phase-to-neutral voltage (Phase -> mV)"""
@@ -514,11 +514,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_VOLTAGE_PER_PHASE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_VOLTAGE_PER_PHASE, value)
 
     def clear_ac_voltage_per_phase(self) -> None:
         """Clear ``acVoltagePerPhase`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_VOLTAGE_PER_PHASE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_VOLTAGE_PER_PHASE, None)
 
     def ac_voltage_phase_to_phase_pair(self) -> dict[PhasePair, int] | None:
         """Phase-to-phase voltage (PhasePair -> mV)"""
@@ -531,11 +531,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_VOLTAGE_PHASE_TO_PHASE_PAIR, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_VOLTAGE_PHASE_TO_PHASE_PAIR, value)
 
     def clear_ac_voltage_phase_to_phase_pair(self) -> None:
         """Clear ``acVoltagePhaseToPhasePair`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_VOLTAGE_PHASE_TO_PHASE_PAIR, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_VOLTAGE_PHASE_TO_PHASE_PAIR, None)
 
     def ac_frequency(self) -> int | None:
         """Grid frequency in millihertz (DEC-070 range: 45000-65000 mHz covers 50/60 Hz with headroom)"""
@@ -548,11 +548,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_FREQUENCY, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_FREQUENCY, value)
 
     def clear_ac_frequency(self) -> None:
         """Clear ``acFrequency`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_FREQUENCY, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_FREQUENCY, None)
 
     def power_factor(self) -> int | None:
         """Power factor (0.001 units, -1.0 to +1.0)"""
@@ -565,11 +565,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_POWER_FACTOR, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_POWER_FACTOR, value)
 
     def clear_power_factor(self) -> None:
         """Clear ``powerFactor`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_POWER_FACTOR, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_POWER_FACTOR, None)
 
     def ac_energy_consumed(self) -> int | None:
         """Total energy consumed from grid"""
@@ -582,11 +582,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_ENERGY_CONSUMED, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ENERGY_CONSUMED, value)
 
     def clear_ac_energy_consumed(self) -> None:
         """Clear ``acEnergyConsumed`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_ENERGY_CONSUMED, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ENERGY_CONSUMED, None)
 
     def ac_energy_produced(self) -> int | None:
         """Total energy produced/fed-in to grid"""
@@ -599,11 +599,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_AC_ENERGY_PRODUCED, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ENERGY_PRODUCED, value)
 
     def clear_ac_energy_produced(self) -> None:
         """Clear ``acEnergyProduced`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_AC_ENERGY_PRODUCED, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_AC_ENERGY_PRODUCED, None)
 
     def dc_power(self) -> int | None:
         """DC power (+ into device, - out)"""
@@ -616,11 +616,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_DC_POWER, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_POWER, value)
 
     def clear_dc_power(self) -> None:
         """Clear ``dcPower`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_DC_POWER, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_POWER, None)
 
     def dc_current(self) -> int | None:
         """DC current (+ into device, - out)"""
@@ -633,11 +633,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_DC_CURRENT, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_CURRENT, value)
 
     def clear_dc_current(self) -> None:
         """Clear ``dcCurrent`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_DC_CURRENT, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_CURRENT, None)
 
     def dc_voltage(self) -> int | None:
         """DC voltage"""
@@ -650,11 +650,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_DC_VOLTAGE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_VOLTAGE, value)
 
     def clear_dc_voltage(self) -> None:
         """Clear ``dcVoltage`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_DC_VOLTAGE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_VOLTAGE, None)
 
     def dc_energy_in(self) -> int | None:
         """Energy into this component"""
@@ -667,11 +667,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_DC_ENERGY_IN, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_ENERGY_IN, value)
 
     def clear_dc_energy_in(self) -> None:
         """Clear ``dcEnergyIn`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_DC_ENERGY_IN, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_ENERGY_IN, None)
 
     def dc_energy_out(self) -> int | None:
         """Energy out of this component"""
@@ -684,11 +684,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_DC_ENERGY_OUT, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_ENERGY_OUT, value)
 
     def clear_dc_energy_out(self) -> None:
         """Clear ``dcEnergyOut`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_DC_ENERGY_OUT, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_DC_ENERGY_OUT, None)
 
     def state_of_charge(self) -> int | None:
         """State of charge (0-100%)"""
@@ -701,11 +701,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_STATE_OF_CHARGE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_STATE_OF_CHARGE, value)
 
     def clear_state_of_charge(self) -> None:
         """Clear ``stateOfCharge`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_STATE_OF_CHARGE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_STATE_OF_CHARGE, None)
 
     def state_of_health(self) -> int | None:
         """State of health (0-100%, battery degradation)"""
@@ -718,11 +718,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_STATE_OF_HEALTH, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_STATE_OF_HEALTH, value)
 
     def clear_state_of_health(self) -> None:
         """Clear ``stateOfHealth`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_STATE_OF_HEALTH, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_STATE_OF_HEALTH, None)
 
     def state_of_energy(self) -> int | None:
         """Available energy at current SoC"""
@@ -735,11 +735,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_STATE_OF_ENERGY, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_STATE_OF_ENERGY, value)
 
     def clear_state_of_energy(self) -> None:
         """Clear ``stateOfEnergy`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_STATE_OF_ENERGY, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_STATE_OF_ENERGY, None)
 
     def useable_capacity(self) -> int | None:
         """Current useable capacity"""
@@ -752,11 +752,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_USEABLE_CAPACITY, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_USEABLE_CAPACITY, value)
 
     def clear_useable_capacity(self) -> None:
         """Clear ``useableCapacity`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_USEABLE_CAPACITY, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_USEABLE_CAPACITY, None)
 
     def cycle_count(self) -> int | None:
         """Charge/discharge cycles"""
@@ -769,11 +769,11 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_CYCLE_COUNT, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_CYCLE_COUNT, value)
 
     def clear_cycle_count(self) -> None:
         """Clear ``cycleCount`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_CYCLE_COUNT, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_CYCLE_COUNT, None)
 
     def temperature(self) -> int | None:
         """Temperature (e.g., 2500 = 25.00C)"""
@@ -786,9 +786,9 @@ class Measurement(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(MEASUREMENT_ATTR_TEMPERATURE, value)
+        self.set_attribute_internal(MEASUREMENT_ATTR_TEMPERATURE, value)
 
     def clear_temperature(self) -> None:
         """Clear ``temperature`` (set to ``None``)."""
-        self.write_attribute(MEASUREMENT_ATTR_TEMPERATURE, None)
+        self.set_attribute_internal(MEASUREMENT_ATTR_TEMPERATURE, None)
 

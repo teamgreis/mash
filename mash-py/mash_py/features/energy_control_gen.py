@@ -1068,7 +1068,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_DEVICE_TYPE, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_DEVICE_TYPE, value)
 
     def control_state(self) -> ControlState:
         """Control relationship state"""
@@ -1081,7 +1081,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_CONTROL_STATE, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_CONTROL_STATE, value)
 
     def opt_out_state(self) -> OptOutState:
         """Opt-out state for external control"""
@@ -1103,7 +1103,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_ACCEPTS_LIMITS, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_ACCEPTS_LIMITS, value)
 
     def accepts_current_limits(self) -> bool:
         """Accepts SetCurrentLimits command"""
@@ -1116,7 +1116,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_ACCEPTS_CURRENT_LIMITS, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_ACCEPTS_CURRENT_LIMITS, value)
 
     def accepts_setpoints(self) -> bool:
         """Accepts SetSetpoint command"""
@@ -1129,7 +1129,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_ACCEPTS_SETPOINTS, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_ACCEPTS_SETPOINTS, value)
 
     def accepts_current_setpoints(self) -> bool:
         """Accepts SetCurrentSetpoints command"""
@@ -1142,7 +1142,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_ACCEPTS_CURRENT_SETPOINTS, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_ACCEPTS_CURRENT_SETPOINTS, value)
 
     def is_pausable(self) -> bool:
         """Accepts Pause/Resume commands"""
@@ -1155,7 +1155,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_IS_PAUSABLE, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_IS_PAUSABLE, value)
 
     def is_shiftable(self) -> bool:
         """Process start time can be shifted by the controller via setSetpoint with cause=SCHEDULED"""
@@ -1168,7 +1168,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_IS_SHIFTABLE, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_IS_SHIFTABLE, value)
 
     def is_stoppable(self) -> bool:
         """Accepts Stop command"""
@@ -1181,7 +1181,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_IS_STOPPABLE, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_IS_STOPPABLE, value)
 
     def effective_consumption_limit(self) -> int | None:
         """Effective consumption limit (min of all zones)"""
@@ -1194,11 +1194,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_LIMIT, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_LIMIT, value)
 
     def clear_effective_consumption_limit(self) -> None:
         """Clear ``effectiveConsumptionLimit`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_LIMIT, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_LIMIT, None)
 
     def my_consumption_limit(self) -> int | None:
         """This zone's consumption limit"""
@@ -1224,11 +1224,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_LIMIT, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_LIMIT, value)
 
     def clear_effective_production_limit(self) -> None:
         """Clear ``effectiveProductionLimit`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_LIMIT, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_LIMIT, None)
 
     def my_production_limit(self) -> int | None:
         """This zone's production limit"""
@@ -1254,11 +1254,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_CONSUMPTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_CONSUMPTION, value)
 
     def clear_effective_current_limits_consumption(self) -> None:
         """Clear ``effectiveCurrentLimitsConsumption`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_CONSUMPTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_CONSUMPTION, None)
 
     def my_current_limits_consumption(self) -> dict[Phase, int] | None:
         """This zone's per-phase current limits (consumption)"""
@@ -1271,11 +1271,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_CONSUMPTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_CONSUMPTION, value)
 
     def clear_my_current_limits_consumption(self) -> None:
         """Clear ``myCurrentLimitsConsumption`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_CONSUMPTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_CONSUMPTION, None)
 
     def effective_current_limits_production(self) -> dict[Phase, int] | None:
         """Effective per-phase current limits (production)"""
@@ -1288,11 +1288,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_PRODUCTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_PRODUCTION, value)
 
     def clear_effective_current_limits_production(self) -> None:
         """Clear ``effectiveCurrentLimitsProduction`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_PRODUCTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_LIMITS_PRODUCTION, None)
 
     def my_current_limits_production(self) -> dict[Phase, int] | None:
         """This zone's per-phase current limits (production)"""
@@ -1305,11 +1305,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_PRODUCTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_PRODUCTION, value)
 
     def clear_my_current_limits_production(self) -> None:
         """Clear ``myCurrentLimitsProduction`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_PRODUCTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_LIMITS_PRODUCTION, None)
 
     def effective_consumption_setpoint(self) -> int | None:
         """Effective consumption setpoint"""
@@ -1322,11 +1322,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_SETPOINT, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_SETPOINT, value)
 
     def clear_effective_consumption_setpoint(self) -> None:
         """Clear ``effectiveConsumptionSetpoint`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_SETPOINT, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CONSUMPTION_SETPOINT, None)
 
     def my_consumption_setpoint(self) -> int | None:
         """This zone's consumption setpoint"""
@@ -1352,11 +1352,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_SETPOINT, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_SETPOINT, value)
 
     def clear_effective_production_setpoint(self) -> None:
         """Clear ``effectiveProductionSetpoint`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_SETPOINT, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_PRODUCTION_SETPOINT, None)
 
     def my_production_setpoint(self) -> int | None:
         """This zone's production setpoint"""
@@ -1382,11 +1382,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_CONSUMPTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_CONSUMPTION, value)
 
     def clear_effective_current_setpoints_consumption(self) -> None:
         """Clear ``effectiveCurrentSetpointsConsumption`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_CONSUMPTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_CONSUMPTION, None)
 
     def my_current_setpoints_consumption(self) -> dict[Phase, int] | None:
         """This zone's per-phase current setpoints (consumption)"""
@@ -1399,11 +1399,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_CONSUMPTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_CONSUMPTION, value)
 
     def clear_my_current_setpoints_consumption(self) -> None:
         """Clear ``myCurrentSetpointsConsumption`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_CONSUMPTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_CONSUMPTION, None)
 
     def effective_current_setpoints_production(self) -> dict[Phase, int] | None:
         """Effective per-phase current setpoints (production)"""
@@ -1416,11 +1416,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_PRODUCTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_PRODUCTION, value)
 
     def clear_effective_current_setpoints_production(self) -> None:
         """Clear ``effectiveCurrentSetpointsProduction`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_PRODUCTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_EFFECTIVE_CURRENT_SETPOINTS_PRODUCTION, None)
 
     def my_current_setpoints_production(self) -> dict[Phase, int] | None:
         """This zone's per-phase current setpoints (production)"""
@@ -1433,11 +1433,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_PRODUCTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_PRODUCTION, value)
 
     def clear_my_current_setpoints_production(self) -> None:
         """Clear ``myCurrentSetpointsProduction`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_PRODUCTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MY_CURRENT_SETPOINTS_PRODUCTION, None)
 
     def failsafe_consumption_limit(self) -> int | None:
         """Limit to apply in FAILSAFE state"""
@@ -1485,11 +1485,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_CONTRACTUAL_CONSUMPTION_MAX, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_CONTRACTUAL_CONSUMPTION_MAX, value)
 
     def clear_contractual_consumption_max(self) -> None:
         """Clear ``contractualConsumptionMax`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_CONTRACTUAL_CONSUMPTION_MAX, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_CONTRACTUAL_CONSUMPTION_MAX, None)
 
     def contractual_production_max(self) -> int | None:
         """Building's max allowed feed-in (EMS only)"""
@@ -1502,11 +1502,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_CONTRACTUAL_PRODUCTION_MAX, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_CONTRACTUAL_PRODUCTION_MAX, value)
 
     def clear_contractual_production_max(self) -> None:
         """Clear ``contractualProductionMax`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_CONTRACTUAL_PRODUCTION_MAX, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_CONTRACTUAL_PRODUCTION_MAX, None)
 
     def override_reason(self) -> OverrideReason | None:
         """Why device is in OVERRIDE state"""
@@ -1519,11 +1519,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_OVERRIDE_REASON, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_OVERRIDE_REASON, value)
 
     def clear_override_reason(self) -> None:
         """Clear ``overrideReason`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_OVERRIDE_REASON, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_OVERRIDE_REASON, None)
 
     def override_direction(self) -> Direction | None:
         """Which direction triggered override"""
@@ -1536,11 +1536,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_OVERRIDE_DIRECTION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_OVERRIDE_DIRECTION, value)
 
     def clear_override_direction(self) -> None:
         """Clear ``overrideDirection`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_OVERRIDE_DIRECTION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_OVERRIDE_DIRECTION, None)
 
     def process_state(self) -> ProcessState:
         """Current process lifecycle state"""
@@ -1553,7 +1553,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_PROCESS_STATE, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_PROCESS_STATE, value)
 
     def optional_process(self) -> bool:
         """Whether the process is optional (can be deferred)"""
@@ -1566,7 +1566,7 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_OPTIONAL_PROCESS, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_OPTIONAL_PROCESS, value)
 
     def min_run_duration(self) -> int | None:
         """Minimum run time before pause/stop"""
@@ -1579,11 +1579,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MIN_RUN_DURATION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MIN_RUN_DURATION, value)
 
     def clear_min_run_duration(self) -> None:
         """Clear ``minRunDuration`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MIN_RUN_DURATION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MIN_RUN_DURATION, None)
 
     def min_pause_duration(self) -> int | None:
         """Minimum pause before restart"""
@@ -1596,11 +1596,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MIN_PAUSE_DURATION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MIN_PAUSE_DURATION, value)
 
     def clear_min_pause_duration(self) -> None:
         """Clear ``minPauseDuration`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MIN_PAUSE_DURATION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MIN_PAUSE_DURATION, None)
 
     def max_run_duration(self) -> int | None:
         """Maximum continuous run time"""
@@ -1613,11 +1613,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MAX_RUN_DURATION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MAX_RUN_DURATION, value)
 
     def clear_max_run_duration(self) -> None:
         """Clear ``maxRunDuration`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MAX_RUN_DURATION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MAX_RUN_DURATION, None)
 
     def max_pause_duration(self) -> int | None:
         """Maximum pause time"""
@@ -1630,11 +1630,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_MAX_PAUSE_DURATION, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MAX_PAUSE_DURATION, value)
 
     def clear_max_pause_duration(self) -> None:
         """Clear ``maxPauseDuration`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_MAX_PAUSE_DURATION, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_MAX_PAUSE_DURATION, None)
 
     def optional_process_power(self) -> int | None:
         """Expected power when process runs"""
@@ -1647,11 +1647,11 @@ class EnergyControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ENERGY_CONTROL_ATTR_OPTIONAL_PROCESS_POWER, value)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_OPTIONAL_PROCESS_POWER, value)
 
     def clear_optional_process_power(self) -> None:
         """Clear ``optionalProcessPower`` (set to ``None``)."""
-        self.write_attribute(ENERGY_CONTROL_ATTR_OPTIONAL_PROCESS_POWER, None)
+        self.set_attribute_internal(ENERGY_CONTROL_ATTR_OPTIONAL_PROCESS_POWER, None)
 
     def control_mode(self) -> ControlMode | None:
         """How setpoints/limits are interpreted"""

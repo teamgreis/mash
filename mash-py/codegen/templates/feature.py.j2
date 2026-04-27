@@ -259,12 +259,12 @@ class {{ feature.name }}(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute({{ const }}, value)
+        self.set_attribute_internal({{ const }}, value)
 
 {% if a.nullable %}
     def {{ clear_name }}(self) -> None:
         """Clear ``{{ a.name }}`` (set to ``None``)."""
-        self.write_attribute({{ const }}, None)
+        self.set_attribute_internal({{ const }}, None)
 
 {% endif %}
 {% endif %}

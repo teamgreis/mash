@@ -15,13 +15,22 @@ spec by ``codegen``; do not edit them by hand.
 
 from __future__ import annotations
 
+from mash_py.model.device import Device
+from mash_py.model.endpoint import Endpoint
 from mash_py.model.endpoint_type_gen import EndpointType
 from mash_py.model.feature import (
     Attribute,
     AttributeMetadata,
+    AttributeNotFoundError,
+    AttributeNotNullableError,
+    AttributeNotWritableError,
+    AttributeObserver,
+    AttributeOutOfRangeError,
+    AttributeValueTypeError,
     Command,
     CommandHandler,
     CommandMetadata,
+    CommandNotFoundError,
     Feature,
     ModelAttributeError,
     ParameterMetadata,
@@ -42,11 +51,20 @@ __all__ = [
     "AsymmetricSupport",
     "Attribute",
     "AttributeMetadata",
+    "AttributeNotFoundError",
+    "AttributeNotNullableError",
+    "AttributeNotWritableError",
+    "AttributeObserver",
+    "AttributeOutOfRangeError",
+    "AttributeValueTypeError",
     "Command",
     "CommandHandler",
     "CommandMetadata",
+    "CommandNotFoundError",
     "DataType",
+    "Device",
     "Direction",
+    "Endpoint",
     "EndpointType",
     "Feature",
     "FeatureType",

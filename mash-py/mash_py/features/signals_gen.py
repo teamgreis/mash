@@ -356,11 +356,11 @@ class Signals(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(SIGNALS_ATTR_SIGNAL_SOURCE, value)
+        self.set_attribute_internal(SIGNALS_ATTR_SIGNAL_SOURCE, value)
 
     def clear_signal_source(self) -> None:
         """Clear ``signalSource`` (set to ``None``)."""
-        self.write_attribute(SIGNALS_ATTR_SIGNAL_SOURCE, None)
+        self.set_attribute_internal(SIGNALS_ATTR_SIGNAL_SOURCE, None)
 
     def start_time(self) -> int | None:
         """Unix timestamp for first slot"""
@@ -373,11 +373,11 @@ class Signals(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(SIGNALS_ATTR_START_TIME, value)
+        self.set_attribute_internal(SIGNALS_ATTR_START_TIME, value)
 
     def clear_start_time(self) -> None:
         """Clear ``startTime`` (set to ``None``)."""
-        self.write_attribute(SIGNALS_ATTR_START_TIME, None)
+        self.set_attribute_internal(SIGNALS_ATTR_START_TIME, None)
 
     def valid_until(self) -> int | None:
         """When signal expires (Unix timestamp)"""
@@ -390,11 +390,11 @@ class Signals(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(SIGNALS_ATTR_VALID_UNTIL, value)
+        self.set_attribute_internal(SIGNALS_ATTR_VALID_UNTIL, value)
 
     def clear_valid_until(self) -> None:
         """Clear ``validUntil`` (set to ``None``)."""
-        self.write_attribute(SIGNALS_ATTR_VALID_UNTIL, None)
+        self.set_attribute_internal(SIGNALS_ATTR_VALID_UNTIL, None)
 
     def price_slots(self) -> list[PriceSlot] | None:
         """Active price schedule slots"""
@@ -407,11 +407,11 @@ class Signals(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(SIGNALS_ATTR_PRICE_SLOTS, value)
+        self.set_attribute_internal(SIGNALS_ATTR_PRICE_SLOTS, value)
 
     def clear_price_slots(self) -> None:
         """Clear ``priceSlots`` (set to ``None``)."""
-        self.write_attribute(SIGNALS_ATTR_PRICE_SLOTS, None)
+        self.set_attribute_internal(SIGNALS_ATTR_PRICE_SLOTS, None)
 
     def constraint_slots(self) -> list[ConstraintSlot] | None:
         """Active power constraint slots"""
@@ -424,11 +424,11 @@ class Signals(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(SIGNALS_ATTR_CONSTRAINT_SLOTS, value)
+        self.set_attribute_internal(SIGNALS_ATTR_CONSTRAINT_SLOTS, value)
 
     def clear_constraint_slots(self) -> None:
         """Clear ``constraintSlots`` (set to ``None``)."""
-        self.write_attribute(SIGNALS_ATTR_CONSTRAINT_SLOTS, None)
+        self.set_attribute_internal(SIGNALS_ATTR_CONSTRAINT_SLOTS, None)
 
     def forecast_slots(self) -> list[ForecastSlot] | None:
         """Active forecast slots"""
@@ -441,9 +441,9 @@ class Signals(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(SIGNALS_ATTR_FORECAST_SLOTS, value)
+        self.set_attribute_internal(SIGNALS_ATTR_FORECAST_SLOTS, value)
 
     def clear_forecast_slots(self) -> None:
         """Clear ``forecastSlots`` (set to ``None``)."""
-        self.write_attribute(SIGNALS_ATTR_FORECAST_SLOTS, None)
+        self.set_attribute_internal(SIGNALS_ATTR_FORECAST_SLOTS, None)
 

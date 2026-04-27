@@ -13,14 +13,26 @@ from enum import StrEnum
 
 
 class Access(StrEnum):
-    """Attribute access mode (matches the YAML ``access`` field)."""
+    """Attribute access mode (matches the YAML ``access`` field).
+
+    ``readOnly`` and ``readWrite`` both allow subscribe; ``read`` is the
+    "dynamic, recomputed each read" mode used for global attributes like
+    ``attributeList`` / ``commandList`` (matches Go's ``AccessRead`` —
+    no subscribe flag, no write flag).
+    """
 
     READ_ONLY = "readOnly"
     READ_WRITE = "readWrite"
     READ = "read"
 
+    def is_readable(self) -> bool:
+        return True
+
     def is_writable(self) -> bool:
         return self is Access.READ_WRITE
+
+    def can_subscribe(self) -> bool:
+        return self in (Access.READ_ONLY, Access.READ_WRITE)
 
 
 class DataType(StrEnum):

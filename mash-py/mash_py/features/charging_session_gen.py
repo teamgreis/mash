@@ -541,7 +541,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_STATE, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_STATE, value)
 
     def session_id(self) -> int:
         """Unique session identifier, monotonically increasing per device. 0 indicates no active session."""
@@ -554,7 +554,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_SESSION_ID, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SESSION_ID, value)
 
     def session_start_time(self) -> int | None:
         """Timestamp when EV connected"""
@@ -567,11 +567,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_SESSION_START_TIME, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SESSION_START_TIME, value)
 
     def clear_session_start_time(self) -> None:
         """Clear ``sessionStartTime`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_SESSION_START_TIME, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SESSION_START_TIME, None)
 
     def session_end_time(self) -> int | None:
         """Timestamp when session ended"""
@@ -584,11 +584,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_SESSION_END_TIME, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SESSION_END_TIME, value)
 
     def clear_session_end_time(self) -> None:
         """Clear ``sessionEndTime`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_SESSION_END_TIME, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SESSION_END_TIME, None)
 
     def session_energy_charged(self) -> int:
         """Energy delivered to EV this session"""
@@ -601,7 +601,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_SESSION_ENERGY_CHARGED, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SESSION_ENERGY_CHARGED, value)
 
     def session_energy_discharged(self) -> int:
         """Energy returned from EV (V2G) this session"""
@@ -614,7 +614,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_SESSION_ENERGY_DISCHARGED, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SESSION_ENERGY_DISCHARGED, value)
 
     def ev_identifications(self) -> list[EVIdentification] | None:
         """List of EV identifiers"""
@@ -627,11 +627,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_IDENTIFICATIONS, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_IDENTIFICATIONS, value)
 
     def clear_ev_identifications(self) -> None:
         """Clear ``evIdentifications`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_IDENTIFICATIONS, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_IDENTIFICATIONS, None)
 
     def ev_state_of_charge(self) -> int | None:
         """Current EV state of charge (DEC-070 range: percent 0..100)"""
@@ -644,11 +644,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_STATE_OF_CHARGE, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_STATE_OF_CHARGE, value)
 
     def clear_ev_state_of_charge(self) -> None:
         """Clear ``evStateOfCharge`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_STATE_OF_CHARGE, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_STATE_OF_CHARGE, None)
 
     def ev_battery_capacity(self) -> int | None:
         """EV battery capacity"""
@@ -661,11 +661,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_BATTERY_CAPACITY, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_BATTERY_CAPACITY, value)
 
     def clear_ev_battery_capacity(self) -> None:
         """Clear ``evBatteryCapacity`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_BATTERY_CAPACITY, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_BATTERY_CAPACITY, None)
 
     def ev_min_state_of_charge(self) -> int | None:
         """Minimum SoC to charge ASAP (DEC-070 range: percent 0..100)"""
@@ -678,11 +678,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MIN_STATE_OF_CHARGE, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MIN_STATE_OF_CHARGE, value)
 
     def clear_ev_min_state_of_charge(self) -> None:
         """Clear ``evMinStateOfCharge`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MIN_STATE_OF_CHARGE, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MIN_STATE_OF_CHARGE, None)
 
     def ev_target_state_of_charge(self) -> int | None:
         """User-defined target SoC (DEC-070 range: percent 0..100)"""
@@ -695,11 +695,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_TARGET_STATE_OF_CHARGE, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_TARGET_STATE_OF_CHARGE, value)
 
     def clear_ev_target_state_of_charge(self) -> None:
         """Clear ``evTargetStateOfCharge`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_TARGET_STATE_OF_CHARGE, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_TARGET_STATE_OF_CHARGE, None)
 
     def ev_demand_mode(self) -> EVDemandMode:
         """EV demand information mode"""
@@ -712,7 +712,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_DEMAND_MODE, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_DEMAND_MODE, value)
 
     def ev_min_energy_request(self) -> int | None:
         """Energy to minimum SoC (negative=can discharge)"""
@@ -725,11 +725,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MIN_ENERGY_REQUEST, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MIN_ENERGY_REQUEST, value)
 
     def clear_ev_min_energy_request(self) -> None:
         """Clear ``evMinEnergyRequest`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MIN_ENERGY_REQUEST, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MIN_ENERGY_REQUEST, None)
 
     def ev_max_energy_request(self) -> int | None:
         """Energy to full charge"""
@@ -742,11 +742,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MAX_ENERGY_REQUEST, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MAX_ENERGY_REQUEST, value)
 
     def clear_ev_max_energy_request(self) -> None:
         """Clear ``evMaxEnergyRequest`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MAX_ENERGY_REQUEST, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MAX_ENERGY_REQUEST, None)
 
     def ev_target_energy_request(self) -> int | None:
         """Energy to target SoC"""
@@ -759,11 +759,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_TARGET_ENERGY_REQUEST, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_TARGET_ENERGY_REQUEST, value)
 
     def clear_ev_target_energy_request(self) -> None:
         """Clear ``evTargetEnergyRequest`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_TARGET_ENERGY_REQUEST, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_TARGET_ENERGY_REQUEST, None)
 
     def ev_departure_time(self) -> int | None:
         """Timestamp when EV needs to leave"""
@@ -776,11 +776,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_DEPARTURE_TIME, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_DEPARTURE_TIME, value)
 
     def clear_ev_departure_time(self) -> None:
         """Clear ``evDepartureTime`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_DEPARTURE_TIME, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_DEPARTURE_TIME, None)
 
     def ev_min_discharging_request(self) -> int | None:
         """Minimum discharge limit (must be <0)"""
@@ -793,11 +793,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MIN_DISCHARGING_REQUEST, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MIN_DISCHARGING_REQUEST, value)
 
     def clear_ev_min_discharging_request(self) -> None:
         """Clear ``evMinDischargingRequest`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MIN_DISCHARGING_REQUEST, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MIN_DISCHARGING_REQUEST, None)
 
     def ev_max_discharging_request(self) -> int | None:
         """Maximum discharge limit (must be >=0)"""
@@ -810,11 +810,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MAX_DISCHARGING_REQUEST, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MAX_DISCHARGING_REQUEST, value)
 
     def clear_ev_max_discharging_request(self) -> None:
         """Clear ``evMaxDischargingRequest`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_MAX_DISCHARGING_REQUEST, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_MAX_DISCHARGING_REQUEST, None)
 
     def ev_discharge_below_target_permitted(self) -> bool | None:
         """Allow V2G below target SoC"""
@@ -827,11 +827,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_DISCHARGE_BELOW_TARGET_PERMITTED, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_DISCHARGE_BELOW_TARGET_PERMITTED, value)
 
     def clear_ev_discharge_below_target_permitted(self) -> None:
         """Clear ``evDischargeBelowTargetPermitted`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_EV_DISCHARGE_BELOW_TARGET_PERMITTED, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_EV_DISCHARGE_BELOW_TARGET_PERMITTED, None)
 
     def estimated_time_to_min_so_c(self) -> int | None:
         """Estimated time to reach minimum SoC"""
@@ -844,11 +844,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_MIN_SO_C, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_MIN_SO_C, value)
 
     def clear_estimated_time_to_min_so_c(self) -> None:
         """Clear ``estimatedTimeToMinSoC`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_MIN_SO_C, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_MIN_SO_C, None)
 
     def estimated_time_to_target_so_c(self) -> int | None:
         """Estimated time to reach target SoC"""
@@ -861,11 +861,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_TARGET_SO_C, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_TARGET_SO_C, value)
 
     def clear_estimated_time_to_target_so_c(self) -> None:
         """Clear ``estimatedTimeToTargetSoC`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_TARGET_SO_C, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_TARGET_SO_C, None)
 
     def estimated_time_to_full_so_c(self) -> int | None:
         """Estimated time to full charge"""
@@ -878,11 +878,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_FULL_SO_C, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_FULL_SO_C, value)
 
     def clear_estimated_time_to_full_so_c(self) -> None:
         """Clear ``estimatedTimeToFullSoC`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_FULL_SO_C, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_ESTIMATED_TIME_TO_FULL_SO_C, None)
 
     def charging_mode(self) -> ChargingMode:
         """Active optimization strategy"""
@@ -895,7 +895,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_CHARGING_MODE, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_CHARGING_MODE, value)
 
     def supported_charging_modes(self) -> list[ChargingMode]:
         """Optimization modes EVSE supports"""
@@ -908,7 +908,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_SUPPORTED_CHARGING_MODES, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SUPPORTED_CHARGING_MODES, value)
 
     def surplus_threshold(self) -> int | None:
         """Threshold for PV_SURPLUS_THRESHOLD mode"""
@@ -921,11 +921,11 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_SURPLUS_THRESHOLD, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SURPLUS_THRESHOLD, value)
 
     def clear_surplus_threshold(self) -> None:
         """Clear ``surplusThreshold`` (set to ``None``)."""
-        self.write_attribute(CHARGING_SESSION_ATTR_SURPLUS_THRESHOLD, None)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_SURPLUS_THRESHOLD, None)
 
     def start_delay(self) -> int:
         """Delay before (re)starting charge"""
@@ -938,7 +938,7 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_START_DELAY, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_START_DELAY, value)
 
     def stop_delay(self) -> int:
         """Delay before pausing charge"""
@@ -951,5 +951,5 @@ class ChargingSession(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(CHARGING_SESSION_ATTR_STOP_DELAY, value)
+        self.set_attribute_internal(CHARGING_SESSION_ATTR_STOP_DELAY, value)
 

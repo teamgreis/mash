@@ -230,7 +230,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_PHASE_COUNT, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_PHASE_COUNT, value)
 
     def phase_mapping(self) -> dict[Phase, GridPhase]:
         """Device phase to grid phase mapping"""
@@ -243,7 +243,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_PHASE_MAPPING, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_PHASE_MAPPING, value)
 
     def nominal_voltage(self) -> int:
         """Nominal voltage (phase-to-neutral RMS; DEC-070 range = typical LV / low-kV grid envelope)"""
@@ -256,7 +256,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_NOMINAL_VOLTAGE, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_NOMINAL_VOLTAGE, value)
 
     def nominal_frequency(self) -> int:
         """Nominal frequency (DEC-070 range = standard 50/60 Hz grids with headroom)"""
@@ -269,7 +269,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_NOMINAL_FREQUENCY, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_NOMINAL_FREQUENCY, value)
 
     def supported_directions(self) -> Direction:
         """Power flow direction capability"""
@@ -282,7 +282,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_SUPPORTED_DIRECTIONS, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_SUPPORTED_DIRECTIONS, value)
 
     def nominal_max_consumption(self) -> int:
         """Maximum consumption power"""
@@ -295,7 +295,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_NOMINAL_MAX_CONSUMPTION, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_NOMINAL_MAX_CONSUMPTION, value)
 
     def nominal_max_production(self) -> int:
         """Maximum production power (0 if N/A)"""
@@ -308,7 +308,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_NOMINAL_MAX_PRODUCTION, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_NOMINAL_MAX_PRODUCTION, value)
 
     def nominal_min_power(self) -> int:
         """Minimum operating point"""
@@ -321,7 +321,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_NOMINAL_MIN_POWER, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_NOMINAL_MIN_POWER, value)
 
     def max_current_per_phase(self) -> int:
         """Maximum current per phase"""
@@ -334,7 +334,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_MAX_CURRENT_PER_PHASE, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_MAX_CURRENT_PER_PHASE, value)
 
     def min_current_per_phase(self) -> int:
         """Minimum current per phase"""
@@ -347,7 +347,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_MIN_CURRENT_PER_PHASE, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_MIN_CURRENT_PER_PHASE, value)
 
     def supports_asymmetric(self) -> AsymmetricSupport:
         """Per-phase asymmetric control support"""
@@ -360,7 +360,7 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_SUPPORTS_ASYMMETRIC, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_SUPPORTS_ASYMMETRIC, value)
 
     def energy_capacity(self) -> int:
         """Battery/storage capacity (0 if N/A)"""
@@ -373,5 +373,5 @@ class Electrical(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(ELECTRICAL_ATTR_ENERGY_CAPACITY, value)
+        self.set_attribute_internal(ELECTRICAL_ATTR_ENERGY_CAPACITY, value)
 

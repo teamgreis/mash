@@ -160,5 +160,5 @@ class TestControl(Feature):
         The wire-side write path rejects external writes; this method is
         for the device implementation to publish telemetry / state.
         """
-        self.write_attribute(TEST_CONTROL_ATTR_TEST_EVENT_TRIGGERS_ENABLED, value)
+        self.set_attribute_internal(TEST_CONTROL_ATTR_TEST_EVENT_TRIGGERS_ENABLED, value)
 
