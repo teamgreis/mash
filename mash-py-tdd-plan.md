@@ -421,7 +421,8 @@ The conventions in each phase:
 | 11 | Interaction Model Client | Done (2026-04-27) |
 | 12 | Code Generation (Python from YAML) | Done (2026-04-27) |
 | 13 | Device Model | Done (2026-04-27) |
-| 14 | PASE Server (Device Side) | Done (2026-04-27) |
+| 14 | PASE Server (Device Side) | Done (2026-04-27, PASE-only — see Phase 14b for the rest of the device commissioning flow) |
+| 14b | Cert Exchange Server (Device Side) | Pending |
 | 15 | Operational Server (Device Side) | Pending |
 | 16 | Subscriptions & Notifications | Pending |
 | 17 | TestControl Feature & Trigger Handlers | Pending |
@@ -1179,6 +1180,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 **Status.** ✅ Complete (2026-04-27). `mash_py.commissioning.PASEServer` shipped — async device-side state machine mirroring `PASEClient`'s shape. 12 new unit tests under `tests/unit/commissioning/test_pase_server.py` (PASEClient ↔ PASEServer loopback + hand-crafted bad-frame paths); 2 new live-interop tests under `tests/interop/commissioning/test_pase_server_with_go_controller.py` against a focused Go helper (`tools/run_pase_client/`) that drives `commissioning.PASEClientSession` over TLS commissioning channel. Live byte-equality verified: Python server K_main = Go client K_main = `a4f522e5…01d9` for setup_code=20202021, discriminator=3840. Spec-strict on the failure envelope: every in-PASE failure (wrong identity, invalid pA, MAC mismatch) emits `PASEComplete{ErrCodeAuthFailed}` with zero-padded confirmation — `CommissioningError` is never sent from inside the handshake (Issue #6 closed on both sides). Issue #14 filed (`mash-py-spec-issues.md`) proposing §6.5 spec edit to allow constant-time minimum-duration floor as a conformant alternative to random 100-500 ms delay. Total suite: 459 unit + 536 full (excluding `slow`); mypy + ruff clean.
 
+**Scope correction (2026-04-27).** Phase 14's original Acceptance line claimed "Bidirectional commissioning works (Python↔Go in both directions)." That was overspecified — the Goal/Files/Interop sections all describe PASE-only work, and only PASE shipped here. Full bidirectional commissioning needs the device-side cert-exchange handler (CSRRequest→CSRResponse→CertInstall→CertInstallResponse→CommissioningComplete) to land first; that is split out as the explicit **Phase 14b — Cert Exchange Server (Device Side)** below. Phase 14's Acceptance is corrected accordingly.
+
 **Goal.** A Python device can receive PASE handshake from a Go controller and complete it.
 
 **Depends on.** Phases 4, 7, 13.
@@ -1194,13 +1197,52 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 |---|---|
 | Unit | Round-trip Python client + Python server (loopback); shared secret matches. |
 | Vector | Replay Go-emitted PASE messages; verify Python server response is byte-identical to what Go server would send (using the seeded RNG). |
-| Interop | **Reverse PASE.** Start Python device on port 8444 with discriminator 5678 and setup code 20202021. Run `mash-go/cmd/mash-controller --commission --discriminator 5678 --setup-code 20202021`. PASE completes. |
+| Interop | **Reverse PASE.** Start Python device on a kernel-assigned port with discriminator 3840 and setup code 20202021. Run a focused mash-go helper (`mash-py/tools/run_pase_client/`) that drives `commissioning.PASEClientSession.Handshake` over a TLS commissioning channel. Helper exits 0 with derived `K_main_hex`; assert byte-equality with the Python server's `shared_secret`. |
 
-**Acceptance.** Bidirectional commissioning works (Python↔Go in both directions).
+**Acceptance.** Python `PASEServer` accepts a Go `PASEClientSession` over a TLS commissioning channel and both sides derive byte-identical `K_main`. Spec-strict failure envelope: every in-PASE failure path emits `PASEComplete{ErrCodeAuthFailed}` with zero-padded confirmation. (Full bidirectional *commissioning* — including post-PASE cert exchange — is gated on **Phase 14b** below.)
 
-**Interop verification.** As above.
+**Interop verification.** As above. Live K_main `a4f522e5…01d9` confirmed for `(20202021, 3840)`.
 
 **Refinement contingency.** Same SPAKE2+ debug technique as Phase 8.
+
+---
+
+### Phase 14b — Cert Exchange Server (Device Side)
+
+**Status.** Pending.
+
+**Goal.** A Python device can complete the post-PASE cert-install flow with a Go controller: receive `CSRRequest`, generate a fresh P-256 zone key, return `CSRResponse` with a PKCS#10 CSR, receive `CertInstall`, validate the chain, persist the operational cert + key, ack with `CertInstallResponse`, and emit `CommissioningComplete`.
+
+**Why split from Phase 14.** The original Phase 14 acceptance text claimed "Bidirectional commissioning works" but the Goal / Files / Interop sections all described PASE-only work. Splitting honors the actual scope of each PR: Phase 14 is the SPAKE2+ wire contract, Phase 14b is the cert-install wire contract that follows it on the same commissioning channel.
+
+**Depends on.** Phase 14 (PASE establishes the secure channel this runs over), Phase 9 (`CertExchangeClient` is the controller-side mirror; same dataclasses + state machine shape, reversed direction), Phase 3 (cert helpers — CSR creation, chain validation).
+
+**Files created.**
+
+- `mash_py/commissioning/cert_exchange_server.py` — async device-side state machine. Single-use class consuming the `(reader, writer)` pair handed off by `PASEServer` after a successful handshake. Returns the persisted operational material `(operational_cert, operational_key, ca_cert, zone_type, zone_priority)` on success.
+- `tests/unit/commissioning/test_cert_exchange_server.py` — round-trip with `CertExchangeClient` (Phase 9), failure paths (chain mismatch, public-key binding mismatch, non-CSR first frame, malformed CertInstall, etc.).
+- `tests/interop/commissioning/test_cert_exchange_server_with_go_controller.py` — full PASE+cert-install flow against a Go helper.
+- Either extend `mash-py/tools/run_pase_client/` to also run cert exchange (rename to `run_commission_client`) **or** ship a parallel `mash-py/tools/run_commission_client/` helper. Decide during implementation; cohesive single-flow helper is preferred.
+
+**Test layers.**
+
+| Layer | What |
+|---|---|
+| Unit | `CertExchangeClient` ↔ `CertExchangeServer` loopback; both sides hold matching operational cert public key after install. Failure paths enforce spec wire contracts. |
+| Vector | N/A directly. Phase 9 already shipped frozen `cert_install_vectors.json` testing the controller side; the same vectors exercise the server side via loopback. |
+| Interop | Spawn `go run ./run_commission_client --target host:port --setup-code 20202021 --discriminator 3840` against a Python `PASEServer` + `CertExchangeServer` listener. Helper drives PASE then cert install via mash-go's `commissioning` package APIs; emits the installed-on-device fingerprint as JSON. Assert byte-equal cert public-key fingerprint between Python device's persisted op-cert and helper's view. |
+
+**Acceptance.**
+
+- Python device persists operational cert + key after the Go-driven flow completes.
+- Operational cert chain validates against the controller-supplied Zone CA.
+- Operational cert's `SubjectPublicKeyInfo` matches the public key of the device-generated key pair.
+- `CommissioningComplete` reaches the wire before the device closes its side.
+- Phase 15 (operational server) can dial the persisted cert and authenticate as expected.
+
+**Interop verification.** As above. With Phase 14 + Phase 14b shipped, mash-py is the *first non-Go MASH implementation that can be commissioned by a Go controller end-to-end* — that's the milestone bidirectional acceptance Phase 14 originally aimed at.
+
+**Refinement contingency.** Cert-chain validation in `cryptography` differs subtly from Go's `x509.Verify` defaults around AKI/SKI tolerance; if interop fails on chain validation, check the spec-vs-Go SKI hash divergence flagged in `mash-py-spec-issues.md` Issue #4. Phase 9 already navigated this on the controller side; the device-side validator should reuse the same lenient-where-spec-says-so primitives.
 
 ---
 
@@ -1210,7 +1252,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 **Goal.** Python device responds correctly to Read/Write/Subscribe/Invoke from a Go controller after commissioning.
 
-**Depends on.** Phases 11, 13, 14.
+**Depends on.** Phases 11, 13, 14, 14b.
 
 **Files created.**
 
