@@ -4030,6 +4030,7 @@ DEC-035 introduced a Matter-inspired `featureMap` bitmap for capability discover
 **Implementation notes:**
 - Removed: `pkg/discovery/types.go` `TXTKeyFeatureMap` constant, `OperationalInfo.FeatureMap`, `OperationalService.FeatureMap`; `pkg/discovery/txtrecord.go` encode/decode FM blocks; copy-through lines in `pkg/discovery/browser.go` and `pkg/discovery/mdns.go`.
 - Removed: `internal/inspect/formatter.go` `FormatFeatureMap` function + its test; call site in `internal/inspect/inspector.go` now renders `Capabilities: 0x%04X` inline.
+- Removed: `EndpointInfo` field 5 (`featureMap: uint32`) from `docs/features/device-info.md` — the same cross-feature aggregation rejected for mDNS TXT has no per-endpoint definition either.
 - Preserved: `pkg/model/feature.go` `Feature.FeatureMap()` method; per-feature featureMap attribute (0xFFFC) as wire source of truth; `internal/testharness/runner/auto_pics.go` bit enumeration (load-bearing for PICS auto-discovery); feature YAMLs declaring bits.
 - Test: `TestOperationalTXT_OmitsFeatureMap` (pkg/discovery) regression-guards the TXT omission; `TestInspector_FeatureMapHex` (internal/inspect) regression-guards the hex-only rendering.
 - docs/features/README.md updated with corrected semantics.

@@ -71,9 +71,10 @@ EndpointInfo:
   2: type,                   // EndpointTypeEnum
   3: label,                  // string?: user-friendly name
   4: features,               // uint16[]: feature IDs on this endpoint
-  5: featureMap,             // uint32: feature flags bitmap
 }
 ```
+
+> Per-feature capability variants are discovered by reading global attribute `featureMap` (0xFFFC) on each feature; see [DEC-074](../decision-log.md#dec-074-featuremap-bit-semantics).
 
 ---
 
@@ -98,22 +99,19 @@ Read DeviceInfo once at connection to understand:
     {
       id: 0,
       type: DEVICE_ROOT,
-      features: [0x0006],
-      featureMap: 0x0001
+      features: [0x0006]
     },
     {
       id: 1,
       type: EV_CHARGER,
       label: "Port 1",
-      features: [0x0001, 0x0002, 0x0003, 0x0005, 0x0007],
-      featureMap: 0x0009
+      features: [0x0001, 0x0002, 0x0003, 0x0005, 0x0007]
     },
     {
       id: 2,
       type: EV_CHARGER,
       label: "Port 2",
-      features: [0x0001, 0x0002, 0x0003, 0x0005, 0x0007],
-      featureMap: 0x0009
+      features: [0x0001, 0x0002, 0x0003, 0x0005, 0x0007]
     }
   ]
 }
