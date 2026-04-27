@@ -782,6 +782,83 @@ The example payload in device-info.md is therefore wrong on **two** axes simulta
 
 ---
 
+### Issue #14 — PASE error-response timing protection: §6.5 prescribes random delay; constant-time floor is what implementations actually want
+
+**Status:** Open
+**Surfaced in:** Phase 14 — drafting `mash_py.commissioning.PASEServer` (2026-04-27)
+**Blocks:** Nothing on the wire; code-side mitigation that mash-py and mash-go can each implement without coordinating, but the spec text needs latitude so any future port (C/Zig/Rust) doesn't have to relitigate the choice.
+
+**The divergence.**
+
+`docs/testing/behavior/commissioning-pase.md §6.5` (Consolidated Error Codes — DEC-047) ends with this normative line:
+
+> **Timing requirement:** Device MUST add random delay (100-500ms) to all error responses to prevent timing-based oracle attacks.
+
+`mash-go/pkg/commissioning/session.go:169` instead implements a **fixed minimum-duration floor**:
+
+```go
+const minHandshakeDuration = 200 * time.Millisecond
+handshakeStart := time.Now()
+// ... on every error path:
+if elapsed := time.Since(handshakeStart); elapsed < minHandshakeDuration {
+    time.Sleep(minHandshakeDuration - elapsed)
+}
+```
+
+So mash-go does *not* implement spec §6.5 literally. It implements a stricter (more constant-time) variant that defends against the same threat.
+
+**Why a fixed floor is the better choice.**
+
+The threat is a timing oracle that distinguishes which check failed:
+1. **Wrong client identity** (`bytes.Equal` against `b"mash-controller"`): early bail, microseconds.
+2. **Invalid pA** (off-curve / identity element / wrong size): early bail, microseconds.
+3. **MAC mismatch** (wrong setup code): late bail, after full SPAKE2+ compute (5-100 ms x86; up to 10 s on ESP32 per §5.3).
+
+Without padding, the attacker easily distinguishes (1)/(2) from (3) by latency. §6.5's random 100-500 ms delay does not cover this when SPAKE2+ compute exceeds the random window — and on constrained devices (§5.3 lists ESP32 as 2-5 s, max 10 s) that window is exceeded by **two orders of magnitude**. Random delay 100-500 ms is folklore that works only when SPAKE2+ compute is already fast (powerful x86-class devices).
+
+A **fixed minimum floor** ≥ the slowest path on this device class makes every error response indistinguishable from every other error response — that's the actual property the spec is gesturing at. Variance itself is information; constant-time wins.
+
+**Cost.** On constrained MCUs the floor is essentially the SPAKE2+ compute upper bound (10 s on ESP32 per §5.3) — a noticeable wait after a wrong setup code. That's the honest cost of timing-side-channel resistance on those devices, and §5.5's backoff tier already implies multi-second waits at higher attempt counts.
+
+**Spec options considered.**
+
+A. **Status quo: §6.5 mandates random 100-500 ms.** mash-go is technically non-conformant; mash-py would either copy mash-go (also non-conformant) or implement spec-literal (and ship a known-weaker mitigation than mash-go). **Rejected — the spec's normative MUST is weaker than what the reference impl ships, which is backwards.**
+
+B. **Replace §6.5's "random 100-500 ms" with a property-style requirement.** Spec mandates the *observable property* ("all error responses on this device MUST take indistinguishable wall-clock time") and lists both random delay and fixed floor as conformant implementations, with guidance that fixed floor ≥ §5.3 device-class upper bound is the recommended choice. **Recommended.**
+
+C. **Replace §6.5 with "fixed floor only."** Mandates the constant-time floor and removes random delay as an option. Cleaner, matches mash-go, but forecloses a future implementation strategy that may make sense (e.g., a hybrid where the floor is randomized within a tight band). Probably over-prescriptive.
+
+**Recommendation.** **B.** Spec specifies the wire-observable property; implementations choose how to achieve it; cite §5.3 device-class compute bounds as the floor a fixed-floor implementation must beat.
+
+**Disposition (proposed).**
+
+1. Spec edit in `docs/testing/behavior/commissioning-pase.md §6.5`, replacing the current one-line timing requirement with:
+
+   > **Timing requirement.** Device MUST ensure that all error responses on this device take wall-clock time indistinguishable to a network observer, regardless of which internal check failed. Conformant implementations include:
+   > - **Constant-time minimum-duration floor (recommended).** Pad every error path to a fixed duration ≥ the SPAKE2+ compute upper bound for this device class (see §5.3). Variance is itself a side channel; a deterministic floor is the simplest way to eliminate it.
+   > - **Bounded random delay.** Add a uniform random delay in `[100, 500]` ms to every error response. Adequate only when the device's SPAKE2+ compute time is below the maximum delay; on constrained devices (§5.3 ESP32 class, 2-10 s) bounded random delay does not eliminate the timing oracle.
+   >
+   > Implementations MUST also use constant-time comparison primitives for all secret-equality checks (e.g., `hmac.compare_digest` in Python, `subtle.ConstantTimeCompare` in Go); see §2.5 *Constant-time MAC comparison*.
+
+2. mash-go: no code change. The 200 ms floor is already conformant under the proposed §6.5; on x86-class hosts (Go's primary target) the floor exceeds typical SPAKE2+ compute, so the side channel is closed. (A separate question is whether mash-go's `mash-device` running on a slower host needs to bump the floor; that's an operator-tunable, not a spec requirement.)
+
+3. mash-py: ships the constant-time floor as a constructor argument `error_delay_floor_s` on `PASEServer`, default 0.2 s for parity with mash-go on x86. Documentation cross-references this issue and §5.3.
+
+**Why mash-py implements the floor unconditionally rather than waiting on the spec edit.**
+
+- §6.5's normative MUST is weaker than what mash-go (the reference impl) ships, so taking the spec literally would mean shipping a known-weaker mitigation in the second-implementation port. That defeats the spec-portability goal mash-py exists to test.
+- The wire-observable property (indistinguishable error timing) is the same regardless of which mitigation is chosen; no interop concern.
+- File this issue *now* so the spec catches up to what both implementations actually do; don't gate Phase 14 on the spec PR landing.
+
+**Affected files.**
+- `docs/testing/behavior/commissioning-pase.md §6.5` — spec edit pending.
+- `mash-py/mash_py/commissioning/pase_server.py` — implements floor; cites this issue.
+- `mash-go/pkg/commissioning/session.go` — already correct under proposed §6.5.
+
+**Related.** DEC-047 (consolidated error codes, source of §6.5); §2.5 (constant-time MAC comparison — same family of mitigation); §5.3 (device-class compute bounds).
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.
