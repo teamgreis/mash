@@ -422,7 +422,7 @@ The conventions in each phase:
 | 12 | Code Generation (Python from YAML) | Done (2026-04-27) |
 | 13 | Device Model | Done (2026-04-27) |
 | 14 | PASE Server (Device Side) | Done (2026-04-27, PASE-only — see Phase 14b for the rest of the device commissioning flow) |
-| 14b | Cert Exchange Server (Device Side) | Pending |
+| 14b | Cert Exchange Server (Device Side) | Done (2026-04-27) |
 | 15 | Operational Server (Device Side) | Pending |
 | 16 | Subscriptions & Notifications | Pending |
 | 17 | TestControl Feature & Trigger Handlers | Pending |
@@ -1209,7 +1209,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 14b — Cert Exchange Server (Device Side)
 
-**Status.** Pending.
+**Status.** ✅ Complete (2026-04-27). `mash_py.commissioning.CertExchangeServer` shipped — async post-PASE state machine mirroring Phase 9's `CertExchangeClient` in reverse. 13 new unit tests under `tests/unit/commissioning/test_cert_exchange_server.py` (round-trip with `CertExchangeClient` + chain mismatch + public-key binding mismatch + malformed cert + zone rejection paths + protocol errors); 1 new live-interop test under `tests/interop/commissioning/test_cert_exchange_server_with_go_controller.py` against a new Go helper (`tools/run_commission_client/`) that drives the full commissioning flow (PASE + cert install) against a Python `PASEServer + CertExchangeServer` listener. **Milestone bidirectional acceptance:** mash-py is the first non-Go MASH implementation that can be commissioned end-to-end by a Go controller. Live byte-equality verified across the boundary: Python server's `operational_cert` DER == Go helper's signed cert DER; Python server's `zone_ca_cert` DER == Go helper's CA DER; persisted private key's public-key DER == operational cert's `SubjectPublicKeyInfo`. Spec-strict: every in-cert-exchange failure emits `CertInstallResponse{error_code != 0}` (never `CommissioningError`); zone-policy callback supports both sync and async; out-of-set codes normalised to `ErrCodeCertInstallFailed`. Total suite: 472 unit + 549 full (excluding `slow`); mypy + ruff clean.
 
 **Goal.** A Python device can complete the post-PASE cert-install flow with a Go controller: receive `CSRRequest`, generate a fresh P-256 zone key, return `CSRResponse` with a PKCS#10 CSR, receive `CertInstall`, validate the chain, persist the operational cert + key, ack with `CertInstallResponse`, and emit `CommissioningComplete`.
 
