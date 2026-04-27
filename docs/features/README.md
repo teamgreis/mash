@@ -21,6 +21,11 @@
     When the two disagree, the generated page wins. Drift is reported by the
     audit pipeline -- if you find a contradiction, file it as a doc bug.
 
+    The Feature ID and EndpointType registries live in
+    [`protocol-versions.yaml`](protocol-versions.yaml) and are the canonical
+    source for codegen; any prose ID tables on hand-written pages are
+    illustrative only.
+
 ---
 
 ## Feature Philosophy

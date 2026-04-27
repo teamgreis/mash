@@ -99,19 +99,19 @@ Read DeviceInfo once at connection to understand:
     {
       id: 0,
       type: DEVICE_ROOT,
-      features: [0x0006]
+      features: [0x01]
     },
     {
       id: 1,
       type: EV_CHARGER,
       label: "Port 1",
-      features: [0x0001, 0x0002, 0x0003, 0x0005, 0x0007]
+      features: [0x02, 0x03, 0x04, 0x05, 0x06]
     },
     {
       id: 2,
       type: EV_CHARGER,
       label: "Port 2",
-      features: [0x0001, 0x0002, 0x0003, 0x0005, 0x0007]
+      features: [0x02, 0x03, 0x04, 0x05, 0x06]
     }
   ]
 }
@@ -121,17 +121,7 @@ Read DeviceInfo once at connection to understand:
 
 ## Feature ID Registry
 
-| ID | Name |
-|----|------|
-| 0x0001 | Electrical |
-| 0x0002 | Measurement |
-| 0x0003 | EnergyControl |
-| 0x0005 | Status |
-| 0x0006 | DeviceInfo |
-| 0x0007 | ChargingSession |
-| 0x0008 | Signals |
-| 0x0009 | Tariff |
-| 0x000A | Plan |
+See [`protocol-versions.yaml`](protocol-versions.yaml) for the canonical Feature ID registry. Prose tables are illustrative only — the YAML is the single source of truth that codegen consumes.
 
 ---
 
