@@ -423,7 +423,7 @@ The conventions in each phase:
 | 13 | Device Model | Done (2026-04-27) |
 | 14 | PASE Server (Device Side) | Done (2026-04-27, PASE-only — see Phase 14b for the rest of the device commissioning flow) |
 | 14b | Cert Exchange Server (Device Side) | Done (2026-04-27) |
-| 15 | Operational Server (Device Side) | Pending |
+| 15 | Operational Server (Device Side) | Done (2026-04-27) |
 | 16 | Subscriptions & Notifications | Pending |
 | 17 | TestControl Feature & Trigger Handlers | Pending |
 | 18 | mDNS Advertiser | Pending |
@@ -1248,33 +1248,40 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 15 — Operational Server (Device Side)
 
-**Status.** Pending.
+**Status.** Done (2026-04-27).
 
 **Goal.** Python device responds correctly to Read/Write/Subscribe/Invoke from a Go controller after commissioning.
 
 **Depends on.** Phases 11, 13, 14, 14b.
 
-**Files created.**
+**Files shipped.**
 
-- `mash_py/interaction/server.py` — request dispatcher: routes incoming Request to the appropriate Endpoint/Feature handler; encodes Response.
-- `mash_py/service/device.py` — extend with operational accept loop.
-- `tests/interop/test_full_device_lifecycle.py`
+- `mash_py/interaction/server.py` — `OperationalServer` request dispatcher: routes Read/Write/Invoke to the appropriate Endpoint/Feature; Subscribe returns `UNSUPPORTED` until Phase 16. `CommandError` exception lets handlers pick a specific `Status` code (mirrors Go's `wire.CommandError`).
+- `mash_py/service/device.py` — `DeviceService` operational accept loop. mTLS listener (TLS 1.3, ALPN `mash/1`, CERT_REQUIRED, Zone-CA-pinned) per-connection drives a `_RequestHandler` that decodes inbound Requests and ships back encoded Responses. Stop-event signal makes graceful shutdown safe even with in-flight handshakes.
+- `tools/run_operational_client/` — focused Go helper: dials operational ALPN with mTLS, drives the four ops, reports JSON. Uses pre-minted certs (commissioning is exercised in Phase 14b's interop test).
+- `tests/unit/interaction/test_server.py` — 22 dispatcher unit tests (all Status branches, spec-strict bare-array Read, Write validation precedence, Invoke integer-keyed params, Subscribe placeholder).
+- `tests/unit/service/test_device.py` — 6 service-level tests (Read/Write/Invoke round-trip via in-process Python InteractionClient against a live `DeviceService`, plus stop-while-active idempotency).
+- `tests/interop/test_full_device_lifecycle.py` — 1 cross-impl test: Go `run_operational_client` performs all four ops against a Python `DeviceService`; integer-keyed Invoke params verified arrived intact.
 
 **Test layers.**
 
 | Layer | What |
 |---|---|
-| Unit | Dispatcher routes Read/Write/Invoke to the right Feature based on EndpointID + FeatureID; returns appropriate Status for invalid endpoint/feature/attribute/command. |
+| Unit | 22 dispatcher tests + 6 DeviceService tests covering routing, all Status codes, payload-shape validation, stop semantics. |
 | Vector | N/A. |
-| Interop | Commission Python device with Go controller; controller reads DeviceInfo; controller writes a writable attribute; controller invokes a command; all succeed. |
+| Interop | Go controller (focused helper) does Read DeviceInfo / Write label / Invoke removeZone / Subscribe → UNSUPPORTED against a Python DeviceService. Verified end-to-end. |
 
-**Acceptance.** Full bidirectional lifecycle works.
+**Acceptance.** Met. Phase 15's primary gate — "controller reads / writes / invokes against the Python device" — passes both in-process and cross-impl.
 
-**Interop verification.** Standard.
+**Spec-vs-Go decisions made (2026-04-27, user-approved).**
 
-**Refinement contingency.** Status code mismatches are common — Go uses specific codes (1 InvalidEndpoint, 2 InvalidFeature, 3 InvalidAttribute, 4 InvalidCommand). Get them right per `pkg/wire/status.go`.
+- (A) Read payload encoding: spec §4.1 bare-array form is canonical. mash-go's `ExtractReadAttributeIDs` was patched to also accept the bare-array form (it was previously buggy: Go's own controller emits the bare array, but the device-side extractor only matched `{1: [...]}`, so Read-with-IDs silently degraded to Read-all). mash-py device accepts both for forward-compat.
+- (B) Unsubscribe gating: spec §6.4 requires both `endpointId == 0` AND `featureId == 0`. mash-go's `handleSubscribe` was tightened (was `featureId == 0` alone). mash-py inherits the spec-strict shape via Phase 16's plan.
+- (C) Partial Read with unknown attribute IDs: matches Go's strict-per-ID first-failure-wins (returns `INVALID_ATTRIBUTE`). Spec §4.2 was silent; the choice is now explicit in `mash_py/interaction/server.py`.
 
-**Spec note (per DEC-074, see "Spec sweep before Phase 14").** When emitting `DeviceInfo.endpoints` (attribute id 20), each `EndpointInfo` is **four-field** (`{1: id, 2: type, 3: label, 4: features}`) — *not* the five-field shape currently shown in `docs/features/device-info.md`. The aggregated per-endpoint `featureMap` slot has no DEC-074-consistent semantics; capability variants are discovered by reading the per-feature global attribute `featureMap` (0xFFFC). `mash_py.model.Endpoint` deliberately exposes no `feature_map` aggregator for this reason.
+mash-go fixes landed in the same workstream: `pkg/wire/message.go::ExtractReadAttributeIDs` (added bare-array + `[]uint16` short-circuit branches) and `pkg/service/dispatch/protocol_handler.go::handleSubscribe` (spec-strict gate). Tests added: `pkg/wire/message_test.go` (6 cases) and `protocol_handler_test.go::TestProtocolHandler_HandleRead_BareArrayWireForm` + `TestProtocolHandler_UnsubscribeRequiresBothEndpointAndFeatureZero`. Full Go suite green.
+
+**Spec note (per DEC-074, see "Spec sweep before Phase 14").** When emitting `DeviceInfo.endpoints` (attribute id 20), each `EndpointInfo` is **four-field** (`{1: id, 2: type, 3: label, 4: features}`). The aggregated per-endpoint `featureMap` slot has no DEC-074-consistent semantics; capability variants are discovered by reading the per-feature global attribute `featureMap` (0xFFFC). `mash_py.model.Endpoint` deliberately exposes no `feature_map` aggregator for this reason.
 
 ---
 
