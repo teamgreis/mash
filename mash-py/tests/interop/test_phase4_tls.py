@@ -48,9 +48,13 @@ def test_python_client_connects_to_go_device():
     assert result.stdout.startswith("go version")
 
 
-@pytest.mark.skipif(not _go_binary_available(), reason="mash-go binary not available")
 def test_go_controller_connects_to_python_device():
-    """Placeholder — Python device side. Implemented in Phase 14+ when
-    PASE server is live; the TLS layer alone is not enough to satisfy
-    a real Go controller's commissioning handshake."""
-    pytest.skip("Python device side awaits Phase 14 (PASE server)")
+    """Phase 14 has shipped — the real Go-controller-↔-Python-device
+    PASE interop lives in
+    ``tests/interop/commissioning/test_pase_server_with_go_controller.py``.
+
+    Kept as a no-op marker so the file's two-test layout (Python
+    client ↔ Go device, Go controller ↔ Python device) still
+    advertises both interop directions to readers browsing the test
+    tree.
+    """
