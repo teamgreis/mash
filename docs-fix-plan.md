@@ -296,6 +296,43 @@ Use real CBOR field numbers from `docs/message-types.md`. Keep code blocks as co
 
 ---
 
+### H10. Feature-ID width style and inline registry completeness drift
+
+**Where:**
+- Page headers: `docs/features/{charging-session,device-info,electrical,energy-control,measurement,plan,signals,status,tariff}.md:5` — all nine hand-written feature pages declare `**Feature ID:** 0x000X` (16-bit notation).
+- Inline registry: `docs/features/README.md:39-51` — Feature Registry table uses 16-bit notation (`0x0001`...`0x0009`) **and** is missing TestControl (`0x0A`); `0x0100+` vendor-range row is also undocumented in `protocol-versions.yaml`.
+- Canonical registry: `docs/features/protocol-versions.yaml:28-37` — assigns 8-bit IDs `0x01`...`0x0A` and lists ten feature types including `TestControl`.
+- Tracker: surfaced 2026-04-27 during the H8/H9 spec sweep; values are numerically consistent with the YAML (no semantic drift), but the width style and TestControl omission diverge.
+
+**Problem:** Two related kinds of low-grade drift survived the H9 sweep:
+1. **Width style.** All hand-written pages use `0x000X` (uint16-shaped) for feature IDs while the canonical YAML uses `0x0X` (uint8-shaped). Numerically equal, so wire-format-correct, but stylistically inconsistent across the spec ecosystem and a minor papercut for new porters who diff-read YAML against prose.
+2. **Inline registry completeness.** `docs/features/README.md`'s Feature Registry table predates TestControl and the `protocol-versions.yaml` registry (commit `24838b3`, 2026-04-27, Phase 12 codegen). It will keep drifting whenever the YAML gets a new entry.
+
+Neither item is value-class drift (the H9 class — wrong mappings that mislead implementers). Both are addressable in one short pass; deferring leaves a steady drip of "wait, which is right?" for first-time readers.
+
+**Fix:** Two viable approaches — pick one project-wide.
+
+- **Option A — Normalize prose to YAML width.** Mechanical pass:
+  1. Rewrite the page header on each of the nine hand-written feature pages from `**Feature ID:** 0x000X` to `**Feature ID:** 0x0X`.
+  2. Replace the `docs/features/README.md` Feature Registry table (lines 39-51) with a one-line pointer to `protocol-versions.yaml`, mirroring the H9 treatment of the `device-info.md` inline registry. Drop the `0x0100+` vendor-range row (or, if the vendor range is real, codify it in `protocol-versions.yaml` first).
+  3. Audit any remaining 16-bit feature-ID notation outside `docs/features/`: `grep -rnE '0x000[0-9A-F].*(?:DeviceInfo|Status|Electrical|Measurement|EnergyControl|ChargingSession|Tariff|Signals|Plan|TestControl)' docs/`.
+
+- **Option B — Auto-generate the registry, defer width normalization.** Extend `mash-go/cmd/mash-docgen` to emit a `docs/generated/features/registry.md` from `protocol-versions.yaml`; replace the README inline table with a transclusion or one-line pointer. Width style on per-feature page headers is left to a separate cleanup. Higher upfront cost, but the registry never drifts again.
+
+**Recommendation.** **Option A.** Pure spec-text edits, scope is bounded (nine page headers + one table replacement), no codegen change. Option B is the right shape for a future "registries are generated" sweep but doesn't pay off for ten rows.
+
+**No code changes** in `mash-go/` or `mash-py/` under either option (Option B touches `mash-docgen` but not protocol implementations). Both impls already consume `protocol-versions.yaml` directly.
+
+**Verify:**
+- `grep -nE '\*\*Feature ID:\*\* 0x000' docs/features/*.md` returns zero matches.
+- `grep -n "TestControl\|0x000A" docs/features/README.md` returns at most a one-line pointer; the prose registry table is gone.
+- `mkdocs build --strict` clean.
+- Spot-check: every feature page header's ID matches the corresponding `id:` value in `docs/features/protocol-versions.yaml` byte-for-byte.
+
+**Coordination:** Independent of H8/H9 (they handled the value-class drift in `device-info.md` only). Can land in any order relative to M1-M6, but mechanically lighter than M1's banner pass — natural to bundle with the next prose-cleanup commit.
+
+---
+
 ## MEDIUM — causes confusion, content hidden from readers
 
 ### M1. One-way linking between hand-written and generated feature trees
@@ -451,7 +488,7 @@ Recommended sequence (smallest blast radius first):
 1. **YAML pass.** Apply H2 (add `sessionId` to charging-session YAML). H1 and H4 are prose-only — no YAML change. Run `cd mash-go && make generate && go build ./... && go test ./...`.
 2. **Generated regen.** `cd mash-go && make docs` so generated pages reflect the new YAML.
 3. **Hand-written prose pass.** H1 prose, H2 prose (add ids 32/33 to hand-written), H3, H4, M1, M3, M5, M6, L2, L3, L4.
-4. **Phase 13 spec sweep (DEC-074 alignment).** **H8 first**, then **H9** — H8 removes `EndpointInfo` field 5 from the spec, H9 then corrects the example feature IDs. Order matters: doing H9 first means redoing the example after H8 lands. Both close issues filed in `mash-py-spec-issues.md` (#12, #13). Pure spec edits — no code changes in `mash-py/` or `mash-go/`.
+4. **Phase 13 spec sweep (DEC-074 alignment).** **H8 first**, then **H9** — H8 removes `EndpointInfo` field 5 from the spec, H9 then corrects the example feature IDs. Order matters: doing H9 first means redoing the example after H8 lands. Both close issues filed in `mash-py-spec-issues.md` (#12, #13). Pure spec edits — no code changes in `mash-py/` or `mash-go/`. **H10** is the residual width-style and registry-completeness sweep surfaced during H8/H9; mechanically light, can land any time after H9.
 5. **Nav pass.** H5, M4, L1.
 6. **New content.** H6 (rewrite `index.md`), H7 (author `example-walkthrough.md`), M2 (decide Option A vs B; if B, ship the small generator change).
 7. **Final verification.** `cd .. && mkdocs build --strict` clean. Click through the rendered site as a first-time reader following the role-based paths from the new home page; note anything that still feels rough and open follow-up items.
