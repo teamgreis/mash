@@ -622,7 +622,7 @@ This is a small YAML migration touching every command in every feature; the code
 
 ### Issue #12 — `EndpointInfo.featureMap` (spec field 5): spec text predates DEC-074
 
-**Status:** 🟡 Open — likely a **spec-text fix**, not a mash-go fix (see DEC-074 analysis below)
+**Status:** ✅ Resolved 2026-04-27 in commit `ff7ba07` — spec field 5 dropped, DEC-074 addendum landed; both reference impls were already four-field-correct.
 **Surfaced in:** Phase 13 — drafting `mash_py.model.Endpoint` against `docs/features/device-info.md` (2026-04-27)
 **Blocks:** mash-py Phase 15 (operational server) acceptance — pick a side before emitting `EndpointInfo`
 **Recent context:** DEC-074 (2026-04-23, 4 days old) reframes featureMap bit semantics in a way that undermines field 5; the spec example in device-info.md hasn't been updated yet.
