@@ -4686,6 +4686,79 @@ This DEC has been reviewed by `mash-py` Phase 7's analysis (which surfaced the o
 
 ---
 
+### DEC-085: Commissioning Cert-Install Uses Dedicated MsgTypes 10–13/20, Not the Renewal Envelope
+
+**Date:** 2026-04-26
+**Status:** Accepted
+
+**Context:**
+After PASE completes on the commissioning ALPN (`mash-comm/1`), the controller delivers an operational certificate signed by the Zone CA. `docs/message-types.md §3` (marked "Authoritative inventory / Status: Normative") assigns this step its own dedicated MsgTypes:
+
+| MsgType | Name | Direction |
+|---|---|---|
+| 10 | `MsgCSRRequest` | Controller → Device |
+| 11 | `MsgCSRResponse` | Device → Controller |
+| 12 | `MsgCertInstall` | Controller → Device |
+| 13 | `MsgCertInstallResponse` | Device → Controller |
+| 20 | `MsgCommissioningComplete` | Device → Controller |
+
+`docs/message-types.md §1` reserves MsgTypes 30–33 for in-session **certificate renewal** on the operational ALPN (`mash/1`) and explicitly forbids cross-plane usage: *"senders must NOT send commissioning MsgTypes on `mash/1` or vice versa; receivers MUST close the connection on cross-plane frames."*
+
+mash-py Phase 9 (CSR & Certificate Install) surfaced that three downstream specification documents and the mash-go reference implementation had drifted from `message-types.md`:
+
+- `docs/security.md §4.3` flow diagram and `§4.5` line 250 ("After the device sends `CertInstallAck`, **message type 33**, …") describe the renewal envelope (30–33) being reused on commissioning.
+- `docs/stack-architecture.md §8.4 Phase 3` shows `CertRenewalRequest / CertRenewalCSR / CertRenewalInstall / CertRenewalAck` driving the post-PASE step.
+- `docs/testing/behavior/commissioning-pase.md §4.3` shows yet a third form with **string** type identifiers (`"csr_req"`, `"cert_install"`, `"cert_ack"`) that predates the integer-MsgType regime entirely.
+- `mash-go/pkg/service/device_service_commissioning.go::performCertExchange` and `pkg/service/controller_renewal.go::IssueInitialCertSync` drive `CertRenewalRequest / CSR / Install / Ack` (MsgTypes 30–33) on `mash-comm/1`. The 10/11/12/13/20 constants exist in `pkg/commissioning/messages.go` and are routed by `pkg/commissioning/protocol.go` but were never wired into the production cert-exchange path — dead constants kept alive only by `messages_test.go` and `protocol_test.go`.
+
+The full divergence catalogue is in `mash-py-spec-issues.md` Issue #7.
+
+**Decision:**
+`message-types.md` is the canonical source. Commissioning cert install uses dedicated MsgTypes **10, 11, 12, 13, 20** on `mash-comm/1`. Renewal stays on **30, 31, 32, 33** on `mash/1`. The two namespaces are disjoint by integer range and routed by ALPN; cross-plane frames are a fatal protocol error.
+
+**Rationale:**
+The decisive argument is the namespace-separation invariant the protocol depends on for both single-port (DEC-067) and two-port (DEC-082) deployments. The dispatcher routing model — *"pick the namespace from ALPN, then decode by MsgType"* — only works if MsgType ranges are disjoint per plane. If 30–33 is dual-purpose, dispatchers must branch on connection state to disambiguate, which:
+
+1. **Defeats single-port deployment.** A controller and device sharing one TCP port and routing by ALPN cannot detect a misdirected frame from MsgType alone if the same range is valid on both planes. The runtime check the spec requires ("MUST close the connection on cross-plane frames") becomes unimplementable.
+2. **Re-introduces the stateful coupling explicit MsgTypes were meant to eliminate.** Disjoint ranges let the receiver dispatch `(ALPN, MsgType) → handler` with no other state. A dual-purpose envelope makes the handler ask "am I commissioning or renewing?" — exactly the implicit-state pattern the wire protocol was designed against.
+3. **Breaks forward-compatibility.** Reserved gaps (5–9, 14–19, 21–29, 34–254) give commissioning room to grow only if 30–33 stays renewal-only. Dual-purpose 30–33 squats in commissioning's reserved space and forces future commissioning extensions to negotiate around renewal.
+
+The two state machines also differ in ways the envelope difference makes explicit:
+
+- **Trust context.** Commissioning cert install runs on a PASE-authenticated channel where the device has no ZoneID yet (the Zone CA is being delivered for the first time, in `CertInstall (12)`). Renewal runs on an mTLS-authenticated channel where the device already has a ZoneID and is renewing that same identity.
+- **Anti-replay binding.** Renewal carries `NonceHash = SHA-256(nonce)[:16]` in `CertRenewalCSR (31)` per DEC-047 because nothing else binds the CSR to the renewal request. Commissioning doesn't need it — the SPAKE2+ shared secret already authenticates the channel — so `CSRResponse (11)` doesn't carry it.
+- **Field set.** `CertInstall (12)` carries `zoneType + zonePriority` (the device must learn what kind of zone it just got). `CertRenewalInstall (32)` carries `sequence` (continuity of the existing zone's cert chain). Squashing these into one envelope loses information at type level.
+- **Terminator.** Commissioning ends with `CommissioningComplete (20)`, after which the device closes the connection and the controller reconnects on `mash/1`. Renewal has no terminator; the operational connection persists.
+
+**Alternatives considered:**
+
+- **A. Patch `message-types.md` to allow 30–33 on `mash-comm/1`; collapse the two flows into one envelope.** Rejected. Breaks the namespace-separation invariant single-port deployment depends on (DEC-067), removes the 5-message commissioning flow's explicit terminator, and loses field-level distinctions (ZoneType, ZonePriority vs. Sequence) that exist for good reasons.
+- **B. Keep status quo (mash-go's renewal-on-commissioning shortcut), update `message-types.md` to match.** Rejected. Same namespace breakage as A, plus it adopts an undocumented shortcut as canonical and abandons three downstream specs that mention 10–13/20 (`message-types.md §3`, plus the Phase 9 plan in `mash-py-tdd-plan.md`).
+- **C. Implement `message-types.md` strictly; document the gap and add an adapter in mash-py decoding both envelopes.** Rejected. The wire shapes, field sets, and message counts differ structurally — an adapter would mean mash-py emits `CertRenewalRequest (30)` on `mash-comm/1`, exactly the cross-plane frame mash-go's own routing rule says receivers must reject. The fix has to be on both sides at once.
+
+**Implementations:**
+
+Lockstep update across:
+
+- **mash-go.** Refactor `pkg/service/device_service_commissioning.go::performCertExchange` to drive 10/11/12/13/20. Move zone-type/zone-slot validation from "ZoneCA arrives in CertRenewalRequest" to "ZoneCA arrives in CertInstall (12)". Device emits `CertInstallResponse (13)` then `CommissioningComplete (20)` then closes the commissioning connection. Move controller-side cert-install flow out of `pkg/service/controller_renewal.go::IssueInitialCertSync` (it is not renewal) into a dedicated `pkg/service/controller_cert_install.go` (or similar). Add a regression test that asserts a frame with `MsgType ∈ {30,31,32,33}` on `mash-comm/1` is rejected, and a frame with `MsgType ∈ {10,11,12,13,20}` on `mash/1` is rejected.
+- **mash-py.** Phase 9 lands spec-strict per the Phase 9 plan: `CSRRequest`/`CSRResponse`/`CertInstall`/`CertInstallResponse`/`CommissioningComplete` in `mash_py/commissioning/messages.py`, controller flow in `mash_py/commissioning/cert_exchange.py`, Zone CA logic in `mash_py/commissioning/cert_store.py`. Live interop test against the post-fix mash-go device closes the Phase 9 acceptance gate.
+- **mash-test.** Existing commissioning conformance cases regenerate their wire vectors. New cases cover the cross-plane rejection invariant.
+- **Spec docs.** `docs/security.md §4.3 / §4.5`, `docs/stack-architecture.md §8.4 Phase 3`, and `docs/testing/behavior/commissioning-pase.md §4.3` updated to use 10/11/12/13/20 and integer-keyed CBOR maps. ATTESTATION wire shape in `commissioning-pase.md §4.3` marked "RESERVED — wire format not yet specified" (no implementation in any reference).
+
+**Affected files:**
+- `docs/decision-log.md` — this entry.
+- `docs/security.md` — `§4.3` flow diagram, `§4.5` line 250.
+- `docs/stack-architecture.md` — `§8.4 Phase 3` mermaid diagram.
+- `docs/testing/behavior/commissioning-pase.md` — `§4.3` wire formats.
+- `mash-go/pkg/service/device_service_commissioning.go`, `pkg/service/controller_renewal.go` (split), and any `pkg/service/*commission*_test.go` that touched the envelope.
+- `mash-go/testdata/cases/commissioning-*.yaml` (vector regeneration as needed).
+- `mash-py/mash_py/commissioning/` — Phase 9 implementation files.
+- `mash-py-spec-issues.md` — Issue #7 marked Resolved when this DEC's fix has shipped on both implementations.
+
+**Related:** DEC-067 (single-port ALPN routing — the namespace-separation invariant this DEC defends), DEC-076 (in-session renewal — defines the renewal envelope on `mash/1`), DEC-077 (renewal window), DEC-082 (two-port deployment — also depends on namespace separation), DEC-084 (SPAKE2+ algorithm — this DEC governs the immediately-following step), `mash-py-spec-issues.md` Issue #7 (resolution being landed).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -4828,3 +4901,4 @@ Key learnings:
 | 2026-04-25 | Added DEC-082: Two-port deployment as conformant alternative to single-port ALPN routing. Surfaced while porting MASH to Python (mash-py): DEC-067's single-port pattern assumed a `GetConfigForClient`-equivalent primitive that isn't available in Python's stdlib `ssl` (or in C/Zig/some Rust TLS stacks). DEC-082 makes both deployment shapes conformant — same wire behavior, observable only as different mDNS SRV ports. Single-port (DEC-067) remains canonical for Go; two-port is canonical for languages without dynamic TLS config callbacks. |
 | 2026-04-25 | Added DEC-083: CBOR tag 77 wrapper for control messages. Surfaced during mash-py Phase 1 — payload-less Responses with msgID ∈ {1,2,3} encode byte-identically to ControlMessages, and audit found no mash-go dispatcher uses session state as a tiebreaker (msgID=3 + no payload silently closes the connection). Wraps all Ping/Pong/Close in `D8 4D <map>` (tag 77 = ASCII 'M'); +2 bytes per control message; eliminates the ambiguity at the wire level. Both mash-go and mash-py updated together; resolves spec-issues Issue #2. |
 | 2026-04-26 | Added DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2). Surfaced during mash-py Phase 7 — the `commissioning-pase.md §2` SPAKE2+ section was unimplementable as written (`K_shared` undefined, `M = G·H(label)` type-mismatched, PASE_X `bytes[32]` impossible) and the Go reference had exploitable security gaps (no MHF before HKDF — verifier theft brute-forces the 8-digit code in seconds; transcript not length-prefixed; identity element not rejected). DEC-084 adopts RFC 9383 + Matter conventions wholesale: fixed RFC 9383 P-256 M/N constants, PBKDF2-HMAC-SHA256 with 100,000 iterations, derived salt (`SHA-256("MASH PBKDF2 salt v1" \|\| discriminator \|\| setup_code)[:16]`), length-prefixed RFC 9383 §3.3 transcript, KcA/KcB confirmation MAC keys per RFC 9383 §3.4, mandatory identity-element rejection. Preserves the original spec's K_main / K_confirm / K_encrypt three-key chain (clearer than RFC 9383's split). Wire-breaking: `pA`/`pB` are now 65 bytes uncompressed (was incorrectly typed `bytes[32]`). Lands in lockstep across mash-go (Phase 7C) and mash-py (Phase 7D); resolves spec-issues Issue #5. |
+| 2026-04-26 | Added DEC-085: Commissioning cert install uses dedicated MsgTypes 10–13/20, not the renewal envelope. Surfaced during mash-py Phase 9 — three downstream specs (`security.md §4.3/4.5`, `stack-architecture.md §8.4`, `commissioning-pase.md §4.3`) and `mash-go` had drifted from `message-types.md` (canonical) and were driving the renewal envelope (MsgTypes 30–33) on the commissioning ALPN. Decision: `message-types.md` wins. Cert install on `mash-comm/1` uses `CSRRequest (10)`, `CSRResponse (11)`, `CertInstall (12)`, `CertInstallResponse (13)`, `CommissioningComplete (20)`. Renewal stays on `mash/1` with 30–33. Disjoint integer ranges + ALPN routing preserve the namespace-separation invariant single-port (DEC-067) and two-port (DEC-082) deployments depend on. Lands in lockstep across mash-go (Issue #7 fix), mash-py (Phase 9 implementation), and three spec-doc patches; resolves spec-issues Issue #7. |

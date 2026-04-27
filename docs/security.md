@@ -188,12 +188,13 @@ Controller                         Device
      │                               │
      │◄── SPAKE2+ (setup code) ────►│  From QR code (8 digits)
      │                               │
-     │── Request CSR ──────────────►│
-     │◄── CSR with new key pair ────┤
+     │── CSRRequest      (MsgType 10) ─►│  32-byte nonce
+     │◄── CSRResponse    (MsgType 11) ──┤  PKCS#10 CSR with fresh P-256 key pair
      │                               │
-     │── Install Operational Cert ─►│  Signed by Zone CA
+     │── CertInstall     (MsgType 12) ─►│  Operational cert (Zone CA-signed) + Zone CA + zoneType + zonePriority
      │                               │
-     │◄── Cert Install Ack ─────────┤
+     │◄── CertInstallResponse (MsgType 13) ──┤  Status = 0 (or error code)
+     │◄── CommissioningComplete (MsgType 20) ─┤  Device ready for operational reconnect
      │                               │
      │   [Commissioning Conn Closed] │  Device closes commissioning connection
      │                               │
@@ -235,7 +236,7 @@ commissioning phase and the certificate-authenticated operational phase:
 1. **Commissioning TLS:** Established with temporary/self-signed certificates
 2. **PASE handshake:** Authenticates both parties using the setup code
 3. **Certificate exchange:** Device receives operational certificate signed by Zone CA
-4. **Connection close:** Device closes the commissioning connection after sending CertInstallAck
+4. **Connection close:** Device closes the commissioning connection after sending `CommissioningComplete`
 5. **Operational reconnect:** Controller initiates new TLS connection using operational certificates
 
 **Why close the commissioning connection?**
@@ -247,10 +248,15 @@ commissioning phase and the certificate-authenticated operational phase:
 
 **Connection close timing:**
 
-After the device sends CertInstallAck (message type 33), it MUST close the commissioning
-TLS connection. The device then waits for the controller to initiate a new operational
-connection. If no operational connection arrives within 30 seconds, the device MAY remove
-the zone (as if the controller abandoned commissioning).
+After the device sends `CertInstallResponse` (MsgType 13) with `Status = 0` followed by
+`CommissioningComplete` (MsgType 20), it MUST close the commissioning TLS connection. The
+device then waits for the controller to initiate a new operational connection. If no
+operational connection arrives within 30 seconds, the device MAY remove the zone (as if the
+controller abandoned commissioning).
+
+> Cert install uses commissioning-plane MsgTypes 10/11/12/13/20, not the renewal envelope
+> (MsgTypes 30–33). The two namespaces are disjoint by integer range and routed by ALPN; see
+> [DEC-085](decision-log.md) and [message-types.md §3](message-types.md#3-commissioning-plane-msgtypes-alpn-mash-comm1).
 
 ### 4.6 Commissioning Certificate Stability (DEC-067)
 

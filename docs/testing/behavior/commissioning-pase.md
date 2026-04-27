@@ -376,18 +376,22 @@ Controller                                    Device
     │─────── PASE_VERIFY { verifier_ctrl } ─────►│
     │◄────── PASE_CONFIRM { status } ────────────┤  PASE_VERIFIED
     │                                            │
-    │─────── ATTESTATION_REQ {} ────────────────►│
-    │◄────── ATTESTATION_RSP { device_cert } ────┤  (optional attestation)
-    │                                            │
-    │─────── CSR_REQ { csr_nonce } ─────────────►│  CSR_GENERATE
-    │◄────── CSR_RSP { csr } ────────────────────┤
+    │─────── CSRRequest      (MsgType 10) ──────►│  CSR_GENERATE
+    │◄────── CSRResponse     (MsgType 11) ───────┤
     │                                            │  CERT_WAIT
-    │─────── CERT_INSTALL { op_cert, ca_cert } ─►│  CERT_INSTALL
-    │◄────── CERT_ACK { status } ────────────────┤  COMPLETE
+    │─────── CertInstall     (MsgType 12) ──────►│  CERT_INSTALL
+    │◄────── CertInstallResponse (MsgType 13) ───┤
+    │◄────── CommissioningComplete (MsgType 20) ─┤  COMPLETE
     │                                            │
-    │◄─────── Connection transitions ────────────┤  → OPERATIONAL
-    │         to OPERATIONAL mode                │
+    │◄─────── Commissioning conn closed ─────────┤  → ADVERTISING (_mash._tcp)
+    │                                            │
+    │─── reconnect on operational ALPN ─────────►│  → OPERATIONAL
 ```
+
+> ATTESTATION (controller-side device manufacturer verification) is **RESERVED** in
+> MASH v1: no MsgType is allocated yet, no wire format is normative, and no reference
+> implementation drives it. The pre-DEC-085 string-keyed sketches (`"attestation_req"` /
+> `"attestation_rsp"`) have been removed pending a follow-up DEC.
 
 ### 4.2 PASE Messages
 
@@ -447,108 +451,97 @@ PASE messages are CBOR maps with integer keys, framed per `transport.md §4`. Fo
 
 ### 4.3 Certificate Messages
 
-**ATTESTATION_REQ (Controller → Device):**
+> **Codified by DEC-085.** Pre-DEC-085 this section showed string-keyed wire examples
+> (`"csr_req"`, `"cert_install"`, …) that contradicted §3 of this same document and the
+> canonical `message-types.md §3` registry. The wire formats below match
+> `mash-go/pkg/commissioning/messages.go` MsgTypes 10–13 and 20, and use integer keys per
+> the rest of the protocol.
+
+Cert-install messages are CBOR maps with integer keys, framed per `transport.md §4`. Five
+messages comprise the post-PASE cert exchange on the commissioning ALPN (`mash-comm/1`):
+
+| MsgType | Name | Direction | Carries |
+|---|---|---|---|
+| 10 | `CSRRequest` | Controller → Device | `nonce` (32-byte anti-replay) |
+| 11 | `CSRResponse` | Device → Controller | `csr` (PKCS#10 DER) |
+| 12 | `CertInstall` | Controller → Device | `operationalCert` + `caCert` + `zoneType` + `zonePriority` |
+| 13 | `CertInstallResponse` | Device → Controller | `errorCode` (0 = success) |
+| 20 | `CommissioningComplete` | Device → Controller | (no payload) |
+
+**ATTESTATION** (optional manufacturer-identity verification before cert exchange) is
+**RESERVED** in MASH v1. No MsgType is allocated and no wire format is normative; a
+follow-up DEC will define it if and when the use case is specified. Implementations MUST
+NOT send any frame in MsgType range 5–9 on the commissioning ALPN.
+
+**CSRRequest (MsgType 10, Controller → Device):**
 ```cbor
 {
-  1: "attestation_req"   // type
+  1: 10,                 // msgType (CSRRequest)
+  2: <bytes[32]>         // nonce — random, anti-replay
 }
 ```
 
-**ATTESTATION_RSP (Device → Controller):**
+**CSRResponse (MsgType 11, Device → Controller):**
 ```cbor
 {
-  1: "attestation_rsp",  // type
-  2: <bytes[]>,          // device_cert (DER-encoded X.509)
-  3: <bytes[]>[]         // cert_chain (optional, DER-encoded)
+  1: 11,                 // msgType (CSRResponse)
+  2: <bytes>,            // csr — PKCS#10 DER-encoded CSR using a fresh P-256 key pair
+  3: <uint8>             // errorCode (0 = success; see §6.2). On non-zero, csr MAY be empty.
 }
 ```
 
-**Attestation Handling:**
-
-Attestation is OPTIONAL. It allows controller to verify device manufacturer identity.
-
-| Scenario | Controller Behavior |
-|----------|---------------------|
-| Device has no attestation cert | ATTESTATION_RSP with empty fields; controller proceeds |
-| Valid attestation chain | Log manufacturer info; proceed with commissioning |
-| Invalid attestation chain | Log warning; proceed with commissioning (don't reject) |
-| Attestation chain required (policy) | Reject if missing/invalid (controller-specific policy) |
-
-**Validation algorithm:**
-```python
-def handle_attestation(response: AttestationResponse, policy: Policy) -> AttestationResult:
-    """Handle device attestation response."""
-
-    if not response.device_cert:
-        # No attestation - device may be open-source/DIY
-        if policy.require_attestation:
-            return AttestationResult(
-                valid=False,
-                error="Attestation required but not provided"
-            )
-        return AttestationResult(valid=True, manufacturer=None)
-
-    # Validate certificate chain
-    try:
-        chain = [response.device_cert] + (response.cert_chain or [])
-        verify_chain(chain, trusted_roots=policy.trusted_manufacturer_cas)
-
-        # Extract manufacturer info from cert
-        manufacturer = extract_manufacturer(response.device_cert)
-
-        return AttestationResult(
-            valid=True,
-            manufacturer=manufacturer,
-            cert_fingerprint=sha256(response.device_cert)
-        )
-    except ChainValidationError as e:
-        # Log but don't necessarily reject
-        log.warning(f"Attestation chain invalid: {e}")
-
-        if policy.require_valid_attestation:
-            return AttestationResult(valid=False, error=str(e))
-
-        # Proceed anyway - attestation is informational
-        return AttestationResult(valid=True, manufacturer=None, warning=str(e))
-```
-
-**Default policy:** Accept devices without attestation. Log attestation info when present. This supports both commercial devices (with manufacturer certs) and open-source/DIY devices (without).
-
-**CSR_REQ (Controller → Device):**
+**CertInstall (MsgType 12, Controller → Device):**
 ```cbor
 {
-  1: "csr_req",          // type
-  2: <bytes[32]>         // csr_nonce (anti-replay)
+  1: 12,                 // msgType (CertInstall)
+  2: <bytes>,            // operationalCert — Zone CA-signed X.509 DER
+  3: <bytes>,            // caCert — Zone CA certificate (X.509 DER)
+  4: <uint8>,            // zoneType (1 = GRID, 2 = LOCAL, 3 = TEST per DEC-060)
+  5: <uint8>             // zonePriority (1 = highest, 2 = next; controller-assigned)
 }
 ```
 
-**CSR_RSP (Device → Controller):**
+**CertInstallResponse (MsgType 13, Device → Controller):**
 ```cbor
 {
-  1: "csr_rsp",          // type
-  2: <bytes[]>           // csr (PKCS#10, DER-encoded)
+  1: 13,                 // msgType (CertInstallResponse)
+  2: <uint8>             // errorCode (0 = success; see §6.2)
 }
 ```
 
-**CERT_INSTALL (Controller → Device):**
+The device MUST validate the operational cert chain (`operationalCert` ←
+`caCert` ← self-signed) and the zone-type slot rules from DEC-043 before storing.
+On any validation failure it sends `CertInstallResponse` with the appropriate
+`errorCode` (`ErrCodeCertInstallFailed = 4` for chain failures,
+`ErrCodeZoneTypeExists = 10` for duplicate zone-type per DEC-043) and aborts;
+`CommissioningComplete` is **not** sent on the failure path.
+
+**CommissioningComplete (MsgType 20, Device → Controller):**
 ```cbor
 {
-  1: "cert_install",     // type
-  2: <bytes[]>,          // operational_cert (DER-encoded X.509)
-  3: <bytes[]>,          // zone_ca_cert (DER-encoded X.509)
-  4: <uint8>,            // zone_type (GRID, LOCAL)
-  5: <uint8>             // zone_priority (1-2)
+  1: 20                  // msgType (CommissioningComplete) — empty payload
 }
 ```
 
-**CERT_ACK (Device → Controller):**
-```cbor
-{
-  1: "cert_ack",         // type
-  2: <uint8>,            // status (0 = success)
-  3: <string>            // error_message (if status != 0)
-}
-```
+Sent only after `CertInstallResponse{errorCode = 0}`. Signals that the device has
+durably installed the operational cert and is ready to accept an operational TLS
+reconnection on `mash/1`. After sending, the device MUST close the commissioning
+connection per `security.md §4.5`. The controller waits for both `CertInstallResponse`
+and `CommissioningComplete` before initiating the operational reconnection.
+
+**Validation requirements:**
+
+- `nonce` in `CSRRequest` MUST be exactly 32 bytes, generated from a CSPRNG fresh per
+  commissioning attempt.
+- The CSR public key MUST be on the P-256 curve. Controllers MUST reject other curves with
+  `errorCode = ErrCodeCSRFailed (3)` returned in a subsequent `CertInstall` failure path is
+  not used; instead the controller closes the commissioning connection and the device
+  observes the abort. (CSR validity is a controller-side check.)
+- `operationalCert.SubjectPublicKeyInfo` MUST equal the CSR's public key (the device
+  rejects a cert install whose public key it did not originate).
+- `operationalCert.Issuer` MUST equal `caCert.Subject` and the chain `operationalCert` ←
+  `caCert` MUST verify under standard X.509 path validation.
+- `zoneType` MUST be one of the values in DEC-060; `zonePriority` MUST be 1 or 2.
 
 ### 4.4 Operational Certificate Format
 

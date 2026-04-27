@@ -698,16 +698,17 @@ sequenceDiagram
     D->>C: PASEComplete (HMAC, errorCode=0)
     Note over C: Verify server HMAC
 
-    Note over C,D: Phase 3: Certificate Exchange
-    C->>D: CertRenewalRequest (nonce, ZoneCA)
-    Note over D: Generate P-256 key pair
-    D->>C: CertRenewalCSR (CSR, nonceHash)
-    Note over C: Sign CSR with Zone CA
-    C->>D: CertRenewalInstall (signedCert, seq=1)
-    Note over D: Install operational cert atomically
-    D->>C: CertRenewalAck (status=0, activeSeq=1)
+    Note over C,D: Phase 3: Certificate Exchange (commissioning MsgTypes 10–13/20)
+    C->>D: CSRRequest (MsgType 10) — 32-byte nonce
+    Note over D: Generate fresh P-256 key pair
+    D->>C: CSRResponse (MsgType 11) — PKCS#10 CSR
+    Note over C: Sign CSR with Zone CA<br/>Derive deviceID from CSR pubkey
+    C->>D: CertInstall (MsgType 12) — operationalCert + ZoneCA + zoneType + zonePriority
+    Note over D: Verify cert chain<br/>Validate zoneType (DEC-043)<br/>Install operational cert atomically
+    D->>C: CertInstallResponse (MsgType 13) — Status=0
+    D->>C: CommissioningComplete (MsgType 20)
 
-    Note over D: Stop _mash-comm._tcp
+    Note over D: Close commissioning connection<br/>Stop _mash-comm._tcp
     D->>DNS: Advertise _mash._tcp<br/><ZoneID>-<DeviceID>
 
     Note over C,D: Phase 4: Operational (mTLS)

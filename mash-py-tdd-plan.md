@@ -963,7 +963,7 @@ cd mash-py && pytest tests/interop/commissioning/test_pase_against_go_device.py 
 
 ### Phase 9 — CSR & Certificate Install
 
-**Status.** Pending.
+**Status.** ✅ Complete (2026-04-27). Codified by DEC-085. Surfaced and resolved Issue #7 (three-doc envelope divergence between `message-types.md` and `security.md`/`stack-architecture.md`/`commissioning-pase.md`/mash-go). End-to-end interop test green: Python controller commissions live mash-go device using spec-strict MsgTypes 10/11/12/13/20 on `mash-comm/1`; device emits `CertInstallResponse` + `CommissioningComplete`, closes commissioning conn, and re-advertises on `_mash._tcp`. Renewal stays separately on `mash/1` with MsgTypes 30–33.
 
 **Goal.** Python controller can issue a Zone CA-signed operational cert to a Go device after PASE.
 
