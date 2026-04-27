@@ -458,11 +458,21 @@ func applyDefaults() {
 	}
 }
 
+// specDeviceID composes a spec-compliant DeviceInfo.deviceId per
+// docs/features/device-info.md §"Device ID Format". This reference CLI
+// uses placeholder Vendor IDs (0x1234) rather than real IANA Private
+// Enterprise Numbers, so we use the "without PEN" fallback form
+// <vendor>-<product>-<serial>. Production devices with an assigned PEN
+// should use PEN<number>.<serial> instead.
+func specDeviceID(brand, model, serial string) string {
+	return fmt.Sprintf("%s-%s-%s", brand, model, serial)
+}
+
 func createDevice() (*model.Device, *features.LimitResolver, discovery.DeviceCategory) {
 	switch config.Type {
 	case DeviceTypeEVSE:
 		evse := examples.NewEVSE(examples.EVSEConfig{
-			DeviceID:              config.SerialNumber,
+			DeviceID:              specDeviceID(config.Brand, config.Model, config.SerialNumber),
 			VendorName:            config.Brand,
 			ProductName:           config.Model,
 			SerialNumber:          config.SerialNumber,
@@ -496,12 +506,13 @@ func createDevice() (*model.Device, *features.LimitResolver, discovery.DeviceCat
 }
 
 func createInverterDevice() (*model.Device, *features.LimitResolver) {
-	device := model.NewDevice(config.SerialNumber, 0x1234, 0x0002)
+	deviceID := specDeviceID(config.Brand, config.Model, config.SerialNumber)
+	device := model.NewDevice(deviceID, 0x1234, 0x0002)
 
 	// Root endpoint with DeviceInfo
 	deviceInfo := features.NewDeviceInfo()
 	deviceInfo.Feature.SetFeatureMap(uint32(model.FeatureMapCore | model.FeatureMapFlex))
-	_ = deviceInfo.SetDeviceID(config.SerialNumber)
+	_ = deviceInfo.SetDeviceID(deviceID)
 	_ = deviceInfo.SetVendorName(config.Brand)
 	_ = deviceInfo.SetProductName(config.Model)
 	_ = deviceInfo.SetSerialNumber(config.SerialNumber)
@@ -554,12 +565,13 @@ func createInverterDevice() (*model.Device, *features.LimitResolver) {
 }
 
 func createBatteryDevice() (*model.Device, *features.LimitResolver) {
-	device := model.NewDevice(config.SerialNumber, 0x1234, 0x0003)
+	deviceID := specDeviceID(config.Brand, config.Model, config.SerialNumber)
+	device := model.NewDevice(deviceID, 0x1234, 0x0003)
 
 	// Root endpoint with DeviceInfo
 	deviceInfo := features.NewDeviceInfo()
 	deviceInfo.Feature.SetFeatureMap(uint32(model.FeatureMapCore | model.FeatureMapFlex | model.FeatureMapBattery))
-	_ = deviceInfo.SetDeviceID(config.SerialNumber)
+	_ = deviceInfo.SetDeviceID(deviceID)
 	_ = deviceInfo.SetVendorName(config.Brand)
 	_ = deviceInfo.SetProductName(config.Model)
 	_ = deviceInfo.SetSerialNumber(config.SerialNumber)
@@ -614,7 +626,7 @@ func createBatteryDevice() (*model.Device, *features.LimitResolver) {
 
 func createHeatPumpDevice() (*model.Device, *features.LimitResolver) {
 	hp := examples.NewHeatPump(examples.HeatPumpConfig{
-		DeviceID:           config.SerialNumber,
+		DeviceID:           specDeviceID(config.Brand, config.Model, config.SerialNumber),
 		VendorName:         config.Brand,
 		ProductName:        config.Model,
 		SerialNumber:       config.SerialNumber,
