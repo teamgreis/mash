@@ -5,6 +5,7 @@ Phase scope:
 - :mod:`mash_py.commissioning.spake2plus` — algorithm + state machines.
 - :mod:`mash_py.commissioning.messages` — commissioning message dataclasses + CBOR codec (Phases 8, 9).
 - :mod:`mash_py.commissioning.pase_client` — controller-side PASE handshake driver (Phase 8).
+- :mod:`mash_py.commissioning.pase_server` — device-side PASE handshake driver (Phase 14).
 - :mod:`mash_py.commissioning.cert_store` — controller-side Zone CA + signing (Phase 9).
 - :mod:`mash_py.commissioning.cert_exchange` — controller-side cert install flow (Phase 9, DEC-085).
 
@@ -51,10 +52,11 @@ from mash_py.commissioning.messages import (
     PASEMessage,
     PASERequest,
     PASEResponse,
+    error_code_string,
+    peek_msg_type,
 )
 from mash_py.commissioning.messages import decode as decode_message
 from mash_py.commissioning.messages import encode as encode_message
-from mash_py.commissioning.messages import error_code_string, peek_msg_type
 from mash_py.commissioning.mhf import MHF_DKLEN, MHF_ITERATIONS, pbkdf2_mhf
 from mash_py.commissioning.pase_client import (
     PASEAuthFailedError,
@@ -62,6 +64,17 @@ from mash_py.commissioning.pase_client import (
     PASEClient,
     PASEClientError,
     PASEProtocolError,
+)
+from mash_py.commissioning.pase_server import (
+    PASEAuthFailedError as PASEServerAuthFailedError,
+)
+from mash_py.commissioning.pase_server import (
+    PASEPhaseTimeoutError,
+    PASEServer,
+    PASEServerError,
+)
+from mash_py.commissioning.pase_server import (
+    PASEProtocolError as PASEServerProtocolError,
 )
 from mash_py.commissioning.spake2plus import (
     CONFIRM_KEY_SIZE,
@@ -153,9 +166,14 @@ __all__ = [
     "PASEComplete",
     "PASEConfirm",
     "PASEMessage",
+    "PASEPhaseTimeoutError",
     "PASEProtocolError",
     "PASERequest",
     "PASEResponse",
+    "PASEServer",
+    "PASEServerAuthFailedError",
+    "PASEServerError",
+    "PASEServerProtocolError",
     "SPAKE2PlusClient",
     "SPAKE2PlusError",
     "SPAKE2PlusServer",
