@@ -712,7 +712,7 @@ C. **Reframe field 5 as "feature-presence bitmap."** A 64-bit map where bit N is
 
 ### Issue #13 — `device-info.md` example uses 16-bit feature IDs that contradict `protocol-versions.yaml`
 
-**Status:** 🟡 Open (doc drift — no implementation impact)
+**Status:** ✅ Resolved 2026-04-27 in commit `a5a25ec` — example rewritten with canonical YAML IDs; inline Feature ID Registry table replaced with a one-line pointer to `protocol-versions.yaml`; `docs/features/README.md` admonition extended to declare the YAML registry canonical for codegen.
 **Surfaced in:** Phase 13 — auditing the spec for endpoint/feature ID widths (2026-04-27)
 **Blocks:** Nothing today; flagged so a spec edit isn't held back when the next port asks "which is right?"
 
