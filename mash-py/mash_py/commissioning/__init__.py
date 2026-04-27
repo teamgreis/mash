@@ -8,6 +8,7 @@ Phase scope:
 - :mod:`mash_py.commissioning.pase_server` — device-side PASE handshake driver (Phase 14).
 - :mod:`mash_py.commissioning.cert_store` — controller-side Zone CA + signing (Phase 9).
 - :mod:`mash_py.commissioning.cert_exchange` — controller-side cert install flow (Phase 9, DEC-085).
+- :mod:`mash_py.commissioning.cert_exchange_server` — device-side cert install flow (Phase 14b, DEC-085).
 
 Future phases:
 - Phase 11: Pairing window helpers.
@@ -19,6 +20,15 @@ need to know the module layout.
 
 from __future__ import annotations
 
+from mash_py.commissioning.cert_exchange_server import (
+    CertExchangePhaseTimeoutError,
+    CertExchangeServer,
+    CertExchangeServerError,
+    CertExchangeServerInstallError,
+    CertExchangeServerProtocolError,
+    CertExchangeServerResult,
+    ZoneRejectedError,
+)
 from mash_py.commissioning.messages import (
     CSR_NONCE_SIZE,
     ERR_CODE_AUTH_FAILED,
@@ -150,6 +160,12 @@ __all__ = [
     "SHARED_SECRET_SIZE",
     "CSRRequest",
     "CSRResponse",
+    "CertExchangePhaseTimeoutError",
+    "CertExchangeServer",
+    "CertExchangeServerError",
+    "CertExchangeServerInstallError",
+    "CertExchangeServerProtocolError",
+    "CertExchangeServerResult",
     "CertInstall",
     "CertInstallResponse",
     "CommissioningComplete",
@@ -178,6 +194,7 @@ __all__ = [
     "SPAKE2PlusError",
     "SPAKE2PlusServer",
     "Verifier",
+    "ZoneRejectedError",
     "client_public",
     "compose_transcript",
     "compute_L",
