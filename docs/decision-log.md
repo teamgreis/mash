@@ -1542,6 +1542,8 @@ Structure:      endpoints[] (id, type, label?, features[])
 
 **Resolves:** OPEN-001 (Feature Definitions) - DeviceInfo feature now defined
 
+**Addendum (2026-04-27):** The standard / vendor ID partition declared in this DEC's Feature ID Registry (`0x0100+ Vendor-specific`) is now codified in `docs/features/protocol-versions.yaml` under `feature_type_ranges` — `standard: 0x01..0xFF`, `vendor: 0x0100..0xFFFF`. Codegen ignores the new field; it documents the allocation policy alongside the registry it partitions.
+
 ---
 
 ### DEC-032: ChargingSession Feature for EV Charging

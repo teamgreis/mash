@@ -24,6 +24,13 @@ versions:
       POEN:  { id: 0x08, major: 1, minor: 0 }
       PODF:  { id: 0x09, major: 1, minor: 0 }
       TOUT:  { id: 0x0A, major: 1, minor: 0 }
+    # Feature-type IDs are uint16 on the wire (EndpointInfo.features field 4).
+    # Standard, protocol-defined types live in 0x01..0xFF (high byte zero).
+    # Vendor-specific types use 0x0100..0xFFFF (high byte non-zero); none are
+    # registered here. Originated in DEC-031.
+    feature_type_ranges:
+      standard: { min: 0x01, max: 0xFF }
+      vendor:   { min: 0x0100, max: 0xFFFF }
     feature_types:
       - { name: DeviceInfo, id: 0x01, description: "Device identity and structure" }
       - { name: Status, id: 0x02, description: "Operating state and fault information" }

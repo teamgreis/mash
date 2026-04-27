@@ -216,7 +216,7 @@ Features are organized by concern, separating static configuration from dynamic 
 
 ### 5.1 Feature Registry
 
-See [`features/protocol-versions.yaml`](features/protocol-versions.yaml) for the canonical Feature ID registry — both `mash-go` and `mash-py` codegen consume it directly. Prose tables are illustrative only.
+See [`features/protocol-versions.yaml`](features/protocol-versions.yaml) for the canonical Feature ID registry — both `mash-go` and `mash-py` codegen consume it directly. Standard feature IDs occupy `0x01..0xFF`; the `0x0100..0xFFFF` range is reserved for vendor-specific feature types (`feature_type_ranges` in the YAML). Prose tables are illustrative only.
 
 ### 5.2 Feature Map
 

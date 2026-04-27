@@ -43,7 +43,7 @@ MASH features are organized by concern:
 
 ## Feature Registry
 
-See [`protocol-versions.yaml`](protocol-versions.yaml) for the canonical Feature ID registry — both `mash-go` and `mash-py` codegen consume it directly. Per-feature data-flow direction is declared on each feature's hand-written page (`**Direction:**` header).
+See [`protocol-versions.yaml`](protocol-versions.yaml) for the canonical Feature ID registry — both `mash-go` and `mash-py` codegen consume it directly. The same file declares the standard ID range (`0x01..0xFF`) and the vendor-specific range (`0x0100..0xFFFF`) under `feature_type_ranges`. Per-feature data-flow direction is declared on each feature's hand-written page (`**Direction:**` header).
 
 **Direction (data flow):**
 - **IN** = Data flows TO device (controller sends)
