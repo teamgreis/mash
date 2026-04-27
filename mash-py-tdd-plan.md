@@ -1080,7 +1080,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 12 — Code Generation (Python from YAML)
 
-**Status.** Pending.
+**Status.** ✅ Complete (2026-04-27). Jinja2 generator under `mash-py/codegen/` emits 15 `*_gen.py` files (10 features, 4 model enums, 1 use-case definitions) into `mash_py/features/` and `mash_py/model/`. `make generate` is deterministic; `make gen-check` is the CI drift gate. Symbol parity with Go's Measurement gen verified (every attribute / command / parameter id has a Python counterpart). YAML 1.1/1.2 bool-coercion trap caught and pinned in `tests/unit/codegen/test_specparse.py`.
 
 **Goal.** A `codegen` tool that reads `docs/features/*.yaml` and emits Python files in `mash_py/features/` and `mash_py/model/`.
 
@@ -1122,7 +1122,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 13 — Device Model (Endpoints, Features, Attributes)
 
-**Status.** Pending.
+**Status.** ✅ Complete (2026-04-27). 42 new model unit tests under `tests/unit/model/`; full unit suite is 517 green. `Endpoint` and `Device` containers under `mash_py/model/`; `Feature` split into access-checked `write_attribute()` (external) and `set_attribute_internal()` (telemetry); validation covers type/range/nullable; observers fire on actual change only. Codegen template re-routes read-only setters through `set_attribute_internal` (matches Go's `SetAttributeInternal` pattern); 10 `*_gen.py` files regenerated, `make gen-check` clean. Two spec-text divergences filed as **Issue #12** (`EndpointInfo.featureMap` field 5 vs DEC-074) and **Issue #13** (device-info.md prose feature-ID example vs `protocol-versions.yaml` registry). Both resolve with spec-only edits; see "Spec sweep before Phase 14" below for the disposition checklist. mash-py runtime exposes `Feature.feature_map` / `set_feature_map()` (DEC-074-aligned per-feature) but deliberately *no* `Endpoint.feature_map` aggregator.
 
 **Goal.** A Python device can hold an endpoint hierarchy with features and attributes, with values readable and writable through the in-memory API.
 
@@ -1149,6 +1149,29 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 **Interop verification.** Deferred.
 
 **Refinement contingency.** If a generated feature crashes on instantiation, the codegen template is wrong — fix in Jinja2, regenerate, retest.
+
+---
+
+### Spec sweep before Phase 14 (2026-04-27)
+
+**Status.** Pending. Spec-text only — no implementation code changes in either mash-py or mash-go.
+
+**Why this is its own step.** Phase 13's spec audit surfaced two doc divergences (Issues #12 and #13 in `mash-py-spec-issues.md`) that resolve with spec edits, not code. Disposing of them now keeps Phase 15 (operational server) from emitting an `EndpointInfo` shape that contradicts itself across the spec, the Go reference impl, and the Python port.
+
+**Concrete edits.** Detailed file-and-line patches are tracked in `docs-fix-plan.md` items **H8** (Issue #12) and **H9** (Issue #13). High-level summary:
+
+1. **Issue #12 — `EndpointInfo.featureMap` field 5.** Drop field 5 from the `EndpointInfo` shape and example payload in `docs/features/device-info.md`. DEC-074 (commit `2ccc270`, 2026-04-23) reframed featureMap bits as per-feature variants and dropped the device-level FM key from mDNS TXT for the same cross-feature-aggregation reason; field 5 is the same kind of aggregation. mash-go is already DEC-074-aligned (no field 5 emitted); the spec text is stale.
+2. **Issue #13 — feature-ID example/registry drift in `device-info.md`.** Re-do the example endpoint payload with the actual registry IDs from `protocol-versions.yaml`, and replace the embedded "Feature ID Registry" prose table with either a pointer to the YAML or a `mash-docgen`-generated section (same pattern commit `58e9a4b` used elsewhere). Pure documentation; no implementation reads the prose example.
+3. **DEC-074 implementation-notes addendum.** One line in `docs/decision-log.md` recording that `EndpointInfo` field 5 is dropped (the mDNS TXT precedent generalizes).
+
+**Acceptance.**
+- `mkdocs build --strict` green after the edits.
+- `mash-py-spec-issues.md` Issues #12 and #13 marked Resolved with the spec PR commit hash.
+- No code change in `mash-py/` or `mash-go/`.
+
+**Depends on.** Phase 13 (which produced the divergence reports).
+
+**Then proceed to.** Phase 14.
 
 ---
 
@@ -1208,6 +1231,8 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 **Interop verification.** Standard.
 
 **Refinement contingency.** Status code mismatches are common — Go uses specific codes (1 InvalidEndpoint, 2 InvalidFeature, 3 InvalidAttribute, 4 InvalidCommand). Get them right per `pkg/wire/status.go`.
+
+**Spec note (per DEC-074, see "Spec sweep before Phase 14").** When emitting `DeviceInfo.endpoints` (attribute id 20), each `EndpointInfo` is **four-field** (`{1: id, 2: type, 3: label, 4: features}`) — *not* the five-field shape currently shown in `docs/features/device-info.md`. The aggregated per-endpoint `featureMap` slot has no DEC-074-consistent semantics; capability variants are discovered by reading the per-feature global attribute `featureMap` (0xFFFC). `mash_py.model.Endpoint` deliberately exposes no `feature_map` aggregator for this reason.
 
 ---
 
