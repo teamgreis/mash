@@ -402,6 +402,46 @@ Unlike Issue #6 (where mash-py decoded both envelopes during the gap because the
 
 ---
 
+### Issue #8 — DEC-085 cross-plane invariant: YAML conformance coverage deferred
+
+**Status:** 🟡 Open — coverage gap deliberately accepted for Phase 9, follow-up scope.
+**Surfaced during:** mash-py Phase 9 closeout, 2026-04-27.
+
+**The gap.**
+DEC-085 codifies a namespace-separation invariant: commissioning MsgTypes (1–4, 10–13, 20, 255) and renewal MsgTypes (30–33) are disjoint integer ranges, routed by ALPN. `docs/message-types.md §1` states explicitly: *"senders must NOT send commissioning MsgTypes on `mash/1` or vice versa; receivers MUST close the connection on cross-plane frames."*
+
+In Phase 9 this invariant is currently pinned at **two layers**:
+
+- **Wire decoder layer (Go unit tests):** `mash-go/pkg/commissioning/messages_test.go::TestDecodePASEMessage_RejectsRenewalMsgTypes` and `TestDecodeRenewalMessage_RejectsCommissioningMsgTypes`. Each parametrises across the cross-plane MsgType set and asserts the decoder errors on every value.
+- **Cross-impl byte vectors:** `mash-go/testdata/cert_install_vectors.json` plus `mash-py/tests/unit/commissioning/test_cert_install_vectors.py`. Locks the canonical encoding for the commissioning-plane MsgTypes both directions.
+
+What's missing: **YAML conformance cases at the runner / dispatcher layer** — i.e., a test that opens a real `mash-comm/1` TLS connection, hand-rolls a `MsgType ∈ {30,31,32,33}` frame, sends it, and asserts the device closes the connection or surfaces a protocol error. Symmetric case for `MsgType ∈ {10,11,12,13,20}` on `mash/1`.
+
+**Why deferred.**
+Decoder-level unit tests already pin the invariant where it lives in code: every dispatcher on both ALPNs routes through one of the two `Decode*Message` helpers, and both of them reject the cross-plane MsgType. For a buggy refactor to slip past, someone would have to (a) introduce a new dispatcher path that bypasses the existing decoders, or (b) widen one of the decoders to accept the other plane's MsgTypes. Both are visible code changes that would be flagged in review and broken by the existing unit tests.
+
+YAML conformance cases would catch a *third* failure mode: a dispatcher path that uses the right decoder but routes its output to the wrong handler chain. That's a real residual risk but smaller than the two the unit tests already cover.
+
+The implementation cost is non-trivial: the runner has no existing step handler for "send a frame with arbitrary MsgType bytes" because all current YAML actions operate at high-level semantics (e.g., `commission`, `send_pase_request`). Adding a `send_raw_frame` handler is itself an infrastructure piece that deserves design review — should it be a generic "send these bytes" or a typed "send commissioning frame with msg_type=N"? Where does it live in the YAML schema? Phase 9 doesn't need that infrastructure for any other purpose.
+
+**Disposition.**
+- **Phase 9 closeout:** decoder unit tests + cross-impl vectors are the load-bearing pin. YAML conformance is belt-and-suspenders coverage.
+- **Reopens when:** any of the following triggers fire:
+  1. A dispatcher refactor in mash-go bypasses `DecodePASEMessage` or `DecodeRenewalMessage` for any plane.
+  2. A new plane (e.g., delegated commissioning per DEC-019) introduces a third MsgType range and the namespace-separation surface area grows.
+  3. A `send_raw_frame` runner step handler lands for unrelated reasons (e.g., negative-test conformance for malformed frames in another phase).
+- **Owner:** TBD — likely whoever lands #1 or #3 above adds the YAML cases as part of that workstream.
+
+**Files affected (for the eventual fix).**
+- `mash-go/internal/testharness/runner/<new>.go` — `send_raw_frame` step handler.
+- `mash-go/internal/testharness/runner/keys.go` — action constant.
+- `mash-go/testdata/cases/commissioning-namespace-rejection.yaml` (new) — covers both planes.
+- This file — mark Resolved.
+
+**Related.** DEC-085 (the invariant), Issue #7 (the workstream that surfaced this gap).
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.

@@ -1,0 +1,95 @@
+{
+  "spec_refs": [
+    "docs/decision-log.md DEC-085",
+    "docs/message-types.md §3",
+    "docs/testing/behavior/commissioning-pase.md §4.3"
+  ],
+  "vectors": [
+    {
+      "name": "csr_request_basic",
+      "msg_type": 10,
+      "go_struct": "commissioning.CSRRequest",
+      "fields": {
+        "nonce_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      },
+      "cbor_hex": "a2010a025820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "description": "CSRRequest with the spec-required 32-byte nonce."
+    },
+    {
+      "name": "csr_response_success",
+      "msg_type": 11,
+      "go_struct": "commissioning.CSRResponse",
+      "fields": {
+        "csr_hex": "504b435331302d4445522d666978747572652d6279746573",
+        "error_code": 0
+      },
+      "cbor_hex": "a3010b025818504b435331302d4445522d666978747572652d62797465730300",
+      "description": "CSRResponse on the success path: csr present, errorCode=0."
+    },
+    {
+      "name": "csr_response_failure",
+      "msg_type": 11,
+      "go_struct": "commissioning.CSRResponse",
+      "fields": {
+        "csr_hex": "",
+        "error_code": 3
+      },
+      "cbor_hex": "a3010b02400303",
+      "description": "CSRResponse on the failure path: csr empty, errorCode=ErrCodeCSRFailed."
+    },
+    {
+      "name": "cert_install_local_zone",
+      "msg_type": 12,
+      "go_struct": "commissioning.CertInstall",
+      "fields": {
+        "ca_cert_hex": "5a4f4e452d43412d4445522d66697874757265",
+        "operational_cert_hex": "4f5045524154494f4e414c2d434552542d4445522d66697874757265",
+        "zone_priority": 1,
+        "zone_type": 2
+      },
+      "cbor_hex": "a5010c02581c4f5045524154494f4e414c2d434552542d4445522d6669787475726503535a4f4e452d43412d4445522d6669787475726504020501",
+      "description": "CertInstall delivering operational cert + Zone CA for a LOCAL zone."
+    },
+    {
+      "name": "cert_install_grid_zone",
+      "msg_type": 12,
+      "go_struct": "commissioning.CertInstall",
+      "fields": {
+        "ca_cert_hex": "5a4f4e452d43412d4445522d66697874757265",
+        "operational_cert_hex": "4f5045524154494f4e414c2d434552542d4445522d66697874757265",
+        "zone_priority": 2,
+        "zone_type": 1
+      },
+      "cbor_hex": "a5010c02581c4f5045524154494f4e414c2d434552542d4445522d6669787475726503535a4f4e452d43412d4445522d6669787475726504010502",
+      "description": "CertInstall for a GRID zone with priority 2."
+    },
+    {
+      "name": "cert_install_response_success",
+      "msg_type": 13,
+      "go_struct": "commissioning.CertInstallResponse",
+      "fields": {
+        "error_code": 0
+      },
+      "cbor_hex": "a2010d0200",
+      "description": "CertInstallResponse acking success (errorCode=0)."
+    },
+    {
+      "name": "cert_install_response_zone_type_exists",
+      "msg_type": 13,
+      "go_struct": "commissioning.CertInstallResponse",
+      "fields": {
+        "error_code": 10
+      },
+      "cbor_hex": "a2010d020a",
+      "description": "CertInstallResponse rejecting a duplicate zone type per DEC-043."
+    },
+    {
+      "name": "commissioning_complete",
+      "msg_type": 20,
+      "go_struct": "commissioning.CommissioningComplete",
+      "fields": {},
+      "cbor_hex": "a10114",
+      "description": "CommissioningComplete terminator — empty payload."
+    }
+  ]
+}
