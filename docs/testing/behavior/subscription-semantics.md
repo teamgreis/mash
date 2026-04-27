@@ -198,7 +198,7 @@ A single subscription can cover multiple attributes:
 ```cbor
 // Subscribe to multiple EnergyControl attributes
 {
-  1: 0x0003,                   // feature: EnergyControl
+  1: 0x05,                     // feature: EnergyControl
   2: [2, 20, 21, 40, 41],      // attributeIds: controlState, limits, setpoints
   3: 1,                        // minInterval
   4: 60                        // maxInterval

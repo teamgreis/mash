@@ -216,18 +216,7 @@ Features are organized by concern, separating static configuration from dynamic 
 
 ### 5.1 Feature Registry
 
-| ID | Name | Description |
-|----|------|-------------|
-| 0x0001 | DeviceInfo | Device identity and structure |
-| 0x0002 | Status | Operating state, faults |
-| 0x0003 | Electrical | Dynamic electrical configuration |
-| 0x0004 | Measurement | Power, energy, voltage, current telemetry |
-| 0x0005 | EnergyControl | Limits, setpoints, control commands |
-| 0x0006 | ChargingSession | EV charging session data |
-| 0x0007 | Tariff | Price structure, components, power tiers |
-| 0x0008 | Signals | Time-slotted prices, limits, forecasts |
-| 0x0009 | Plan | Device's intended behavior |
-| 0x0100+ | (vendor) | Vendor-specific features |
+See [`features/protocol-versions.yaml`](features/protocol-versions.yaml) for the canonical Feature ID registry — both `mash-go` and `mash-py` codegen consume it directly. Prose tables are illustrative only.
 
 ### 5.2 Feature Map
 

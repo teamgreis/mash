@@ -177,7 +177,7 @@ XML-based, following Matter's approach:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<conformance feature="EnergyControl" id="0x0003">
+<conformance feature="EnergyControl" id="0x05">
 
   <!-- Feature flag conformance -->
   <featureFlags>

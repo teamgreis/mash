@@ -1511,15 +1511,15 @@ Structure:      endpoints[] (id, type, label?, features[])
 
 **Feature ID Registry:**
 ```
-0x0001  DeviceInfo
-0x0002  Status
-0x0003  Electrical
-0x0004  Measurement
-0x0005  EnergyControl
-0x0006  ChargingSession
-0x0007  Tariff
-0x0008  Signals
-0x0009  Plan
+0x01    DeviceInfo
+0x02    Status
+0x03    Electrical
+0x04    Measurement
+0x05    EnergyControl
+0x06    ChargingSession
+0x07    Tariff
+0x08    Signals
+0x09    Plan
 0x0100+ Vendor-specific
 ```
 
@@ -1670,21 +1670,21 @@ The key insight is **data direction**:
 - **Plan** = data flowing OUT from device (to controllers)
 - **Tariff** = stable structure (rarely changes)
 
-**Tariff Feature (0x0007):**
+**Tariff Feature (0x07):**
 - Defines price structure separately from time-varying values
 - Components: ENERGY, GRID_FEE, TAX, LEVY, CO2, CREDIT
 - Power tiers for demand-based pricing
 - Separate consumption and production (feed-in) tariffs
 - Signals references Tariff for component IDs
 
-**Signals Feature (0x0008):**
+**Signals Feature (0x08):**
 - Time-slotted INPUT data from controllers
 - Five signal types: PRICE, CONSTRAINT, TARGET, FORECAST, COMBINED
 - Supports multiple concurrent signals from different sources
 - Resolution rules: most restrictive for limits, highest priority for prices
 - SignalSlot fields: prices, limits, targets, forecasts, environmental signals
 
-**Plan Feature (0x0009):**
+**Plan Feature (0x09):**
 - Time-slotted OUTPUT data from device
 - Device's intended behavior in response to Signals
 - For EVSE: reflects EV's ISO 15118 ChargingProfile
