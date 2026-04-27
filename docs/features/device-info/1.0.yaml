@@ -113,6 +113,6 @@ commands:
     mandatory: true
     description: "Remove a zone from this device"
     parameters:
-      - { name: zoneId, type: string, required: true }
+      - { id: 1, name: zoneId, type: string, required: true }
     response:
-      - { name: removed, type: bool, required: true }
+      - { id: 1, name: removed, type: bool, required: true }

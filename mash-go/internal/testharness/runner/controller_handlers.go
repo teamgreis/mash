@@ -301,9 +301,9 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 		FeatureID:  uint8(model.FeatureTestControl), //nolint:gosec // constant fits in uint8
 		Payload: &wire.InvokePayload{
 			CommandID: features.TestControlCmdSetCommissioningWindowDuration,
-			Parameters: map[string]any{
-				features.SetCommWindowDurParamEnableKey:       r.config.EnableKey,
-				features.SetCommWindowDurParamDurationSeconds: durationSeconds,
+			Parameters: map[uint8]any{
+				features.SetCommissioningWindowDurationParamEnableKey:       r.config.EnableKey,
+				features.SetCommissioningWindowDurationParamDurationSeconds: durationSeconds,
 			},
 		},
 	}

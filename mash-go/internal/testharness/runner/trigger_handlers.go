@@ -100,7 +100,7 @@ func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, 
 		FeatureID:  uint8(model.FeatureTestControl),
 		Payload: &wire.InvokePayload{
 			CommandID: features.TestControlCmdTriggerTestEvent,
-			Parameters: map[string]any{
+			Parameters: map[uint8]any{
 				features.TriggerTestEventParamEnableKey:    enableKey,
 				features.TriggerTestEventParamEventTrigger: trigger,
 			},

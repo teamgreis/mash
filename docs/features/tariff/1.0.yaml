@@ -50,7 +50,7 @@ commands:
     mandatory: true
     description: "Set tariff metadata"
     parameters:
-      - { name: tariffId, type: uint32, required: true }
-      - { name: currency, type: string, required: true }
-      - { name: priceUnit, type: uint8, enum: PriceUnit, required: false }
-      - { name: description, type: string, required: false }
+      - { id: 1, name: tariffId, type: uint32, required: true }
+      - { id: 2, name: currency, type: string, required: true }
+      - { id: 3, name: priceUnit, type: uint8, enum: PriceUnit, required: false }
+      - { id: 4, name: description, type: string, required: false }

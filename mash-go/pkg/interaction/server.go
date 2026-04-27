@@ -354,32 +354,24 @@ func (s *Server) handleInvoke(ctx context.Context, req *wire.Request) *wire.Resp
 		return errorResponse(req.MessageID, wire.StatusInvalidFeature, "feature not found")
 	}
 
-	// Parse invoke payload
+	// Parse invoke payload — integer-keyed parameters per
+	// docs/interaction-model.md §7.1 (Issue #11 fix).
 	var cmdID uint8
-	var params map[string]any
+	var params map[uint8]any
 
 	switch p := req.Payload.(type) {
 	case *wire.InvokePayload:
 		cmdID = p.CommandID
-		if m, ok := p.Parameters.(map[string]any); ok {
-			params = m
-		}
+		params = wire.ToUint8Map(p.Parameters)
 	case wire.InvokePayload:
 		cmdID = p.CommandID
-		if m, ok := p.Parameters.(map[string]any); ok {
-			params = m
-		}
+		params = wire.ToUint8Map(p.Parameters)
 	case map[any]any:
 		if v, ok := p[uint64(1)].(uint64); ok {
 			cmdID = uint8(v)
 		}
-		if v, ok := p[uint64(2)].(map[any]any); ok {
-			params = make(map[string]any)
-			for k, val := range v {
-				if key, ok := k.(string); ok {
-					params[key] = val
-				}
-			}
+		if raw, ok := p[uint64(2)]; ok {
+			params = wire.ToUint8Map(raw)
 		}
 	default:
 		return errorResponse(req.MessageID, wire.StatusInvalidParameter, "invalid invoke payload")
@@ -485,3 +477,4 @@ func errorResponse(msgID uint32, status wire.Status, message string) *wire.Respo
 		Payload:   &wire.ErrorPayload{Message: message},
 	}
 }
+

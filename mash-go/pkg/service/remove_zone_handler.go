@@ -38,10 +38,10 @@ func (s *DeviceService) registerDeviceCommands() {
 			Name:        "RemoveZone",
 			Description: "Remove a zone from this device (self-removal only)",
 			Parameters: []model.ParameterMetadata{
-				{Name: features.RemoveZoneParamZoneID, Type: model.DataTypeString, Required: true, Description: "Zone ID to remove"},
+				{ID: features.RemoveZoneParamZoneID, Name: "zoneId", Type: model.DataTypeString, Required: true, Description: "Zone ID to remove"},
 			},
 			Response: []model.ParameterMetadata{
-				{Name: features.RemoveZoneRespRemoved, Type: model.DataTypeBool, Description: "Whether the zone was removed"},
+				{ID: features.RemoveZoneRespRemoved, Name: "removed", Type: model.DataTypeBool, Description: "Whether the zone was removed"},
 			},
 		},
 		s.makeRemoveZoneHandler(),
@@ -75,8 +75,10 @@ func CallerZoneTypeFromContext(ctx context.Context) cert.ZoneType {
 
 // makeRemoveZoneHandler creates a command handler for the RemoveZone command.
 // This handler validates that only the zone itself can request removal (self-removal).
+//
+// Parameters are integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
 func (s *DeviceService) makeRemoveZoneHandler() model.CommandHandler {
-	return func(ctx context.Context, params map[string]any) (map[string]any, error) {
+	return func(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 		// Extract the zone ID parameter
 		zoneIDParam, ok := params[features.RemoveZoneParamZoneID]
 		if !ok {
@@ -107,7 +109,7 @@ func (s *DeviceService) makeRemoveZoneHandler() model.CommandHandler {
 			return nil, err
 		}
 
-		return map[string]any{
+		return map[uint8]any{
 			features.RemoveZoneRespRemoved: true,
 		}, nil
 	}

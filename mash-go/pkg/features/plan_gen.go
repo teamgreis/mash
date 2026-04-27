@@ -389,6 +389,58 @@ const (
 	PlanCmdAcceptPlan  uint8 = 2
 )
 
+// RequestPlan command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	RequestPlanParamStartTime uint8 = 1
+	RequestPlanParamDuration  uint8 = 2
+)
+
+// RequestPlanParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var RequestPlanParamNameToID = map[string]uint8{
+	"startTime": RequestPlanParamStartTime,
+	"duration":  RequestPlanParamDuration,
+}
+
+// RequestPlan command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+	RequestPlanRespPlanID uint8 = 1
+)
+
+// RequestPlanRespNameToID maps response field names to wire IDs.
+var RequestPlanRespNameToID = map[string]uint8{
+	"planId": RequestPlanRespPlanID,
+}
+
+// AcceptPlan command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	AcceptPlanParamPlanID      uint8 = 1
+	AcceptPlanParamPlanVersion uint8 = 2
+)
+
+// AcceptPlanParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var AcceptPlanParamNameToID = map[string]uint8{
+	"planId":      AcceptPlanParamPlanID,
+	"planVersion": AcceptPlanParamPlanVersion,
+}
+
+// AcceptPlan command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+	AcceptPlanRespNewCommitment uint8 = 1
+)
+
+// AcceptPlanRespNameToID maps response field names to wire IDs.
+var AcceptPlanRespNameToID = map[string]uint8{
+	"newCommitment": AcceptPlanRespNewCommitment,
+}
+
 // RequestPlanRequest represents the requestPlan command parameters.
 type RequestPlanRequest struct {
 	StartTime *uint64
@@ -418,8 +470,8 @@ func (p *Plan) addCommands() {
 		Name:        "requestPlan",
 		Description: "Request device to generate/update its plan",
 		Parameters: []model.ParameterMetadata{
-			{Name: "startTime", Type: model.DataTypeUint64, Required: false},
-			{Name: "duration", Type: model.DataTypeUint32, Required: false},
+			{ID: 1, Name: "startTime", Type: model.DataTypeUint64, Required: false},
+			{ID: 2, Name: "duration", Type: model.DataTypeUint32, Required: false},
 		},
 	}, p.handleRequestPlan))
 
@@ -428,25 +480,25 @@ func (p *Plan) addCommands() {
 		Name:        "acceptPlan",
 		Description: "Accept a plan, advancing its commitment level",
 		Parameters: []model.ParameterMetadata{
-			{Name: "planId", Type: model.DataTypeUint32, Required: true},
-			{Name: "planVersion", Type: model.DataTypeUint32, Required: true},
+			{ID: 1, Name: "planId", Type: model.DataTypeUint32, Required: true},
+			{ID: 2, Name: "planVersion", Type: model.DataTypeUint32, Required: true},
 		},
 	}, p.handleAcceptPlan))
 
 }
 
-func (p *Plan) handleRequestPlan(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (p *Plan) handleRequestPlan(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if p.onRequestPlan == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := RequestPlanRequest{}
-	if raw, exists := params["startTime"]; exists {
+	if raw, exists := params[RequestPlanParamStartTime]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.StartTime = &v
 		}
 	}
-	if raw, exists := params["duration"]; exists {
+	if raw, exists := params[RequestPlanParamDuration]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.Duration = &v
 		}
@@ -457,23 +509,23 @@ func (p *Plan) handleRequestPlan(ctx context.Context, params map[string]any) (ma
 		return nil, err
 	}
 
-	result := make(map[string]any)
-	result["planId"] = resp.PlanID
+	result := make(map[uint8]any)
+	result[RequestPlanRespPlanID] = resp.PlanID
 	return result, nil
 }
 
-func (p *Plan) handleAcceptPlan(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (p *Plan) handleAcceptPlan(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if p.onAcceptPlan == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := AcceptPlanRequest{}
-	if raw, exists := params["planId"]; exists {
+	if raw, exists := params[AcceptPlanParamPlanID]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.PlanID = v
 		}
 	}
-	if raw, exists := params["planVersion"]; exists {
+	if raw, exists := params[AcceptPlanParamPlanVersion]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.PlanVersion = v
 		}
@@ -484,8 +536,8 @@ func (p *Plan) handleAcceptPlan(ctx context.Context, params map[string]any) (map
 		return nil, err
 	}
 
-	result := make(map[string]any)
-	result["newCommitment"] = uint8(resp.NewCommitment)
+	result := make(map[uint8]any)
+	result[AcceptPlanRespNewCommitment] = uint8(resp.NewCommitment)
 	return result, nil
 }
 

@@ -19,17 +19,17 @@ commands:
     mandatory: true
     description: "Trigger a test event by opcode. Requires matching 128-bit enableKey (hex-encoded, 32 chars). Matter-inspired safety gate."
     parameters:
-      - { name: enableKey, type: string, required: true }
-      - { name: eventTrigger, type: uint64, required: true }
+      - { id: 1, name: enableKey, type: string, required: true }
+      - { id: 2, name: eventTrigger, type: uint64, required: true }
     response:
-      - { name: success, type: bool, required: true }
+      - { id: 1, name: success, type: bool, required: true }
 
   - id: 0x02
     name: setCommissioningWindowDuration
     mandatory: false
     description: "Set commissioning window duration (test mode only). Requires matching enableKey."
     parameters:
-      - { name: enableKey, type: string, required: true }
-      - { name: durationSeconds, type: uint32, required: true }
+      - { id: 1, name: enableKey, type: string, required: true }
+      - { id: 2, name: durationSeconds, type: uint32, required: true }
     response:
-      - { name: success, type: bool, required: true }
+      - { id: 1, name: success, type: bool, required: true }

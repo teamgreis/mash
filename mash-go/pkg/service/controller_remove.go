@@ -9,8 +9,10 @@ import (
 
 // DeviceSessionInvoker is the interface needed to invoke commands on a device.
 // This allows mocking in tests.
+//
+// params is integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
 type DeviceSessionInvoker interface {
-	Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error)
+	Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any) (any, error)
 	Close() error
 }
 
@@ -38,8 +40,9 @@ func (s *ControllerService) removeDeviceWithSession(ctx context.Context, deviceI
 	zoneID := s.zoneID
 	s.mu.RUnlock()
 
-	// Send RemoveZone command to device
-	params := map[string]any{
+	// Send RemoveZone command to device — integer-keyed parameters per
+	// docs/interaction-model.md §7.1 (Issue #11 fix).
+	params := map[uint8]any{
 		features.RemoveZoneParamZoneID: zoneID,
 	}
 

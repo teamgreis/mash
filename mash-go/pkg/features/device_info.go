@@ -4,12 +4,6 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
-// RemoveZone parameter and response keys (CBOR integer keys).
-const (
-	RemoveZoneParamZoneID = "zoneId"
-	RemoveZoneRespRemoved = "removed"
-)
-
 // SetEndpoints sets the endpoint structure.
 func (d *DeviceInfo) SetEndpoints(endpoints []*model.EndpointInfo) error {
 	attr, err := d.GetAttribute(DeviceInfoAttrEndpoints)

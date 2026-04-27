@@ -195,9 +195,9 @@ func TestZoneSession_InvokeResponseWaitsForCommandCompletion(t *testing.T) {
 	feature.AddCommand(model.NewCommand(&model.CommandMetadata{
 		ID:   slowCmdID,
 		Name: "SlowCommand",
-	}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
+	}, func(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 		time.Sleep(700 * time.Millisecond)
-		return map[string]any{"ok": true}, nil
+		return map[uint8]any{1: true}, nil
 	}))
 
 	conn := newMockSendableConnection()
@@ -210,7 +210,7 @@ func TestZoneSession_InvokeResponseWaitsForCommandCompletion(t *testing.T) {
 		FeatureID:  uint8(model.FeatureDeviceInfo),
 		Payload: &wire.InvokePayload{
 			CommandID:  slowCmdID,
-			Parameters: map[string]any{},
+			Parameters: map[uint8]any{},
 		},
 	}
 	reqData, err := wire.EncodeRequest(req)
@@ -721,7 +721,7 @@ func TestZoneSession_Invoke_SendsRequestAndReceivesResponse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	result, err := session.Invoke(ctx, 1, 6, 1, map[string]any{"param": "value"})
+	result, err := session.Invoke(ctx, 1, 6, 1, map[uint8]any{1: "value"})
 	if err != nil {
 		t.Fatalf("Invoke failed: %v", err)
 	}

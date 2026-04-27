@@ -525,7 +525,7 @@ func (r *Runner) sendTriggerOnConn(ctx context.Context, trigger uint64, conn *Co
 		FeatureID:  uint8(model.FeatureTestControl), //nolint:gosec // constant fits in uint8
 		Payload: &wire.InvokePayload{
 			CommandID: features.TestControlCmdTriggerTestEvent,
-			Parameters: map[string]any{
+			Parameters: map[uint8]any{
 				features.TriggerTestEventParamEnableKey:    enableKey,
 				features.TriggerTestEventParamEventTrigger: trigger,
 			},

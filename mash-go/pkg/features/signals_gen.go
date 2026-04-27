@@ -495,6 +495,87 @@ const (
 	SignalsCmdClearSignals         uint8 = 4
 )
 
+// SendPriceSignal command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SendPriceSignalParamSource     uint8 = 1
+	SendPriceSignalParamStartTime  uint8 = 2
+	SendPriceSignalParamValidUntil uint8 = 3
+	SendPriceSignalParamSlots      uint8 = 4
+)
+
+// SendPriceSignalParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SendPriceSignalParamNameToID = map[string]uint8{
+	"source":     SendPriceSignalParamSource,
+	"startTime":  SendPriceSignalParamStartTime,
+	"validUntil": SendPriceSignalParamValidUntil,
+	"slots":      SendPriceSignalParamSlots,
+}
+
+// SendConstraintSignal command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SendConstraintSignalParamSource     uint8 = 1
+	SendConstraintSignalParamStartTime  uint8 = 2
+	SendConstraintSignalParamValidUntil uint8 = 3
+	SendConstraintSignalParamSlots      uint8 = 4
+)
+
+// SendConstraintSignalParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SendConstraintSignalParamNameToID = map[string]uint8{
+	"source":     SendConstraintSignalParamSource,
+	"startTime":  SendConstraintSignalParamStartTime,
+	"validUntil": SendConstraintSignalParamValidUntil,
+	"slots":      SendConstraintSignalParamSlots,
+}
+
+// SendForecastSignal command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SendForecastSignalParamSource     uint8 = 1
+	SendForecastSignalParamStartTime  uint8 = 2
+	SendForecastSignalParamValidUntil uint8 = 3
+	SendForecastSignalParamSlots      uint8 = 4
+)
+
+// SendForecastSignalParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SendForecastSignalParamNameToID = map[string]uint8{
+	"source":     SendForecastSignalParamSource,
+	"startTime":  SendForecastSignalParamStartTime,
+	"validUntil": SendForecastSignalParamValidUntil,
+	"slots":      SendForecastSignalParamSlots,
+}
+
+// ClearSignals command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	ClearSignalsParamSignalType uint8 = 1
+)
+
+// ClearSignalsParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var ClearSignalsParamNameToID = map[string]uint8{
+	"signalType": ClearSignalsParamSignalType,
+}
+
+// ClearSignals command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+	ClearSignalsRespCleared uint8 = 1
+)
+
+// ClearSignalsRespNameToID maps response field names to wire IDs.
+var ClearSignalsRespNameToID = map[string]uint8{
+	"cleared": ClearSignalsRespCleared,
+}
+
 // SendPriceSignalRequest represents the sendPriceSignal command parameters.
 type SendPriceSignalRequest struct {
 	Source     SignalSource
@@ -536,10 +617,10 @@ func (s *Signals) addCommands() {
 		Name:        "sendPriceSignal",
 		Description: "Send a price signal schedule to the device",
 		Parameters: []model.ParameterMetadata{
-			{Name: "source", Type: model.DataTypeUint8, Required: true},
-			{Name: "startTime", Type: model.DataTypeUint64, Required: true},
-			{Name: "validUntil", Type: model.DataTypeUint64, Required: false},
-			{Name: "slots", Type: model.DataTypeArray, Required: true},
+			{ID: 1, Name: "source", Type: model.DataTypeUint8, Required: true},
+			{ID: 2, Name: "startTime", Type: model.DataTypeUint64, Required: true},
+			{ID: 3, Name: "validUntil", Type: model.DataTypeUint64, Required: false},
+			{ID: 4, Name: "slots", Type: model.DataTypeArray, Required: true},
 		},
 	}, s.handleSendPriceSignal))
 
@@ -548,10 +629,10 @@ func (s *Signals) addCommands() {
 		Name:        "sendConstraintSignal",
 		Description: "Send a power constraint signal to the device",
 		Parameters: []model.ParameterMetadata{
-			{Name: "source", Type: model.DataTypeUint8, Required: true},
-			{Name: "startTime", Type: model.DataTypeUint64, Required: true},
-			{Name: "validUntil", Type: model.DataTypeUint64, Required: false},
-			{Name: "slots", Type: model.DataTypeArray, Required: true},
+			{ID: 1, Name: "source", Type: model.DataTypeUint8, Required: true},
+			{ID: 2, Name: "startTime", Type: model.DataTypeUint64, Required: true},
+			{ID: 3, Name: "validUntil", Type: model.DataTypeUint64, Required: false},
+			{ID: 4, Name: "slots", Type: model.DataTypeArray, Required: true},
 		},
 	}, s.handleSendConstraintSignal))
 
@@ -560,10 +641,10 @@ func (s *Signals) addCommands() {
 		Name:        "sendForecastSignal",
 		Description: "Send a power forecast signal to the device",
 		Parameters: []model.ParameterMetadata{
-			{Name: "source", Type: model.DataTypeUint8, Required: true},
-			{Name: "startTime", Type: model.DataTypeUint64, Required: true},
-			{Name: "validUntil", Type: model.DataTypeUint64, Required: false},
-			{Name: "slots", Type: model.DataTypeArray, Required: true},
+			{ID: 1, Name: "source", Type: model.DataTypeUint8, Required: true},
+			{ID: 2, Name: "startTime", Type: model.DataTypeUint64, Required: true},
+			{ID: 3, Name: "validUntil", Type: model.DataTypeUint64, Required: false},
+			{ID: 4, Name: "slots", Type: model.DataTypeArray, Required: true},
 		},
 	}, s.handleSendForecastSignal))
 
@@ -572,112 +653,112 @@ func (s *Signals) addCommands() {
 		Name:        "clearSignals",
 		Description: "Clear active signals",
 		Parameters: []model.ParameterMetadata{
-			{Name: "signalType", Type: model.DataTypeString, Required: false},
+			{ID: 1, Name: "signalType", Type: model.DataTypeString, Required: false},
 		},
 	}, s.handleClearSignals))
 
 }
 
-func (s *Signals) handleSendPriceSignal(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (s *Signals) handleSendPriceSignal(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if s.onSendPriceSignal == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SendPriceSignalRequest{}
-	if raw, exists := params["source"]; exists {
+	if raw, exists := params[SendPriceSignalParamSource]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Source = SignalSource(v)
 		}
 	}
-	if raw, exists := params["startTime"]; exists {
+	if raw, exists := params[SendPriceSignalParamStartTime]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.StartTime = v
 		}
 	}
-	if raw, exists := params["validUntil"]; exists {
+	if raw, exists := params[SendPriceSignalParamValidUntil]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.ValidUntil = &v
 		}
 	}
-	if raw, exists := params["slots"]; exists {
+	if raw, exists := params[SendPriceSignalParamSlots]; exists {
 		if v, ok := raw.([]any); ok {
 			req.Slots = v
 		}
 	}
 
 	err := s.onSendPriceSignal(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (s *Signals) handleSendConstraintSignal(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (s *Signals) handleSendConstraintSignal(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if s.onSendConstraintSignal == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SendConstraintSignalRequest{}
-	if raw, exists := params["source"]; exists {
+	if raw, exists := params[SendConstraintSignalParamSource]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Source = SignalSource(v)
 		}
 	}
-	if raw, exists := params["startTime"]; exists {
+	if raw, exists := params[SendConstraintSignalParamStartTime]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.StartTime = v
 		}
 	}
-	if raw, exists := params["validUntil"]; exists {
+	if raw, exists := params[SendConstraintSignalParamValidUntil]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.ValidUntil = &v
 		}
 	}
-	if raw, exists := params["slots"]; exists {
+	if raw, exists := params[SendConstraintSignalParamSlots]; exists {
 		if v, ok := raw.([]any); ok {
 			req.Slots = v
 		}
 	}
 
 	err := s.onSendConstraintSignal(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (s *Signals) handleSendForecastSignal(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (s *Signals) handleSendForecastSignal(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if s.onSendForecastSignal == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SendForecastSignalRequest{}
-	if raw, exists := params["source"]; exists {
+	if raw, exists := params[SendForecastSignalParamSource]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Source = SignalSource(v)
 		}
 	}
-	if raw, exists := params["startTime"]; exists {
+	if raw, exists := params[SendForecastSignalParamStartTime]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.StartTime = v
 		}
 	}
-	if raw, exists := params["validUntil"]; exists {
+	if raw, exists := params[SendForecastSignalParamValidUntil]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.ValidUntil = &v
 		}
 	}
-	if raw, exists := params["slots"]; exists {
+	if raw, exists := params[SendForecastSignalParamSlots]; exists {
 		if v, ok := raw.([]any); ok {
 			req.Slots = v
 		}
 	}
 
 	err := s.onSendForecastSignal(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (s *Signals) handleClearSignals(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (s *Signals) handleClearSignals(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if s.onClearSignals == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := ClearSignalsRequest{}
-	if raw, exists := params["signalType"]; exists {
+	if raw, exists := params[ClearSignalsParamSignalType]; exists {
 		if v, ok := raw.(string); ok {
 			req.SignalType = &v
 		}
@@ -688,8 +769,8 @@ func (s *Signals) handleClearSignals(ctx context.Context, params map[string]any)
 		return nil, err
 	}
 
-	result := make(map[string]any)
-	result["cleared"] = resp.Cleared
+	result := make(map[uint8]any)
+	result[ClearSignalsRespCleared] = resp.Cleared
 	return result, nil
 }
 

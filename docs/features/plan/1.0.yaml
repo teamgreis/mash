@@ -87,16 +87,16 @@ commands:
     mandatory: true
     description: "Request device to generate/update its plan"
     parameters:
-      - { name: startTime, type: uint64, required: false }
-      - { name: duration, type: uint32, required: false }
+      - { id: 1, name: startTime, type: uint64, required: false }
+      - { id: 2, name: duration, type: uint32, required: false }
     response:
-      - { name: planId, type: uint32, required: true }
+      - { id: 1, name: planId, type: uint32, required: true }
 
   - id: 2
     name: acceptPlan
     description: "Accept a plan, advancing its commitment level"
     parameters:
-      - { name: planId, type: uint32, required: true }
-      - { name: planVersion, type: uint32, required: true }
+      - { id: 1, name: planId, type: uint32, required: true }
+      - { id: 2, name: planVersion, type: uint32, required: true }
     response:
-      - { name: newCommitment, type: uint8, enum: Commitment, required: true }
+      - { id: 1, name: newCommitment, type: uint8, enum: Commitment, required: true }

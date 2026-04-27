@@ -1046,7 +1046,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 11 — Interaction Model Client (Read/Write/Subscribe/Invoke)
 
-**Status.** ✅ Mostly complete (2026-04-27). Read / Write / Subscribe / Unsubscribe pass end-to-end against mash-go; Invoke is gated on Issue #11 (mash-go uses string-keyed parameter maps; spec specifies integer keys per ``§7.1``). Interop test for Invoke is marked ``xfail(strict=True)`` and will flip to passing once mash-go is updated. Issue #10 (Go's messageId off-by-one) also captured.
+**Status.** ✅ Complete (2026-04-27). All four operations interop end-to-end against mash-go. Issues #10 (messageId off-by-one) and #11 (string-keyed Invoke parameters) both filed and resolved same-day in mash-go: integer-keyed Invoke params + responses per spec §7.1/§7.2 with codegen producing `<Cmd>Param<Name>` / `<Cmd>Resp<Name>` `uint8` constants, single `wire.ToUint8Map` helper for CBOR narrowing.
 
 **Goal.** Full request/response correlation for the controller side, with subscription notification dispatch.
 

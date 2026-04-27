@@ -353,7 +353,10 @@ func (f *Feature) GetCommand(id uint8) (*Command, error) {
 }
 
 // InvokeCommand invokes a command by ID.
-func (f *Feature) InvokeCommand(ctx context.Context, id uint8, params map[string]any) (map[string]any, error) {
+//
+// params and the response map are integer-keyed per
+// docs/interaction-model.md §7.1 / §7.2 (Issue #11 fix).
+func (f *Feature) InvokeCommand(ctx context.Context, id uint8, params map[uint8]any) (map[uint8]any, error) {
 	cmd, err := f.GetCommand(id)
 	if err != nil {
 		return nil, err

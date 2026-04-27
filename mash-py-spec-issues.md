@@ -505,8 +505,9 @@ mash-py is the controller in Phase 10. The spec divergence is not blocking — P
 
 ### Issue #10 — Initial messageId: spec says "Start at 1," mash-go emits `2`
 
-**Status:** Open (mash-go bug)
+**Status:** ✅ Resolved (2026-04-27, same day as #11)
 **Surfaced in:** Phase 11 — InteractionClient implementation (2026-04-27)
+**Resolution:** mash-go `pkg/interaction/client.go` — `nextMsgID` initial value changed from `1` to `0` so the first `atomic.AddUint32` returns `1` per spec §3.5. New regression test `TestMessageIDStartsAtOne` added.
 
 **The divergence.**
 
@@ -540,8 +541,9 @@ The wraparound check (`if id != wire.NotificationMessageID`) already protects th
 
 ### Issue #11 — Invoke command parameters: spec specifies integer keys, mash-go uses string keys
 
-**Status:** Open (mash-go bug — interop-breaking for Invoke)
+**Status:** ✅ Resolved (2026-04-27, same day as surfaced)
 **Surfaced in:** Phase 11 — interop test against `mash-device` removeZone command (2026-04-27)
+**Resolution:** mash-go converted to integer-keyed Invoke parameters and responses end-to-end. YAML migration added explicit `id:` fields to all 17 commands across 7 features; codegen now emits `<Cmd>Param<Name>` and `<Cmd>Resp<Name>` `uint8` constants plus `<Cmd>ParamNameToID` / `<Cmd>RespNameToID` lookup tables for harness use. Interfaces (`model.CommandHandler`, `Feature.InvokeCommand`, `Device.InvokeCommand`, `dispatch.DeviceModel.InvokeCommand`, `interaction.Client.Invoke`, `service.DeviceSession.Invoke`, `service.ZoneSession.Invoke`) all switched from `map[string]any` → `map[uint8]any`. Single shared helper `wire.ToUint8Map` does the CBOR-decode narrowing (CBOR widens uint8 keys to uint64 during generic decode). mash-py interop verified: `test_invoke_remove_zone_decodes_integer_keyed_params` passes — the post-fix failure mode is `CONSTRAINT_ERROR` (zoneId mismatch, expected because mash-py doesn't compute the device-derived zone-id `sha256(k_main)[:8]`), proving the integer-keyed wire form decodes correctly.
 
 **The divergence.**
 

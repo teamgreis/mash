@@ -412,9 +412,9 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, err := tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
-			"enableKey":       "00112233445566778899aabbccddeeff",
-			"durationSeconds": uint32(20),
+		_, err := tc.InvokeCommand(testZoneCtx(), 2, map[uint8]any{
+			features.SetCommissioningWindowDurationParamEnableKey:       "00112233445566778899aabbccddeeff",
+			features.SetCommissioningWindowDurationParamDurationSeconds: uint32(20),
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
@@ -430,9 +430,9 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, err := tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
-			"enableKey":       "wrong-key",
-			"durationSeconds": uint32(20),
+		_, err := tc.InvokeCommand(testZoneCtx(), 2, map[uint8]any{
+			features.SetCommissioningWindowDurationParamEnableKey:       "wrong-key",
+			features.SetCommissioningWindowDurationParamDurationSeconds: uint32(20),
 		})
 		if err == nil {
 			t.Error("expected error for wrong enableKey, got nil")
@@ -445,9 +445,9 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, _ = tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
-			"enableKey":       "00112233445566778899aabbccddeeff",
-			"durationSeconds": uint32(1),
+		_, _ = tc.InvokeCommand(testZoneCtx(), 2, map[uint8]any{
+			features.SetCommissioningWindowDurationParamEnableKey:       "00112233445566778899aabbccddeeff",
+			features.SetCommissioningWindowDurationParamDurationSeconds: uint32(1),
 		})
 
 		got := dm.CommissioningWindowDuration()
@@ -462,9 +462,9 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, _ = tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
-			"enableKey":       "00112233445566778899aabbccddeeff",
-			"durationSeconds": uint32(20000),
+		_, _ = tc.InvokeCommand(testZoneCtx(), 2, map[uint8]any{
+			features.SetCommissioningWindowDurationParamEnableKey:       "00112233445566778899aabbccddeeff",
+			features.SetCommissioningWindowDurationParamDurationSeconds: uint32(20000),
 		})
 
 		got := dm.CommissioningWindowDuration()

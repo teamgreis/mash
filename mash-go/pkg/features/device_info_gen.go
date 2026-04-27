@@ -485,6 +485,30 @@ const (
 	DeviceInfoCmdRemoveZone uint8 = 16
 )
 
+// RemoveZone command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	RemoveZoneParamZoneID uint8 = 1
+)
+
+// RemoveZoneParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var RemoveZoneParamNameToID = map[string]uint8{
+	"zoneId": RemoveZoneParamZoneID,
+}
+
+// RemoveZone command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+	RemoveZoneRespRemoved uint8 = 1
+)
+
+// RemoveZoneRespNameToID maps response field names to wire IDs.
+var RemoveZoneRespNameToID = map[string]uint8{
+	"removed": RemoveZoneRespRemoved,
+}
+
 // RemoveZoneRequest represents the removeZone command parameters.
 type RemoveZoneRequest struct {
 	ZoneID string
@@ -502,19 +526,19 @@ func (d *DeviceInfo) addCommands() {
 		Name:        "removeZone",
 		Description: "Remove a zone from this device",
 		Parameters: []model.ParameterMetadata{
-			{Name: "zoneId", Type: model.DataTypeString, Required: true},
+			{ID: 1, Name: "zoneId", Type: model.DataTypeString, Required: true},
 		},
 	}, d.handleRemoveZone))
 
 }
 
-func (d *DeviceInfo) handleRemoveZone(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (d *DeviceInfo) handleRemoveZone(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if d.onRemoveZone == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := RemoveZoneRequest{}
-	if raw, exists := params["zoneId"]; exists {
+	if raw, exists := params[RemoveZoneParamZoneID]; exists {
 		if v, ok := raw.(string); ok {
 			req.ZoneID = v
 		}
@@ -525,8 +549,8 @@ func (d *DeviceInfo) handleRemoveZone(ctx context.Context, params map[string]any
 		return nil, err
 	}
 
-	result := make(map[string]any)
-	result["removed"] = resp.Removed
+	result := make(map[uint8]any)
+	result[RemoveZoneRespRemoved] = resp.Removed
 	return result, nil
 }
 

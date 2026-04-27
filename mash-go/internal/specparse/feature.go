@@ -82,7 +82,15 @@ type RawCommandDef struct {
 }
 
 // RawParameterDef represents a command parameter or response field.
+//
+// ID is the integer key used in the on-the-wire CBOR map per
+// docs/interaction-model.md §7.1 / §7.2 (and the protocol-wide §2.2
+// integer-key design). YAML must declare ID explicitly per parameter
+// and per response field; codegen relies on it for the CBOR (en|de)code
+// path. Name is kept for human-readable test fixtures and
+// documentation; it is NOT a wire-level identifier.
 type RawParameterDef struct {
+	ID          uint8  `yaml:"id"`
 	Name        string `yaml:"name"`
 	Type        string `yaml:"type"`
 	Enum        string `yaml:"enum"`

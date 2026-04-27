@@ -137,12 +137,17 @@ func TestDeviceInfo(t *testing.T) {
 		if DeviceInfoCmdRemoveZone != 0x10 {
 			t.Errorf("expected RemoveZone command ID 0x10, got 0x%02x", DeviceInfoCmdRemoveZone)
 		}
-		// Verify parameter and response keys
-		if RemoveZoneParamZoneID != "zoneId" {
-			t.Errorf("expected parameter key 'zoneId', got '%s'", RemoveZoneParamZoneID)
+		// Verify parameter and response IDs (Issue #11 fix: integer keys
+		// per docs/interaction-model.md §7.1).
+		if RemoveZoneParamZoneID != 1 {
+			t.Errorf("expected parameter ID 1, got %d", RemoveZoneParamZoneID)
 		}
-		if RemoveZoneRespRemoved != "removed" {
-			t.Errorf("expected response key 'removed', got '%s'", RemoveZoneRespRemoved)
+		if RemoveZoneRespRemoved != 1 {
+			t.Errorf("expected response field ID 1, got %d", RemoveZoneRespRemoved)
+		}
+		// The codegen also emits a name-to-id map for harness use.
+		if RemoveZoneParamNameToID["zoneId"] != RemoveZoneParamZoneID {
+			t.Errorf("expected zoneId in RemoveZoneParamNameToID, got %v", RemoveZoneParamNameToID)
 		}
 	})
 }
@@ -998,31 +1003,33 @@ func TestEnergyControl_ProcessLifecycleOptIn(t *testing.T) {
 	})
 
 	t.Run("PauseWithoutHandlerIsNonPanicking", func(t *testing.T) {
-		out, err := ec.handlePause(context.Background(), map[string]any{})
+		out, err := ec.handlePause(context.Background(), map[uint8]any{})
 		if err != nil {
 			t.Fatalf("handlePause on opt-out device must not error; got %v", err)
 		}
-		if ok, _ := out["success"].(bool); ok {
+		// Codegen returns {1: false} for nil-handler simple-response commands
+		// (id 1 = success/applied by spec convention; see Issue #11).
+		if ok, _ := out[1].(bool); ok {
 			t.Errorf("handlePause on opt-out device must report success=false; got out=%v", out)
 		}
 	})
 
 	t.Run("ResumeWithoutHandlerIsNonPanicking", func(t *testing.T) {
-		out, err := ec.handleResume(context.Background(), map[string]any{})
+		out, err := ec.handleResume(context.Background(), map[uint8]any{})
 		if err != nil {
 			t.Fatalf("handleResume on opt-out device must not error; got %v", err)
 		}
-		if ok, _ := out["success"].(bool); ok {
+		if ok, _ := out[1].(bool); ok {
 			t.Errorf("handleResume on opt-out device must report success=false; got out=%v", out)
 		}
 	})
 
 	t.Run("StopWithoutHandlerIsNonPanicking", func(t *testing.T) {
-		out, err := ec.handleStop(context.Background(), map[string]any{})
+		out, err := ec.handleStop(context.Background(), map[uint8]any{})
 		if err != nil {
 			t.Fatalf("handleStop on opt-out device must not error; got %v", err)
 		}
-		if ok, _ := out["success"].(bool); ok {
+		if ok, _ := out[1].(bool); ok {
 			t.Errorf("handleStop on opt-out device must report success=false; got out=%v", out)
 		}
 	})
@@ -1639,24 +1646,24 @@ func TestSetLimitEnhancedResponse(t *testing.T) {
 			}, nil
 		})
 
-		// Invoke via command
-		result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[string]any{
-			"consumptionLimit": int64(7_000_000),
-			"cause":            uint8(LimitCauseGridEmergency),
+		// Invoke via command — integer-keyed parameters per Issue #11.
+		result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[uint8]any{
+			SetLimitParamConsumptionLimit: int64(7_000_000),
+			SetLimitParamCause:            uint8(LimitCauseGridEmergency),
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
 		}
 
-		// Check enhanced response fields
-		if applied, ok := result["applied"].(bool); !ok || !applied {
-			t.Errorf("expected applied=true, got %v", result["applied"])
+		// Check enhanced response fields — integer-keyed per Issue #11.
+		if applied, ok := result[SetLimitRespApplied].(bool); !ok || !applied {
+			t.Errorf("expected applied=true, got %v", result[SetLimitRespApplied])
 		}
-		if cs, ok := result["controlState"].(uint8); !ok || ControlState(cs) != ControlStateLimited {
-			t.Errorf("expected controlState=LIMITED, got %v", result["controlState"])
+		if cs, ok := result[SetLimitRespControlState].(uint8); !ok || ControlState(cs) != ControlStateLimited {
+			t.Errorf("expected controlState=LIMITED, got %v", result[SetLimitRespControlState])
 		}
-		if effLimit, ok := result["effectiveConsumptionLimit"].(int64); !ok || effLimit != 7_000_000 {
-			t.Errorf("expected effectiveConsumptionLimit=7000000, got %v", result["effectiveConsumptionLimit"])
+		if effLimit, ok := result[SetLimitRespEffectiveConsumptionLimit].(int64); !ok || effLimit != 7_000_000 {
+			t.Errorf("expected effectiveConsumptionLimit=7000000, got %v", result[SetLimitRespEffectiveConsumptionLimit])
 		}
 	})
 
@@ -1670,16 +1677,16 @@ func TestSetLimitEnhancedResponse(t *testing.T) {
 			}, nil
 		})
 
-		result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[string]any{
-			"productionLimit": int64(5_000_000),
-			"cause":           uint8(LimitCauseGridEmergency),
+		result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[uint8]any{
+			SetLimitParamProductionLimit: int64(5_000_000),
+			SetLimitParamCause:           uint8(LimitCauseGridEmergency),
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
 		}
 
-		if effLimit, ok := result["effectiveProductionLimit"].(int64); !ok || effLimit != 5_000_000 {
-			t.Errorf("expected effectiveProductionLimit=5000000, got %v", result["effectiveProductionLimit"])
+		if effLimit, ok := result[SetLimitRespEffectiveProductionLimit].(int64); !ok || effLimit != 5_000_000 {
+			t.Errorf("expected effectiveProductionLimit=5000000, got %v", result[SetLimitRespEffectiveProductionLimit])
 		}
 	})
 }
@@ -1701,22 +1708,22 @@ func TestSetLimitRejectsNegativeValue(t *testing.T) {
 		return SetLimitResponse{Applied: true, ControlState: ControlStateLimited}, nil
 	})
 
-	result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[string]any{
-		"consumptionLimit": int64(-1000),
-		"cause":            uint8(LimitCauseGridEmergency),
+	result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[uint8]any{
+		SetLimitParamConsumptionLimit: int64(-1000),
+		SetLimitParamCause:            uint8(LimitCauseGridEmergency),
 	})
 	if err != nil {
 		t.Fatalf("InvokeCommand failed: %v", err)
 	}
 
-	if applied, ok := result["applied"].(bool); ok && applied {
+	if applied, ok := result[SetLimitRespApplied].(bool); ok && applied {
 		t.Error("expected applied=false for negative value")
 	}
-	if reason, ok := result["rejectReason"].(uint8); !ok || LimitRejectReason(reason) != LimitRejectReasonInvalidValue {
-		t.Errorf("expected rejectReason=INVALID_VALUE, got %v", result["rejectReason"])
+	if reason, ok := result[SetLimitRespRejectReason].(uint8); !ok || LimitRejectReason(reason) != LimitRejectReasonInvalidValue {
+		t.Errorf("expected rejectReason=INVALID_VALUE, got %v", result[SetLimitRespRejectReason])
 	}
-	if cs, ok := result["controlState"].(uint8); !ok || ControlState(cs) != ControlStateControlled {
-		t.Errorf("expected controlState=CONTROLLED, got %v", result["controlState"])
+	if cs, ok := result[SetLimitRespControlState].(uint8); !ok || ControlState(cs) != ControlStateControlled {
+		t.Errorf("expected controlState=CONTROLLED, got %v", result[SetLimitRespControlState])
 	}
 }
 
@@ -1763,9 +1770,9 @@ func TestTariff(t *testing.T) {
 			return nil
 		})
 
-		_, err := tariff.InvokeCommand(context.Background(), TariffCmdSetTariff, map[string]any{
-			"tariffId": uint32(100),
-			"currency": "USD",
+		_, err := tariff.InvokeCommand(context.Background(), TariffCmdSetTariff, map[uint8]any{
+			SetTariffParamTariffID: uint32(100),
+			SetTariffParamCurrency: "USD",
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
@@ -1832,10 +1839,10 @@ func TestSignals(t *testing.T) {
 			return nil
 		})
 
-		_, err := sig.InvokeCommand(context.Background(), SignalsCmdSendPriceSignal, map[string]any{
-			"source":    uint8(SignalSourceGrid),
-			"startTime": uint64(1700000000),
-			"slots":     []any{},
+		_, err := sig.InvokeCommand(context.Background(), SignalsCmdSendPriceSignal, map[uint8]any{
+			SendPriceSignalParamSource:    uint8(SignalSourceGrid),
+			SendPriceSignalParamStartTime: uint64(1700000000),
+			SendPriceSignalParamSlots:     []any{},
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
@@ -1852,15 +1859,15 @@ func TestSignals(t *testing.T) {
 			return ClearSignalsResponse{Cleared: 3}, nil
 		})
 
-		result, err := sig.InvokeCommand(context.Background(), SignalsCmdClearSignals, map[string]any{})
+		result, err := sig.InvokeCommand(context.Background(), SignalsCmdClearSignals, map[uint8]any{})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
 		}
 		if !called {
 			t.Error("expected OnClearSignals handler to be called")
 		}
-		if cleared, ok := result["cleared"].(uint8); !ok || cleared != 3 {
-			t.Errorf("expected cleared=3, got %v", result["cleared"])
+		if cleared, ok := result[ClearSignalsRespCleared].(uint8); !ok || cleared != 3 {
+			t.Errorf("expected cleared=3, got %v", result[ClearSignalsRespCleared])
 		}
 	})
 
@@ -1940,15 +1947,15 @@ func TestPlan(t *testing.T) {
 			return RequestPlanResponse{PlanID: 99}, nil
 		})
 
-		result, err := plan.InvokeCommand(context.Background(), PlanCmdRequestPlan, map[string]any{})
+		result, err := plan.InvokeCommand(context.Background(), PlanCmdRequestPlan, map[uint8]any{})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
 		}
 		if !called {
 			t.Error("expected OnRequestPlan handler to be called")
 		}
-		if planID, ok := result["planId"].(uint32); !ok || planID != 99 {
-			t.Errorf("expected planId=99, got %v", result["planId"])
+		if planID, ok := result[RequestPlanRespPlanID].(uint32); !ok || planID != 99 {
+			t.Errorf("expected planId=99, got %v", result[RequestPlanRespPlanID])
 		}
 	})
 
@@ -1962,9 +1969,9 @@ func TestPlan(t *testing.T) {
 			return AcceptPlanResponse{NewCommitment: CommitmentCommitted}, nil
 		})
 
-		result, err := plan.InvokeCommand(context.Background(), PlanCmdAcceptPlan, map[string]any{
-			"planId":      uint32(99),
-			"planVersion": uint32(1),
+		result, err := plan.InvokeCommand(context.Background(), PlanCmdAcceptPlan, map[uint8]any{
+			AcceptPlanParamPlanID:      uint32(99),
+			AcceptPlanParamPlanVersion: uint32(1),
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
@@ -1972,8 +1979,8 @@ func TestPlan(t *testing.T) {
 		if !called {
 			t.Error("expected OnAcceptPlan handler to be called")
 		}
-		if nc, ok := result["newCommitment"].(uint8); !ok || Commitment(nc) != CommitmentCommitted {
-			t.Errorf("expected newCommitment=COMMITTED, got %v", result["newCommitment"])
+		if nc, ok := result[AcceptPlanRespNewCommitment].(uint8); !ok || Commitment(nc) != CommitmentCommitted {
+			t.Errorf("expected newCommitment=COMMITTED, got %v", result[AcceptPlanRespNewCommitment])
 		}
 	})
 
@@ -2036,11 +2043,11 @@ func TestSetLimitRequestParsing(t *testing.T) {
 	})
 
 	t.Run("AllFieldsParsed", func(t *testing.T) {
-		_, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[string]any{
-			"consumptionLimit": int64(10_000_000),
-			"productionLimit":  int64(5_000_000),
-			"duration":         uint32(3600),
-			"cause":            uint8(LimitCauseLocalProtection),
+		_, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[uint8]any{
+			SetLimitParamConsumptionLimit: int64(10_000_000),
+			SetLimitParamProductionLimit:  int64(5_000_000),
+			SetLimitParamDuration:         uint32(3600),
+			SetLimitParamCause:            uint8(LimitCauseLocalProtection),
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
@@ -2061,8 +2068,8 @@ func TestSetLimitRequestParsing(t *testing.T) {
 	})
 
 	t.Run("OptionalFieldsNil", func(t *testing.T) {
-		_, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[string]any{
-			"cause": uint8(LimitCauseGridEmergency),
+		_, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[uint8]any{
+			SetLimitParamCause: uint8(LimitCauseGridEmergency),
 		})
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)

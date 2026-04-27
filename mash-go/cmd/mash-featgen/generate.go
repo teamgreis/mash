@@ -476,12 +476,15 @@ func generateCommandHandlers(b *strings.Builder, def *specparse.RawFeatureDef) {
 	recv := strings.ToLower(name[:1])
 
 	for _, cmd := range def.Commands {
-		handlerName := "handle" + goTitleCase(cmd.Name)
-		callbackField := "on" + goTitleCase(cmd.Name)
+		cmdTitle := goTitleCase(cmd.Name)
+		handlerName := "handle" + cmdTitle
+		callbackField := "on" + cmdTitle
 		simple := isSimpleResponse(cmd)
 		hasParams := hasParameters(cmd)
 
-		fmt.Fprintf(b, "func (%s *%s) %s(ctx context.Context, params map[string]any) (map[string]any, error) {\n",
+		// CommandHandler signature is map[uint8]any -> map[uint8]any per
+		// docs/interaction-model.md §7.1 / §7.2 (Issue #11 fix).
+		fmt.Fprintf(b, "func (%s *%s) %s(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {\n",
 			recv, name, handlerName)
 
 		fmt.Fprintf(b, "if %s.%s == nil {\n", recv, callbackField)
@@ -489,11 +492,12 @@ func generateCommandHandlers(b *strings.Builder, def *specparse.RawFeatureDef) {
 		b.WriteString("}\n\n")
 
 		if hasParams {
-			reqType := goTitleCase(cmd.Name) + "Request"
+			reqType := cmdTitle + "Request"
 			fmt.Fprintf(b, "req := %s{}\n", reqType)
 			for _, p := range cmd.Parameters {
 				fieldName := goTitleCase(p.Name)
-				fmt.Fprintf(b, "if raw, exists := params[%q]; exists {\n", p.Name)
+				paramConst := cmdTitle + "Param" + goTitleCase(p.Name)
+				fmt.Fprintf(b, "if raw, exists := params[%s]; exists {\n", paramConst)
 				writeParamParse(b, p, fieldName, "req")
 				b.WriteString("}\n")
 			}
@@ -506,7 +510,17 @@ func generateCommandHandlers(b *strings.Builder, def *specparse.RawFeatureDef) {
 			} else {
 				fmt.Fprintf(b, "err := %s.%s(ctx)\n", recv, callbackField)
 			}
-			fmt.Fprintf(b, "return map[string]any{\"success\": err == nil}, err\n")
+			// Simple-response commands declare either `success: bool` at
+			// id 1 (TestControl) or no response block at all (e.g.
+			// EnergyControl.pause). The first case gets the named
+			// constant; the second falls back to magic id 1 — there's
+			// nothing in the YAML to name. Per docs/interaction-model.md
+			// §7.2 the caller still receives a shaped payload either way.
+			if len(cmd.Response) == 1 {
+				fmt.Fprintf(b, "return map[uint8]any{%sRespSuccess: err == nil}, err\n", cmdTitle)
+			} else {
+				fmt.Fprintf(b, "return map[uint8]any{1: err == nil}, err\n")
+			}
 		} else {
 			if hasParams {
 				fmt.Fprintf(b, "resp, err := %s.%s(ctx, req)\n", recv, callbackField)
@@ -525,6 +539,7 @@ func generateCommandHandlers(b *strings.Builder, def *specparse.RawFeatureDef) {
 }
 
 func writeNilHandlerDefault(b *strings.Builder, cmd specparse.RawCommandDef) {
+	cmdTitle := goTitleCase(cmd.Name)
 	if !isSimpleResponse(cmd) {
 		hasApplied := false
 		for _, r := range cmd.Response {
@@ -534,31 +549,37 @@ func writeNilHandlerDefault(b *strings.Builder, cmd specparse.RawCommandDef) {
 			}
 		}
 		if hasApplied {
-			fmt.Fprintf(b, "return map[string]any{\"applied\": false}, nil\n")
+			fmt.Fprintf(b, "return map[uint8]any{%sRespApplied: false}, nil\n", cmdTitle)
 		} else {
-			fmt.Fprintf(b, "return map[string]any{\"success\": false}, nil\n")
+			// First response field at id 1 by spec convention; emit a
+			// false placeholder so unwired commands still return a
+			// shaped response (the caller can distinguish "no handler"
+			// from "handler returned ok" via the err value).
+			fmt.Fprintf(b, "return map[uint8]any{1: false}, nil\n")
 		}
 	} else {
-		fmt.Fprintf(b, "return map[string]any{\"success\": false}, nil\n")
+		fmt.Fprintf(b, "return map[uint8]any{1: false}, nil\n")
 	}
 }
 
 func writeResponseSerialize(b *strings.Builder, cmd specparse.RawCommandDef, recv string) {
-	b.WriteString("result := make(map[string]any)\n")
+	cmdTitle := goTitleCase(cmd.Name)
+	b.WriteString("result := make(map[uint8]any)\n")
 	for _, r := range cmd.Response {
 		fieldName := goTitleCase(r.Name)
+		respConst := cmdTitle + "Resp" + fieldName
 		if r.Required {
 			if r.Enum != "" {
-				fmt.Fprintf(b, "result[%q] = uint8(resp.%s)\n", r.Name, fieldName)
+				fmt.Fprintf(b, "result[%s] = uint8(resp.%s)\n", respConst, fieldName)
 			} else {
-				fmt.Fprintf(b, "result[%q] = resp.%s\n", r.Name, fieldName)
+				fmt.Fprintf(b, "result[%s] = resp.%s\n", respConst, fieldName)
 			}
 		} else {
 			fmt.Fprintf(b, "if resp.%s != nil {\n", fieldName)
 			if r.Enum != "" {
-				fmt.Fprintf(b, "result[%q] = uint8(*resp.%s)\n", r.Name, fieldName)
+				fmt.Fprintf(b, "result[%s] = uint8(*resp.%s)\n", respConst, fieldName)
 			} else {
-				fmt.Fprintf(b, "result[%q] = *resp.%s\n", r.Name, fieldName)
+				fmt.Fprintf(b, "result[%s] = *resp.%s\n", respConst, fieldName)
 			}
 			b.WriteString("}\n")
 		}

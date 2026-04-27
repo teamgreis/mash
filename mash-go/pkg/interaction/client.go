@@ -49,9 +49,11 @@ const DefaultRequestTimeout = 10 * time.Second
 // NewClient creates a new interaction client.
 func NewClient(sender RequestSender) *Client {
 	return &Client{
-		sender:    sender,
-		timeout:   DefaultRequestTimeout,
-		nextMsgID: 1,
+		sender:  sender,
+		timeout: DefaultRequestTimeout,
+		// Start at 0 so the first atomic.AddUint32 returns 1 per
+		// docs/interaction-model.md §3.5 ("Start at 1 for new connections").
+		nextMsgID: 0,
 		pending:   make(map[uint32]chan *wire.Response),
 	}
 }
@@ -336,7 +338,9 @@ func (c *Client) Unsubscribe(ctx context.Context, subscriptionID uint32) error {
 }
 
 // Invoke executes a command on a feature.
-func (c *Client) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error) {
+//
+// params is integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
+func (c *Client) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any) (any, error) {
 	req := &wire.Request{
 		MessageID:  c.nextMessageID(),
 		Operation:  wire.OpInvoke,

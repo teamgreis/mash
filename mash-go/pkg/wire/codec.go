@@ -389,3 +389,28 @@ func ToStringMap(v any) map[string]any {
 		return nil
 	}
 }
+
+// ToUint8Map normalizes a CBOR-decoded map to map[uint8]any. CBOR decodes
+// integer-keyed maps into map[any]any with uint64 keys; this narrows them
+// to uint8 (the Issue #11 / docs/interaction-model.md §7.1 wire shape for
+// command parameters and response payloads). Already-typed map[uint8]any
+// passes through unchanged. Returns nil if the value is not a recognised
+// map type.
+func ToUint8Map(v any) map[uint8]any {
+	switch m := v.(type) {
+	case map[uint8]any:
+		return m
+	case map[any]any:
+		result := make(map[uint8]any, len(m))
+		for k, val := range m {
+			n, ok := k.(uint64)
+			if !ok || n > 255 {
+				continue
+			}
+			result[uint8(n)] = val
+		}
+		return result
+	default:
+		return nil
+	}
+}

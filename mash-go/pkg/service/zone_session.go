@@ -621,7 +621,9 @@ func (s *ZoneSession) Unsubscribe(ctx context.Context, subscriptionID uint32) er
 }
 
 // Invoke executes a command on a controller feature.
-func (s *ZoneSession) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error) {
+//
+// params is integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
+func (s *ZoneSession) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any) (any, error) {
 	s.mu.RLock()
 	if s.closed {
 		s.mu.RUnlock()

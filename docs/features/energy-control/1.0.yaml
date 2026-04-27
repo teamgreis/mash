@@ -448,74 +448,74 @@ commands:
     mandatory: true
     description: "Set power limits for this zone"
     parameters:
-      - { name: consumptionLimit, type: int64, required: false }
-      - { name: productionLimit, type: int64, required: false }
-      - { name: duration, type: uint32, required: false }
-      - { name: cause, type: uint8, enum: LimitCause, required: true }
+      - { id: 1, name: consumptionLimit, type: int64, required: false }
+      - { id: 2, name: productionLimit, type: int64, required: false }
+      - { id: 3, name: duration, type: uint32, required: false }
+      - { id: 4, name: cause, type: uint8, enum: LimitCause, required: true }
     response:
-      - { name: applied, type: bool, required: true }
-      - { name: controlState, type: uint8, enum: ControlState, required: true }
-      - { name: effectiveConsumptionLimit, type: int64, required: false }
-      - { name: effectiveProductionLimit, type: int64, required: false }
-      - { name: rejectReason, type: uint8, enum: LimitRejectReason, required: false }
+      - { id: 1, name: applied, type: bool, required: true }
+      - { id: 2, name: controlState, type: uint8, enum: ControlState, required: true }
+      - { id: 3, name: effectiveConsumptionLimit, type: int64, required: false }
+      - { id: 4, name: effectiveProductionLimit, type: int64, required: false }
+      - { id: 5, name: rejectReason, type: uint8, enum: LimitRejectReason, required: false }
 
   - id: 2
     name: clearLimit
     mandatory: true
     description: "Remove this zone's power limits"
     parameters:
-      - { name: direction, type: uint8, enum: Direction, required: false }
+      - { id: 1, name: direction, type: uint8, enum: Direction, required: false }
 
   - id: 3
     name: setCurrentLimits
     description: "Set per-phase current limits"
     parameters:
-      - { name: phases, type: map, required: true }
-      - { name: direction, type: uint8, enum: Direction, required: true }
-      - { name: duration, type: uint32, required: false }
-      - { name: cause, type: uint8, enum: LimitCause, required: true }
+      - { id: 1, name: phases, type: map, required: true }
+      - { id: 2, name: direction, type: uint8, enum: Direction, required: true }
+      - { id: 3, name: duration, type: uint32, required: false }
+      - { id: 4, name: cause, type: uint8, enum: LimitCause, required: true }
 
   - id: 4
     name: clearCurrentLimits
     description: "Remove this zone's per-phase current limits"
     parameters:
-      - { name: direction, type: uint8, enum: Direction, required: false }
+      - { id: 1, name: direction, type: uint8, enum: Direction, required: false }
 
   - id: 5
     name: setSetpoint
     description: "Set power setpoint for this zone"
     parameters:
-      - { name: consumptionSetpoint, type: int64, required: false }
-      - { name: productionSetpoint, type: int64, required: false }
-      - { name: duration, type: uint32, required: false }
-      - { name: cause, type: uint8, enum: SetpointCause, required: true }
+      - { id: 1, name: consumptionSetpoint, type: int64, required: false }
+      - { id: 2, name: productionSetpoint, type: int64, required: false }
+      - { id: 3, name: duration, type: uint32, required: false }
+      - { id: 4, name: cause, type: uint8, enum: SetpointCause, required: true }
 
   - id: 6
     name: clearSetpoint
     description: "Remove this zone's power setpoints"
     parameters:
-      - { name: direction, type: uint8, enum: Direction, required: false }
+      - { id: 1, name: direction, type: uint8, enum: Direction, required: false }
 
   - id: 7
     name: setCurrentSetpoints
     description: "Set per-phase current setpoints"
     parameters:
-      - { name: phases, type: map, required: true }
-      - { name: direction, type: uint8, enum: Direction, required: true }
-      - { name: duration, type: uint32, required: false }
-      - { name: cause, type: uint8, enum: SetpointCause, required: true }
+      - { id: 1, name: phases, type: map, required: true }
+      - { id: 2, name: direction, type: uint8, enum: Direction, required: true }
+      - { id: 3, name: duration, type: uint32, required: false }
+      - { id: 4, name: cause, type: uint8, enum: SetpointCause, required: true }
 
   - id: 8
     name: clearCurrentSetpoints
     description: "Remove this zone's per-phase current setpoints"
     parameters:
-      - { name: direction, type: uint8, enum: Direction, required: false }
+      - { id: 1, name: direction, type: uint8, enum: Direction, required: false }
 
   - id: 9
     name: pause
     description: "Temporarily pause device operation"
     parameters:
-      - { name: duration, type: uint32, required: false }
+      - { id: 1, name: duration, type: uint32, required: false }
 
   - id: 10
     name: resume

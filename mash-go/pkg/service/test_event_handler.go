@@ -95,17 +95,21 @@ func (s *DeviceService) RegisterGetTestStateHandler(tc *features.TestControl) {
 		Name:        "getTestState",
 		Description: "Returns device mutable state snapshot for test diagnostics.",
 		Parameters: []model.ParameterMetadata{
-			{Name: "enableKey", Type: model.DataTypeString, Required: true},
+			{ID: 1, Name: "enableKey", Type: model.DataTypeString, Required: true},
 		},
-	}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
+	}, func(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 		if err := requireTestZone(ctx); err != nil {
 			return nil, err
 		}
-		enableKey, _ := params["enableKey"].(string)
+		enableKey, _ := params[1].(string)
 		if enableKey != s.config.TestEnableKey {
 			return nil, fmt.Errorf("invalid enable key")
 		}
-		return s.collectTestState(), nil
+		// Wrap the diagnostic snapshot under response field id 1 — the
+		// snapshot itself is a freeform string-keyed map of internal
+		// state and predates the integer-key rule (Issue #11). The
+		// harness consumer reads result[1] then walks the snapshot.
+		return map[uint8]any{1: s.collectTestState()}, nil
 	}))
 }
 

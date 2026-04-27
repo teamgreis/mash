@@ -2065,6 +2065,166 @@ const (
 	EnergyControlCmdStop                  uint8 = 11
 )
 
+// SetLimit command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SetLimitParamConsumptionLimit uint8 = 1
+	SetLimitParamProductionLimit  uint8 = 2
+	SetLimitParamDuration         uint8 = 3
+	SetLimitParamCause            uint8 = 4
+)
+
+// SetLimitParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SetLimitParamNameToID = map[string]uint8{
+	"consumptionLimit": SetLimitParamConsumptionLimit,
+	"productionLimit":  SetLimitParamProductionLimit,
+	"duration":         SetLimitParamDuration,
+	"cause":            SetLimitParamCause,
+}
+
+// SetLimit command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+	SetLimitRespApplied                   uint8 = 1
+	SetLimitRespControlState              uint8 = 2
+	SetLimitRespEffectiveConsumptionLimit uint8 = 3
+	SetLimitRespEffectiveProductionLimit  uint8 = 4
+	SetLimitRespRejectReason              uint8 = 5
+)
+
+// SetLimitRespNameToID maps response field names to wire IDs.
+var SetLimitRespNameToID = map[string]uint8{
+	"applied":                   SetLimitRespApplied,
+	"controlState":              SetLimitRespControlState,
+	"effectiveConsumptionLimit": SetLimitRespEffectiveConsumptionLimit,
+	"effectiveProductionLimit":  SetLimitRespEffectiveProductionLimit,
+	"rejectReason":              SetLimitRespRejectReason,
+}
+
+// ClearLimit command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	ClearLimitParamDirection uint8 = 1
+)
+
+// ClearLimitParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var ClearLimitParamNameToID = map[string]uint8{
+	"direction": ClearLimitParamDirection,
+}
+
+// SetCurrentLimits command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SetCurrentLimitsParamPhases    uint8 = 1
+	SetCurrentLimitsParamDirection uint8 = 2
+	SetCurrentLimitsParamDuration  uint8 = 3
+	SetCurrentLimitsParamCause     uint8 = 4
+)
+
+// SetCurrentLimitsParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SetCurrentLimitsParamNameToID = map[string]uint8{
+	"phases":    SetCurrentLimitsParamPhases,
+	"direction": SetCurrentLimitsParamDirection,
+	"duration":  SetCurrentLimitsParamDuration,
+	"cause":     SetCurrentLimitsParamCause,
+}
+
+// ClearCurrentLimits command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	ClearCurrentLimitsParamDirection uint8 = 1
+)
+
+// ClearCurrentLimitsParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var ClearCurrentLimitsParamNameToID = map[string]uint8{
+	"direction": ClearCurrentLimitsParamDirection,
+}
+
+// SetSetpoint command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SetSetpointParamConsumptionSetpoint uint8 = 1
+	SetSetpointParamProductionSetpoint  uint8 = 2
+	SetSetpointParamDuration            uint8 = 3
+	SetSetpointParamCause               uint8 = 4
+)
+
+// SetSetpointParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SetSetpointParamNameToID = map[string]uint8{
+	"consumptionSetpoint": SetSetpointParamConsumptionSetpoint,
+	"productionSetpoint":  SetSetpointParamProductionSetpoint,
+	"duration":            SetSetpointParamDuration,
+	"cause":               SetSetpointParamCause,
+}
+
+// ClearSetpoint command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	ClearSetpointParamDirection uint8 = 1
+)
+
+// ClearSetpointParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var ClearSetpointParamNameToID = map[string]uint8{
+	"direction": ClearSetpointParamDirection,
+}
+
+// SetCurrentSetpoints command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SetCurrentSetpointsParamPhases    uint8 = 1
+	SetCurrentSetpointsParamDirection uint8 = 2
+	SetCurrentSetpointsParamDuration  uint8 = 3
+	SetCurrentSetpointsParamCause     uint8 = 4
+)
+
+// SetCurrentSetpointsParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SetCurrentSetpointsParamNameToID = map[string]uint8{
+	"phases":    SetCurrentSetpointsParamPhases,
+	"direction": SetCurrentSetpointsParamDirection,
+	"duration":  SetCurrentSetpointsParamDuration,
+	"cause":     SetCurrentSetpointsParamCause,
+}
+
+// ClearCurrentSetpoints command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	ClearCurrentSetpointsParamDirection uint8 = 1
+)
+
+// ClearCurrentSetpointsParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var ClearCurrentSetpointsParamNameToID = map[string]uint8{
+	"direction": ClearCurrentSetpointsParamDirection,
+}
+
+// Pause command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	PauseParamDuration uint8 = 1
+)
+
+// PauseParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var PauseParamNameToID = map[string]uint8{
+	"duration": PauseParamDuration,
+}
+
 // SetLimitRequest represents the setLimit command parameters.
 type SetLimitRequest struct {
 	ConsumptionLimit *int64
@@ -2138,10 +2298,10 @@ func (e *EnergyControl) addCommands() {
 		Name:        "setLimit",
 		Description: "Set power limits for this zone",
 		Parameters: []model.ParameterMetadata{
-			{Name: "consumptionLimit", Type: model.DataTypeInt64, Required: false},
-			{Name: "productionLimit", Type: model.DataTypeInt64, Required: false},
-			{Name: "duration", Type: model.DataTypeUint32, Required: false},
-			{Name: "cause", Type: model.DataTypeUint8, Required: true},
+			{ID: 1, Name: "consumptionLimit", Type: model.DataTypeInt64, Required: false},
+			{ID: 2, Name: "productionLimit", Type: model.DataTypeInt64, Required: false},
+			{ID: 3, Name: "duration", Type: model.DataTypeUint32, Required: false},
+			{ID: 4, Name: "cause", Type: model.DataTypeUint8, Required: true},
 		},
 	}, e.handleSetLimit))
 
@@ -2150,7 +2310,7 @@ func (e *EnergyControl) addCommands() {
 		Name:        "clearLimit",
 		Description: "Remove this zone's power limits",
 		Parameters: []model.ParameterMetadata{
-			{Name: "direction", Type: model.DataTypeUint8, Required: false},
+			{ID: 1, Name: "direction", Type: model.DataTypeUint8, Required: false},
 		},
 	}, e.handleClearLimit))
 
@@ -2159,10 +2319,10 @@ func (e *EnergyControl) addCommands() {
 		Name:        "setCurrentLimits",
 		Description: "Set per-phase current limits",
 		Parameters: []model.ParameterMetadata{
-			{Name: "phases", Type: model.DataTypeMap, Required: true},
-			{Name: "direction", Type: model.DataTypeUint8, Required: true},
-			{Name: "duration", Type: model.DataTypeUint32, Required: false},
-			{Name: "cause", Type: model.DataTypeUint8, Required: true},
+			{ID: 1, Name: "phases", Type: model.DataTypeMap, Required: true},
+			{ID: 2, Name: "direction", Type: model.DataTypeUint8, Required: true},
+			{ID: 3, Name: "duration", Type: model.DataTypeUint32, Required: false},
+			{ID: 4, Name: "cause", Type: model.DataTypeUint8, Required: true},
 		},
 	}, e.handleSetCurrentLimits))
 
@@ -2171,7 +2331,7 @@ func (e *EnergyControl) addCommands() {
 		Name:        "clearCurrentLimits",
 		Description: "Remove this zone's per-phase current limits",
 		Parameters: []model.ParameterMetadata{
-			{Name: "direction", Type: model.DataTypeUint8, Required: false},
+			{ID: 1, Name: "direction", Type: model.DataTypeUint8, Required: false},
 		},
 	}, e.handleClearCurrentLimits))
 
@@ -2180,10 +2340,10 @@ func (e *EnergyControl) addCommands() {
 		Name:        "setSetpoint",
 		Description: "Set power setpoint for this zone",
 		Parameters: []model.ParameterMetadata{
-			{Name: "consumptionSetpoint", Type: model.DataTypeInt64, Required: false},
-			{Name: "productionSetpoint", Type: model.DataTypeInt64, Required: false},
-			{Name: "duration", Type: model.DataTypeUint32, Required: false},
-			{Name: "cause", Type: model.DataTypeUint8, Required: true},
+			{ID: 1, Name: "consumptionSetpoint", Type: model.DataTypeInt64, Required: false},
+			{ID: 2, Name: "productionSetpoint", Type: model.DataTypeInt64, Required: false},
+			{ID: 3, Name: "duration", Type: model.DataTypeUint32, Required: false},
+			{ID: 4, Name: "cause", Type: model.DataTypeUint8, Required: true},
 		},
 	}, e.handleSetSetpoint))
 
@@ -2192,7 +2352,7 @@ func (e *EnergyControl) addCommands() {
 		Name:        "clearSetpoint",
 		Description: "Remove this zone's power setpoints",
 		Parameters: []model.ParameterMetadata{
-			{Name: "direction", Type: model.DataTypeUint8, Required: false},
+			{ID: 1, Name: "direction", Type: model.DataTypeUint8, Required: false},
 		},
 	}, e.handleClearSetpoint))
 
@@ -2201,10 +2361,10 @@ func (e *EnergyControl) addCommands() {
 		Name:        "setCurrentSetpoints",
 		Description: "Set per-phase current setpoints",
 		Parameters: []model.ParameterMetadata{
-			{Name: "phases", Type: model.DataTypeMap, Required: true},
-			{Name: "direction", Type: model.DataTypeUint8, Required: true},
-			{Name: "duration", Type: model.DataTypeUint32, Required: false},
-			{Name: "cause", Type: model.DataTypeUint8, Required: true},
+			{ID: 1, Name: "phases", Type: model.DataTypeMap, Required: true},
+			{ID: 2, Name: "direction", Type: model.DataTypeUint8, Required: true},
+			{ID: 3, Name: "duration", Type: model.DataTypeUint32, Required: false},
+			{ID: 4, Name: "cause", Type: model.DataTypeUint8, Required: true},
 		},
 	}, e.handleSetCurrentSetpoints))
 
@@ -2213,7 +2373,7 @@ func (e *EnergyControl) addCommands() {
 		Name:        "clearCurrentSetpoints",
 		Description: "Remove this zone's per-phase current setpoints",
 		Parameters: []model.ParameterMetadata{
-			{Name: "direction", Type: model.DataTypeUint8, Required: false},
+			{ID: 1, Name: "direction", Type: model.DataTypeUint8, Required: false},
 		},
 	}, e.handleClearCurrentSetpoints))
 
@@ -2222,7 +2382,7 @@ func (e *EnergyControl) addCommands() {
 		Name:        "pause",
 		Description: "Temporarily pause device operation",
 		Parameters: []model.ParameterMetadata{
-			{Name: "duration", Type: model.DataTypeUint32, Required: false},
+			{ID: 1, Name: "duration", Type: model.DataTypeUint32, Required: false},
 		},
 	}, e.handlePause))
 
@@ -2240,28 +2400,28 @@ func (e *EnergyControl) addCommands() {
 
 }
 
-func (e *EnergyControl) handleSetLimit(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleSetLimit(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onSetLimit == nil {
-		return map[string]any{"applied": false}, nil
+		return map[uint8]any{SetLimitRespApplied: false}, nil
 	}
 
 	req := SetLimitRequest{}
-	if raw, exists := params["consumptionLimit"]; exists {
+	if raw, exists := params[SetLimitParamConsumptionLimit]; exists {
 		if v, ok := wire.ToInt64(raw); ok {
 			req.ConsumptionLimit = &v
 		}
 	}
-	if raw, exists := params["productionLimit"]; exists {
+	if raw, exists := params[SetLimitParamProductionLimit]; exists {
 		if v, ok := wire.ToInt64(raw); ok {
 			req.ProductionLimit = &v
 		}
 	}
-	if raw, exists := params["duration"]; exists {
+	if raw, exists := params[SetLimitParamDuration]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.Duration = &v
 		}
 	}
-	if raw, exists := params["cause"]; exists {
+	if raw, exists := params[SetLimitParamCause]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Cause = LimitCause(v)
 		}
@@ -2272,28 +2432,28 @@ func (e *EnergyControl) handleSetLimit(ctx context.Context, params map[string]an
 		return nil, err
 	}
 
-	result := make(map[string]any)
-	result["applied"] = resp.Applied
-	result["controlState"] = uint8(resp.ControlState)
+	result := make(map[uint8]any)
+	result[SetLimitRespApplied] = resp.Applied
+	result[SetLimitRespControlState] = uint8(resp.ControlState)
 	if resp.EffectiveConsumptionLimit != nil {
-		result["effectiveConsumptionLimit"] = *resp.EffectiveConsumptionLimit
+		result[SetLimitRespEffectiveConsumptionLimit] = *resp.EffectiveConsumptionLimit
 	}
 	if resp.EffectiveProductionLimit != nil {
-		result["effectiveProductionLimit"] = *resp.EffectiveProductionLimit
+		result[SetLimitRespEffectiveProductionLimit] = *resp.EffectiveProductionLimit
 	}
 	if resp.RejectReason != nil {
-		result["rejectReason"] = uint8(*resp.RejectReason)
+		result[SetLimitRespRejectReason] = uint8(*resp.RejectReason)
 	}
 	return result, nil
 }
 
-func (e *EnergyControl) handleClearLimit(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleClearLimit(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onClearLimit == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := ClearLimitRequest{}
-	if raw, exists := params["direction"]; exists {
+	if raw, exists := params[ClearLimitParamDirection]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			tmp := Direction(v)
 			req.Direction = &tmp
@@ -2301,47 +2461,47 @@ func (e *EnergyControl) handleClearLimit(ctx context.Context, params map[string]
 	}
 
 	err := e.onClearLimit(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleSetCurrentLimits(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleSetCurrentLimits(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onSetCurrentLimits == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SetCurrentLimitsRequest{}
-	if raw, exists := params["phases"]; exists {
+	if raw, exists := params[SetCurrentLimitsParamPhases]; exists {
 		if v, ok := raw.(map[string]any); ok {
 			req.Phases = v
 		}
 	}
-	if raw, exists := params["direction"]; exists {
+	if raw, exists := params[SetCurrentLimitsParamDirection]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Direction = Direction(v)
 		}
 	}
-	if raw, exists := params["duration"]; exists {
+	if raw, exists := params[SetCurrentLimitsParamDuration]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.Duration = &v
 		}
 	}
-	if raw, exists := params["cause"]; exists {
+	if raw, exists := params[SetCurrentLimitsParamCause]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Cause = LimitCause(v)
 		}
 	}
 
 	err := e.onSetCurrentLimits(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleClearCurrentLimits(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleClearCurrentLimits(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onClearCurrentLimits == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := ClearCurrentLimitsRequest{}
-	if raw, exists := params["direction"]; exists {
+	if raw, exists := params[ClearCurrentLimitsParamDirection]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			tmp := Direction(v)
 			req.Direction = &tmp
@@ -2349,47 +2509,47 @@ func (e *EnergyControl) handleClearCurrentLimits(ctx context.Context, params map
 	}
 
 	err := e.onClearCurrentLimits(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleSetSetpoint(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleSetSetpoint(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onSetSetpoint == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SetSetpointRequest{}
-	if raw, exists := params["consumptionSetpoint"]; exists {
+	if raw, exists := params[SetSetpointParamConsumptionSetpoint]; exists {
 		if v, ok := wire.ToInt64(raw); ok {
 			req.ConsumptionSetpoint = &v
 		}
 	}
-	if raw, exists := params["productionSetpoint"]; exists {
+	if raw, exists := params[SetSetpointParamProductionSetpoint]; exists {
 		if v, ok := wire.ToInt64(raw); ok {
 			req.ProductionSetpoint = &v
 		}
 	}
-	if raw, exists := params["duration"]; exists {
+	if raw, exists := params[SetSetpointParamDuration]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.Duration = &v
 		}
 	}
-	if raw, exists := params["cause"]; exists {
+	if raw, exists := params[SetSetpointParamCause]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Cause = SetpointCause(v)
 		}
 	}
 
 	err := e.onSetSetpoint(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleClearSetpoint(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleClearSetpoint(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onClearSetpoint == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := ClearSetpointRequest{}
-	if raw, exists := params["direction"]; exists {
+	if raw, exists := params[ClearSetpointParamDirection]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			tmp := Direction(v)
 			req.Direction = &tmp
@@ -2397,47 +2557,47 @@ func (e *EnergyControl) handleClearSetpoint(ctx context.Context, params map[stri
 	}
 
 	err := e.onClearSetpoint(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleSetCurrentSetpoints(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleSetCurrentSetpoints(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onSetCurrentSetpoints == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SetCurrentSetpointsRequest{}
-	if raw, exists := params["phases"]; exists {
+	if raw, exists := params[SetCurrentSetpointsParamPhases]; exists {
 		if v, ok := raw.(map[string]any); ok {
 			req.Phases = v
 		}
 	}
-	if raw, exists := params["direction"]; exists {
+	if raw, exists := params[SetCurrentSetpointsParamDirection]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Direction = Direction(v)
 		}
 	}
-	if raw, exists := params["duration"]; exists {
+	if raw, exists := params[SetCurrentSetpointsParamDuration]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.Duration = &v
 		}
 	}
-	if raw, exists := params["cause"]; exists {
+	if raw, exists := params[SetCurrentSetpointsParamCause]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Cause = SetpointCause(v)
 		}
 	}
 
 	err := e.onSetCurrentSetpoints(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleClearCurrentSetpoints(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleClearCurrentSetpoints(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onClearCurrentSetpoints == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := ClearCurrentSetpointsRequest{}
-	if raw, exists := params["direction"]; exists {
+	if raw, exists := params[ClearCurrentSetpointsParamDirection]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			tmp := Direction(v)
 			req.Direction = &tmp
@@ -2445,41 +2605,41 @@ func (e *EnergyControl) handleClearCurrentSetpoints(ctx context.Context, params 
 	}
 
 	err := e.onClearCurrentSetpoints(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handlePause(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handlePause(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onPause == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := PauseRequest{}
-	if raw, exists := params["duration"]; exists {
+	if raw, exists := params[PauseParamDuration]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.Duration = &v
 		}
 	}
 
 	err := e.onPause(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleResume(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleResume(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onResume == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	err := e.onResume(ctx)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
-func (e *EnergyControl) handleStop(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (e *EnergyControl) handleStop(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if e.onStop == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	err := e.onStop(ctx)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
 // OnSetLimit sets the handler for setLimit command.

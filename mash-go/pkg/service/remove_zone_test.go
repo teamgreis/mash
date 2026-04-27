@@ -38,7 +38,7 @@ func TestRemoveZoneHandler_SelfRemoval(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), zoneID)
 
 	// Invoke: self-removal (zone removes itself)
-	params := map[string]any{
+	params := map[uint8]any{
 		features.RemoveZoneParamZoneID: zoneID,
 	}
 	result, err := handler(ctx, params)
@@ -88,7 +88,7 @@ func TestRemoveZoneHandler_RejectsOtherZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), zoneA)
 
 	// Invoke: zone A tries to remove zone B (not allowed without enable-key)
-	params := map[string]any{
+	params := map[uint8]any{
 		features.RemoveZoneParamZoneID: zoneB,
 	}
 	_, err := handler(ctx, params)
@@ -132,7 +132,7 @@ func TestRemoveZoneHandler_TestZoneAllowsCrossZone(t *testing.T) {
 	// Zone A (TEST type) removes zone B (allowed for TEST zones)
 	ctx := ContextWithCallerZoneID(context.Background(), zoneA)
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
-	params := map[string]any{
+	params := map[uint8]any{
 		features.RemoveZoneParamZoneID: zoneB,
 	}
 	result, err := handler(ctx, params)
@@ -164,7 +164,7 @@ func TestRemoveZoneHandler_InvalidParameters(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "zone-abc")
 
 	t.Run("MissingZoneID", func(t *testing.T) {
-		params := map[string]any{}
+		params := map[uint8]any{}
 		_, err := handler(ctx, params)
 		if err != model.ErrInvalidParameters {
 			t.Errorf("expected ErrInvalidParameters, got: %v", err)
@@ -172,7 +172,7 @@ func TestRemoveZoneHandler_InvalidParameters(t *testing.T) {
 	})
 
 	t.Run("WrongTypeZoneID", func(t *testing.T) {
-		params := map[string]any{
+		params := map[uint8]any{
 			features.RemoveZoneParamZoneID: 12345, // wrong type
 		}
 		_, err := handler(ctx, params)
@@ -199,7 +199,7 @@ func TestRemoveZoneHandler_NoCallerContext(t *testing.T) {
 
 	// No caller zone ID in context
 	ctx := context.Background()
-	params := map[string]any{
+	params := map[uint8]any{
 		features.RemoveZoneParamZoneID: "zone-abc",
 	}
 

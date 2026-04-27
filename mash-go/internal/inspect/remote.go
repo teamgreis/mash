@@ -7,11 +7,14 @@ import (
 
 // SessionReader defines the interface for reading/writing to a remote device.
 // This is implemented by service.DeviceSession.
+//
+// Invoke params and response are integer-keyed per
+// docs/interaction-model.md §7.1 / §7.2 (Issue #11 fix).
 type SessionReader interface {
 	DeviceID() string
 	Read(ctx context.Context, endpointID uint8, featureID uint8, attrIDs []uint16) (map[uint16]any, error)
 	Write(ctx context.Context, endpointID uint8, featureID uint8, attrs map[uint16]any) (map[uint16]any, error)
-	Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error)
+	Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any) (any, error)
 }
 
 // RemoteInspector provides inspection and mutation capabilities for remote devices
@@ -78,7 +81,9 @@ func (r *RemoteInspector) WriteAttribute(ctx context.Context, path *Path, value 
 }
 
 // InvokeCommand invokes a command on the remote device.
-func (r *RemoteInspector) InvokeCommand(ctx context.Context, path *Path, params map[string]any) (any, error) {
+//
+// params is integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
+func (r *RemoteInspector) InvokeCommand(ctx context.Context, path *Path, params map[uint8]any) (any, error) {
 	if path == nil {
 		return nil, errors.New("path is nil")
 	}

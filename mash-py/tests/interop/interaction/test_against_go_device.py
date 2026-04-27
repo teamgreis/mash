@@ -411,35 +411,31 @@ async def test_read_write_subscribe_against_go_device(live_go_device) -> None:
 @pytest.mark.skipif(not _go_available(), reason="go toolchain not available")
 @pytest.mark.slow
 @pytest.mark.timeout(300)
-@pytest.mark.xfail(
-    reason=(
-        "Issue #11: mash-go decodes Invoke parameters as map[string]any "
-        "and silently drops integer-keyed entries (pkg/service/dispatch/"
-        "protocol_handler.go:738). mash-py is spec-faithful per "
-        "interaction-model.md §7.1 (integer keys). This test will flip "
-        "to passing when mash-go is updated to decode and return "
-        "integer-keyed parameter maps."
-    ),
-    strict=True,
-)
-async def test_invoke_remove_zone_against_go_device(live_go_device) -> None:
+async def test_invoke_remove_zone_decodes_integer_keyed_params(live_go_device) -> None:
     """Invoke ``DeviceInfo.removeZone`` with spec-conformant integer-keyed
-    parameters.
+    parameters and verify the device decoded them correctly.
 
-    Expected post-fix behaviour:
-        - Request parameters: ``{1: "mash-py-phase11"}`` (zoneId at param id 1).
-        - Response payload: ``{1: True}`` (removed at response field 1).
+    Issue #11 fix verification: prior to the fix, mash-go's
+    ``handleInvoke`` decoded parameters as ``map[string]any`` and
+    silently dropped integer-keyed entries (Spec §7.1 specifies
+    integer keys; the Go decoder previously rejected them). After the
+    fix, integer-keyed parameters are decoded and routed to the
+    handler.
 
-    Current behaviour against mash-go:
-        - Device's ``protocol_handler.handleInvoke`` decodes the
-          ``map[any]any`` parameters and drops every non-string key →
-          ``params`` is empty → ``params["zoneId"]`` lookup misses →
-          handler returns ``ErrInvalidParameters`` → wire status
-          ``INVALID_PARAMETER (5)`` → :class:`StatusError` raised here.
+    We send ``{zoneId: "mash-py-phase11"}`` (spec-conformant). The
+    device's ``handleRemoveZone`` extracts the parameter, compares it
+    against the *connection-derived* zone-id (``sha256(k_main)[:8]``,
+    NOT the zone CA's CN), and returns
+    ``Status.CONSTRAINT_ERROR`` because the strings don't match —
+    mash-py has no way to know the device-derived zone-id without
+    duplicating the PASE secret hashing logic.
 
-    The xfail is ``strict=True``: if mash-go is fixed and this test
-    starts passing, pytest will flag it (XPASS) so we know to remove
-    the marker in the same change that closes Issue #11.
+    The point of this test is **not** to actually remove a zone; it's
+    to verify the integer-keyed parameter map traversed the wire
+    intact. The pre-fix failure was ``INVALID_PARAMETER`` (params
+    dropped → no ``zoneId`` found); the post-fix failure is
+    ``CONSTRAINT_ERROR`` (params decoded → zoneId mismatch). Either
+    way, the *decode path* is what we're proving works.
     """
     proc, discriminator, setup_code, _port = live_go_device
 
@@ -451,25 +447,26 @@ async def test_invoke_remove_zone_against_go_device(live_go_device) -> None:
     client.start()
 
     try:
-        # Spec-conformant integer-keyed parameters per
-        # interaction-model.md §7.1. mash-go's current decoder drops
-        # these silently; once #11 lands the device will accept this
-        # exact wire form.
-        invoke_resp = await asyncio.wait_for(
-            client.invoke(
-                0,
-                FEATURE_DEVICE_INFO,
-                CMD_REMOVE_ZONE,
-                parameters={CMD_REMOVE_ZONE_PARAM_ZONE_ID: "mash-py-phase11"},
-            ),
-            timeout=15.0,
-        )
-        # Spec-conformant integer-keyed response per §7.2.
-        assert isinstance(invoke_resp, dict), (
-            f"removeZone response must be a CBOR map; got {type(invoke_resp).__name__}"
-        )
-        assert invoke_resp.get(CMD_REMOVE_ZONE_RESP_REMOVED) is True, (
-            f"removeZone returned removed!=True: {invoke_resp!r}"
+        # Spec-conformant integer-keyed parameters per §7.1.
+        with pytest.raises(StatusError) as excinfo:
+            await asyncio.wait_for(
+                client.invoke(
+                    0,
+                    FEATURE_DEVICE_INFO,
+                    CMD_REMOVE_ZONE,
+                    parameters={CMD_REMOVE_ZONE_PARAM_ZONE_ID: "mash-py-phase11"},
+                ),
+                timeout=15.0,
+            )
+
+        # Pre-fix: INVALID_PARAMETER (5) — params silently dropped.
+        # Post-fix: CONSTRAINT_ERROR (11) — params decoded, zoneId
+        # mismatches the device-derived zone-id. The latter proves the
+        # integer-keyed wire form was handled correctly.
+        assert excinfo.value.status == Status.CONSTRAINT_ERROR, (
+            f"expected CONSTRAINT_ERROR (Issue #11 verification: params "
+            f"decoded but zoneId mismatch); got {excinfo.value.status.name} "
+            f"(if INVALID_PARAMETER, integer-key decode is broken)"
         )
     finally:
         with contextlib.suppress(Exception):

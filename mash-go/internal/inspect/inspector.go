@@ -238,7 +238,9 @@ func (i *Inspector) WriteAttribute(path *Path, value any) error {
 }
 
 // InvokeCommand invokes a command using a path.
-func (i *Inspector) InvokeCommand(path *Path, params map[string]any) (any, error) {
+//
+// params is integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
+func (i *Inspector) InvokeCommand(path *Path, params map[uint8]any) (any, error) {
 	ep, err := i.device.GetEndpoint(path.EndpointID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: endpoint %d", ErrEndpointNotFound, path.EndpointID)

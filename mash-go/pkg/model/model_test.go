@@ -221,19 +221,19 @@ func TestAccessFlags(t *testing.T) {
 
 func TestCommand(t *testing.T) {
 	handlerCalled := false
-	var receivedParams map[string]any
+	var receivedParams map[uint8]any
 
 	cmd := NewCommand(&CommandMetadata{
 		ID:          CmdIDPrimary,
 		Name:        "testCmd",
 		Description: "A test command",
 		Parameters: []ParameterMetadata{
-			{Name: "value", Type: DataTypeInt32, Required: true},
+			{ID: 1, Name: "value", Type: DataTypeInt32, Required: true},
 		},
-	}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
+	}, func(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 		handlerCalled = true
 		receivedParams = params
-		return map[string]any{"result": "ok"}, nil
+		return map[uint8]any{1: "ok"}, nil
 	})
 
 	t.Run("ID", func(t *testing.T) {
@@ -249,23 +249,23 @@ func TestCommand(t *testing.T) {
 	})
 
 	t.Run("InvokeSuccess", func(t *testing.T) {
-		result, err := cmd.Invoke(context.Background(), map[string]any{"value": 42})
+		result, err := cmd.Invoke(context.Background(), map[uint8]any{1: 42})
 		if err != nil {
 			t.Fatalf("Invoke failed: %v", err)
 		}
 		if !handlerCalled {
 			t.Error("handler was not called")
 		}
-		if receivedParams["value"] != 42 {
-			t.Errorf("expected value 42, got %v", receivedParams["value"])
+		if receivedParams[1] != 42 {
+			t.Errorf("expected value 42 at id 1, got %v", receivedParams[1])
 		}
-		if result["result"] != "ok" {
-			t.Errorf("expected result ok, got %v", result["result"])
+		if result[1] != "ok" {
+			t.Errorf("expected result ok at id 1, got %v", result[1])
 		}
 	})
 
 	t.Run("InvokeMissingRequired", func(t *testing.T) {
-		_, err := cmd.Invoke(context.Background(), map[string]any{})
+		_, err := cmd.Invoke(context.Background(), map[uint8]any{})
 		if err != ErrInvalidParameters {
 			t.Errorf("expected ErrInvalidParameters, got %v", err)
 		}
@@ -331,7 +331,7 @@ func TestFeature(t *testing.T) {
 		cmd := NewCommand(&CommandMetadata{
 			ID:   CmdIDPrimary,
 			Name: "reset",
-		}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
+		}, func(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 			return nil, nil
 		})
 		feature.AddCommand(cmd)
@@ -616,8 +616,8 @@ func TestDeviceFeatureAccess(t *testing.T) {
 	cmd := NewCommand(&CommandMetadata{
 		ID:   CmdIDPrimary,
 		Name: "reset",
-	}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
-		return map[string]any{"status": "done"}, nil
+	}, func(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
+		return map[uint8]any{1: "done"}, nil
 	})
 	feature.AddCommand(cmd)
 
@@ -664,8 +664,8 @@ func TestDeviceFeatureAccess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("InvokeCommand failed: %v", err)
 		}
-		if result["status"] != "done" {
-			t.Errorf("expected status done, got %v", result["status"])
+		if result[1] != "done" {
+			t.Errorf("expected status done at id 1, got %v", result[1])
 		}
 	})
 
@@ -837,7 +837,7 @@ func TestCommandListSorted(t *testing.T) {
 		cmd := NewCommand(&CommandMetadata{
 			ID:   id,
 			Name: "cmd",
-		}, func(_ context.Context, _ map[string]any) (map[string]any, error) {
+		}, func(_ context.Context, _ map[uint8]any) (map[uint8]any, error) {
 			return nil, nil
 		})
 		feature.AddCommand(cmd)

@@ -46,7 +46,7 @@ type DeviceModel interface {
 	GetFeature(endpointID uint8, featureType model.FeatureType) (*model.Feature, error)
 	ReadAttribute(endpointID uint8, featureType model.FeatureType, attrID uint16) (any, error)
 	WriteAttribute(endpointID uint8, featureType model.FeatureType, attrID uint16, value any) error
-	InvokeCommand(ctx context.Context, endpointID uint8, featureType model.FeatureType, cmdID uint8, params map[string]any) (map[string]any, error)
+	InvokeCommand(ctx context.Context, endpointID uint8, featureType model.FeatureType, cmdID uint8, params map[uint8]any) (map[uint8]any, error)
 	Info() *model.DeviceInfo
 	FindEndpointsByType(endpointType model.EndpointType) []*model.Endpoint
 	FindEndpointsWithFeature(featureType model.FeatureType) []*model.Endpoint

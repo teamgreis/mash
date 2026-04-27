@@ -296,7 +296,9 @@ func (s *DeviceSession) Unsubscribe(ctx context.Context, subscriptionID uint32) 
 }
 
 // Invoke executes a command on a feature.
-func (s *DeviceSession) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error) {
+//
+// params is integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
+func (s *DeviceSession) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any) (any, error) {
 	s.mu.RLock()
 	if s.closed {
 		s.mu.RUnlock()

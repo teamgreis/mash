@@ -169,6 +169,45 @@ const (
 {{- end}}
 )
 
+{{range .Commands}}
+{{- $cmd := goTitleCase .Name}}
+{{- if .Parameters}}
+// {{$cmd}} command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+{{- range .Parameters}}
+{{$cmd}}Param{{goTitleCase .Name}} uint8 = {{.ID}}
+{{- end}}
+)
+
+// {{$cmd}}ParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var {{$cmd}}ParamNameToID = map[string]uint8{
+{{- range .Parameters}}
+{{quote .Name}}: {{$cmd}}Param{{goTitleCase .Name}},
+{{- end}}
+}
+
+{{end}}
+{{- if .Response}}
+// {{$cmd}} command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+{{- range .Response}}
+{{$cmd}}Resp{{goTitleCase .Name}} uint8 = {{.ID}}
+{{- end}}
+)
+
+// {{$cmd}}RespNameToID maps response field names to wire IDs.
+var {{$cmd}}RespNameToID = map[string]uint8{
+{{- range .Response}}
+{{quote .Name}}: {{$cmd}}Resp{{goTitleCase .Name}},
+{{- end}}
+}
+
+{{end}}
+{{- end}}
 {{end}}`
 
 const commandStructsTmpl = `{{define "commandStructs"}}
@@ -265,7 +304,7 @@ Description: {{quote .Description}},
 {{- if .Parameters}}
 Parameters: []model.ParameterMetadata{
 {{- range .Parameters}}
-{Name: {{quote .Name}}, Type: {{modelDataType .Type}}, Required: {{.Required}}},
+{ID: {{.ID}}, Name: {{quote .Name}}, Type: {{modelDataType .Type}}, Required: {{.Required}}},
 {{- end}}
 },
 {{- end}}

@@ -1349,6 +1349,25 @@ const (
 	ChargingSessionCmdSetChargingMode uint8 = 1
 )
 
+// SetChargingMode command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SetChargingModeParamMode             uint8 = 1
+	SetChargingModeParamSurplusThreshold uint8 = 2
+	SetChargingModeParamStartDelay       uint8 = 3
+	SetChargingModeParamStopDelay        uint8 = 4
+)
+
+// SetChargingModeParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SetChargingModeParamNameToID = map[string]uint8{
+	"mode":             SetChargingModeParamMode,
+	"surplusThreshold": SetChargingModeParamSurplusThreshold,
+	"startDelay":       SetChargingModeParamStartDelay,
+	"stopDelay":        SetChargingModeParamStopDelay,
+}
+
 // SetChargingModeRequest represents the setChargingMode command parameters.
 type SetChargingModeRequest struct {
 	Mode             ChargingMode
@@ -1364,44 +1383,44 @@ func (c *ChargingSession) addCommands() {
 		Name:        "setChargingMode",
 		Description: "Set the optimization strategy",
 		Parameters: []model.ParameterMetadata{
-			{Name: "mode", Type: model.DataTypeUint8, Required: true},
-			{Name: "surplusThreshold", Type: model.DataTypeInt64, Required: false},
-			{Name: "startDelay", Type: model.DataTypeUint32, Required: false},
-			{Name: "stopDelay", Type: model.DataTypeUint32, Required: false},
+			{ID: 1, Name: "mode", Type: model.DataTypeUint8, Required: true},
+			{ID: 2, Name: "surplusThreshold", Type: model.DataTypeInt64, Required: false},
+			{ID: 3, Name: "startDelay", Type: model.DataTypeUint32, Required: false},
+			{ID: 4, Name: "stopDelay", Type: model.DataTypeUint32, Required: false},
 		},
 	}, c.handleSetChargingMode))
 
 }
 
-func (c *ChargingSession) handleSetChargingMode(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (c *ChargingSession) handleSetChargingMode(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if c.onSetChargingMode == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SetChargingModeRequest{}
-	if raw, exists := params["mode"]; exists {
+	if raw, exists := params[SetChargingModeParamMode]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			req.Mode = ChargingMode(v)
 		}
 	}
-	if raw, exists := params["surplusThreshold"]; exists {
+	if raw, exists := params[SetChargingModeParamSurplusThreshold]; exists {
 		if v, ok := wire.ToInt64(raw); ok {
 			req.SurplusThreshold = &v
 		}
 	}
-	if raw, exists := params["startDelay"]; exists {
+	if raw, exists := params[SetChargingModeParamStartDelay]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.StartDelay = &v
 		}
 	}
-	if raw, exists := params["stopDelay"]; exists {
+	if raw, exists := params[SetChargingModeParamStopDelay]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.StopDelay = &v
 		}
 	}
 
 	err := c.onSetChargingMode(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
 // OnSetChargingMode sets the handler for setChargingMode command.

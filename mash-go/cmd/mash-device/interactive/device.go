@@ -973,26 +973,39 @@ func (d *Device) displayCommandInvoked(event service.Event) {
 		zoneID = zoneID[:8]
 	}
 
-	// Build parameter summary
+	// Build parameter summary. Parameter IDs are command-specific (per
+	// docs/features/energy-control/1.0.yaml) — switch on the command to
+	// look up by the right generated constant. Issue #11 fix: command
+	// parameters are integer-keyed maps now (`map[uint8]any`).
 	var paramParts []string
 	if event.CommandParams != nil {
-		if v, ok := event.CommandParams["consumptionLimit"]; ok {
-			paramParts = append(paramParts, fmt.Sprintf("consumption=%.1f kW", toKW(v)))
-		}
-		if v, ok := event.CommandParams["productionLimit"]; ok {
-			paramParts = append(paramParts, fmt.Sprintf("production=%.1f kW", toKW(v)))
-		}
-		if v, ok := event.CommandParams["duration"]; ok {
-			paramParts = append(paramParts, fmt.Sprintf("duration=%vs", v))
-		}
-		if v, ok := event.CommandParams["cause"]; ok {
-			paramParts = append(paramParts, fmt.Sprintf("cause=%s", formatLimitCause(v)))
-		}
-		if v, ok := event.CommandParams["consumptionSetpoint"]; ok {
-			paramParts = append(paramParts, fmt.Sprintf("consumption=%.1f kW", toKW(v)))
-		}
-		if v, ok := event.CommandParams["productionSetpoint"]; ok {
-			paramParts = append(paramParts, fmt.Sprintf("production=%.1f kW", toKW(v)))
+		switch event.CommandID {
+		case features.EnergyControlCmdSetLimit:
+			if v, ok := event.CommandParams[features.SetLimitParamConsumptionLimit]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("consumption=%.1f kW", toKW(v)))
+			}
+			if v, ok := event.CommandParams[features.SetLimitParamProductionLimit]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("production=%.1f kW", toKW(v)))
+			}
+			if v, ok := event.CommandParams[features.SetLimitParamDuration]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("duration=%vs", v))
+			}
+			if v, ok := event.CommandParams[features.SetLimitParamCause]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("cause=%s", formatLimitCause(v)))
+			}
+		case features.EnergyControlCmdSetSetpoint:
+			if v, ok := event.CommandParams[features.SetSetpointParamConsumptionSetpoint]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("consumption=%.1f kW", toKW(v)))
+			}
+			if v, ok := event.CommandParams[features.SetSetpointParamProductionSetpoint]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("production=%.1f kW", toKW(v)))
+			}
+			if v, ok := event.CommandParams[features.SetSetpointParamDuration]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("duration=%vs", v))
+			}
+			if v, ok := event.CommandParams[features.SetSetpointParamCause]; ok {
+				paramParts = append(paramParts, fmt.Sprintf("cause=%s", formatLimitCause(v)))
+			}
 		}
 	}
 

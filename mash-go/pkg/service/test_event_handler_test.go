@@ -924,9 +924,9 @@ func TestTestControl_TriggerTestEvent_RejectedOnGridZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "grid-zone-1")
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeGrid)
 
-	params := map[string]any{
-		"enableKey":    "test-key-abc",
-		"eventTrigger": features.TriggerResetTestState,
+	params := map[uint8]any{
+		features.TriggerTestEventParamEnableKey:    "test-key-abc",
+		features.TriggerTestEventParamEventTrigger: features.TriggerResetTestState,
 	}
 	_, err := feat.InvokeCommand(ctx, features.TestControlCmdTriggerTestEvent, params)
 	if err == nil {
@@ -940,9 +940,9 @@ func TestTestControl_TriggerTestEvent_RejectedOnLocalZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "local-zone-1")
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeLocal)
 
-	params := map[string]any{
-		"enableKey":    "test-key-abc",
-		"eventTrigger": features.TriggerResetTestState,
+	params := map[uint8]any{
+		features.TriggerTestEventParamEnableKey:    "test-key-abc",
+		features.TriggerTestEventParamEventTrigger: features.TriggerResetTestState,
 	}
 	_, err := feat.InvokeCommand(ctx, features.TestControlCmdTriggerTestEvent, params)
 	if err == nil {
@@ -956,9 +956,9 @@ func TestTestControl_TriggerTestEvent_AcceptedOnTestZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "test-zone-1")
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
 
-	params := map[string]any{
-		"enableKey":    "test-key-abc",
-		"eventTrigger": features.TriggerResetTestState,
+	params := map[uint8]any{
+		features.TriggerTestEventParamEnableKey:    "test-key-abc",
+		features.TriggerTestEventParamEventTrigger: features.TriggerResetTestState,
 	}
 	_, err := feat.InvokeCommand(ctx, features.TestControlCmdTriggerTestEvent, params)
 	if err != nil {
@@ -972,9 +972,9 @@ func TestTestControl_SetCommWindowDuration_RejectedOnGridZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "grid-zone-1")
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeGrid)
 
-	params := map[string]any{
-		"enableKey":       "test-key-abc",
-		"durationSeconds": uint32(60),
+	params := map[uint8]any{
+		features.SetCommissioningWindowDurationParamEnableKey:       "test-key-abc",
+		features.SetCommissioningWindowDurationParamDurationSeconds: uint32(60),
 	}
 	_, err := feat.InvokeCommand(ctx, features.TestControlCmdSetCommissioningWindowDuration, params)
 	if err == nil {
@@ -993,9 +993,9 @@ func TestTestControl_SetCommWindowDuration_AcceptedOnTestZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "test-zone-1")
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
 
-	params := map[string]any{
-		"enableKey":       "test-key-abc",
-		"durationSeconds": uint32(60),
+	params := map[uint8]any{
+		features.SetCommissioningWindowDurationParamEnableKey:       "test-key-abc",
+		features.SetCommissioningWindowDurationParamDurationSeconds: uint32(60),
 	}
 	_, err := feat.InvokeCommand(ctx, features.TestControlCmdSetCommissioningWindowDuration, params)
 	if err != nil {
@@ -1009,8 +1009,8 @@ func TestTestControl_GetTestState_RejectedOnLocalZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "local-zone-1")
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeLocal)
 
-	params := map[string]any{
-		"enableKey": "test-key-abc",
+	params := map[uint8]any{
+		1: "test-key-abc", // GetTestState param 1 = enableKey
 	}
 	_, err := feat.InvokeCommand(ctx, TestControlCmdGetTestState, params)
 	if err == nil {
@@ -1024,8 +1024,8 @@ func TestTestControl_GetTestState_AcceptedOnTestZone(t *testing.T) {
 	ctx := ContextWithCallerZoneID(context.Background(), "test-zone-1")
 	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
 
-	params := map[string]any{
-		"enableKey": "test-key-abc",
+	params := map[uint8]any{
+		1: "test-key-abc", // GetTestState param 1 = enableKey
 	}
 	result, err := feat.InvokeCommand(ctx, TestControlCmdGetTestState, params)
 	if err != nil {

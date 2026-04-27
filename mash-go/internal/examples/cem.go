@@ -19,7 +19,7 @@ type DeviceClient interface {
 	Write(ctx context.Context, endpointID uint8, featureID uint8, attrs map[uint16]any) (map[uint16]any, error)
 	Subscribe(ctx context.Context, endpointID uint8, featureID uint8, opts *interaction.SubscribeOptions) (uint32, map[uint16]any, error)
 	Unsubscribe(ctx context.Context, subscriptionID uint32) error
-	Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error)
+	Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any) (any, error)
 }
 
 // CEM represents a Central Energy Manager that controls other devices.
@@ -479,12 +479,12 @@ func (c *CEM) SetPowerLimitFull(ctx context.Context, deviceID string, endpointID
 		effectiveCause = zoneType
 	}
 
-	params := map[string]any{
-		"consumptionLimit": limitMW,
-		"cause":            uint8(effectiveCause),
+	params := map[uint8]any{
+		features.SetLimitParamConsumptionLimit: limitMW,
+		features.SetLimitParamCause:            uint8(effectiveCause),
 	}
 	if durationSec != nil {
-		params["duration"] = *durationSec
+		params[features.SetLimitParamDuration] = *durationSec
 	}
 
 	rawResult, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureEnergyControl),
@@ -495,38 +495,36 @@ func (c *CEM) SetPowerLimitFull(ctx context.Context, deviceID string, endpointID
 
 	result := &SetLimitResult{}
 
-	// Parse enhanced response using type-safe coercion
-	// CBOR decodes maps as map[any]any when target is any, so normalize first
-	if resultMap := wire.ToStringMap(rawResult); resultMap != nil {
-		// Parse applied
-		if rawVal, exists := resultMap["applied"]; exists {
+	// Parse enhanced response using type-safe coercion. The response
+	// payload is integer-keyed per docs/interaction-model.md §7.2 (Issue
+	// #11 fix); CBOR widens uint8 to uint64 during generic decode, so we
+	// narrow back via wire.ToUint8Map.
+	if resultMap := wire.ToUint8Map(rawResult); resultMap != nil {
+		if rawVal, exists := resultMap[features.SetLimitRespApplied]; exists {
 			if v, ok := rawVal.(bool); ok {
 				result.Applied = v
 			}
 		}
 
-		// Parse controlState
-		if rawVal, exists := resultMap["controlState"]; exists {
+		if rawVal, exists := resultMap[features.SetLimitRespControlState]; exists {
 			if v, ok := wire.ToUint8Public(rawVal); ok {
 				result.ControlState = features.ControlState(v)
 			}
 		}
 
-		// Parse rejectReason (only if not applied)
-		if rawVal, exists := resultMap["rejectReason"]; exists {
+		if rawVal, exists := resultMap[features.SetLimitRespRejectReason]; exists {
 			if v, ok := wire.ToUint8Public(rawVal); ok {
 				reason := features.LimitRejectReason(v)
 				result.RejectReason = &reason
 			}
 		}
 
-		// Parse effective limits
-		if rawVal, exists := resultMap["effectiveConsumptionLimit"]; exists {
+		if rawVal, exists := resultMap[features.SetLimitRespEffectiveConsumptionLimit]; exists {
 			if v, ok := wire.ToInt64(rawVal); ok {
 				result.EffectiveConsumptionLimit = &v
 			}
 		}
-		if rawVal, exists := resultMap["effectiveProductionLimit"]; exists {
+		if rawVal, exists := resultMap[features.SetLimitRespEffectiveProductionLimit]; exists {
 			if v, ok := wire.ToInt64(rawVal); ok {
 				result.EffectiveProductionLimit = &v
 			}
@@ -610,11 +608,11 @@ func (c *CEM) SetChargingMode(ctx context.Context, deviceID string, endpointID u
 		return errors.New("device not connected")
 	}
 
-	params := map[string]any{
-		"mode": uint8(mode),
+	params := map[uint8]any{
+		features.SetChargingModeParamMode: uint8(mode),
 	}
 	if surplusThreshold != nil {
-		params["surplusThreshold"] = *surplusThreshold
+		params[features.SetChargingModeParamSurplusThreshold] = *surplusThreshold
 	}
 
 	result, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureChargingSession),
@@ -623,12 +621,12 @@ func (c *CEM) SetChargingMode(ctx context.Context, deviceID string, endpointID u
 		return err
 	}
 
-	// Check if successful
-	if resultMap, ok := result.(map[string]any); ok {
-		if success, ok := resultMap["success"].(bool); ok && !success {
-			if reason, ok := resultMap["reason"].(string); ok {
-				return errors.New(reason)
-			}
+	// Check if successful — simple-response form: codegen returns
+	// {1: success} where id 1 is the conventional success/applied field
+	// (Issue #11 fix; YAML setChargingMode declares no response block,
+	// so id 1 is synthesized).
+	if resultMap := wire.ToUint8Map(result); resultMap != nil {
+		if success, ok := resultMap[1].(bool); ok && !success {
 			return errors.New("charging mode not accepted")
 		}
 	}
@@ -657,13 +655,13 @@ func (c *CEM) SendPriceSignal(ctx context.Context, deviceID string, endpointID u
 		}
 	}
 
-	params := map[string]any{
-		"source":    uint8(source),
-		"startTime": startTime,
-		"slots":     slotsData,
+	params := map[uint8]any{
+		features.SendPriceSignalParamSource:    uint8(source),
+		features.SendPriceSignalParamStartTime: startTime,
+		features.SendPriceSignalParamSlots:     slotsData,
 	}
 	if validUntil != nil {
-		params["validUntil"] = *validUntil
+		params[features.SendPriceSignalParamValidUntil] = *validUntil
 	}
 
 	_, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureSignals),
@@ -692,13 +690,13 @@ func (c *CEM) SendConstraintSignal(ctx context.Context, deviceID string, endpoin
 		}
 	}
 
-	params := map[string]any{
-		"source":    uint8(source),
-		"startTime": startTime,
-		"slots":     slotsData,
+	params := map[uint8]any{
+		features.SendConstraintSignalParamSource:    uint8(source),
+		features.SendConstraintSignalParamStartTime: startTime,
+		features.SendConstraintSignalParamSlots:     slotsData,
 	}
 	if validUntil != nil {
-		params["validUntil"] = *validUntil
+		params[features.SendConstraintSignalParamValidUntil] = *validUntil
 	}
 
 	_, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureSignals),
@@ -738,8 +736,8 @@ func (c *CEM) RequestPlan(ctx context.Context, deviceID string, endpointID uint8
 		return 0, err
 	}
 
-	if resultMap := wire.ToStringMap(rawResult); resultMap != nil {
-		if rawVal, exists := resultMap["planId"]; exists {
+	if resultMap := wire.ToUint8Map(rawResult); resultMap != nil {
+		if rawVal, exists := resultMap[features.RequestPlanRespPlanID]; exists {
 			if v, ok := wire.ToUint32(rawVal); ok {
 				return v, nil
 			}
@@ -760,9 +758,9 @@ func (c *CEM) AcceptPlan(ctx context.Context, deviceID string, endpointID uint8,
 		return 0, errors.New("device not connected")
 	}
 
-	params := map[string]any{
-		"planId":      planID,
-		"planVersion": uint32(0),
+	params := map[uint8]any{
+		features.AcceptPlanParamPlanID:      planID,
+		features.AcceptPlanParamPlanVersion: uint32(0),
 	}
 
 	rawResult, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeaturePlan),
@@ -771,8 +769,8 @@ func (c *CEM) AcceptPlan(ctx context.Context, deviceID string, endpointID uint8,
 		return 0, err
 	}
 
-	if resultMap := wire.ToStringMap(rawResult); resultMap != nil {
-		if rawVal, exists := resultMap["newCommitment"]; exists {
+	if resultMap := wire.ToUint8Map(rawResult); resultMap != nil {
+		if rawVal, exists := resultMap[features.AcceptPlanRespNewCommitment]; exists {
 			if v, ok := wire.ToUint8Public(rawVal); ok {
 				return features.Commitment(v), nil
 			}

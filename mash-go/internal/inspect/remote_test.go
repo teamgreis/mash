@@ -12,7 +12,7 @@ import (
 type mockSession struct {
 	readFunc    func(ctx context.Context, epID uint8, featID uint8, attrIDs []uint16) (map[uint16]any, error)
 	writeFunc   func(ctx context.Context, epID uint8, featID uint8, attrs map[uint16]any) (map[uint16]any, error)
-	invokeFunc  func(ctx context.Context, epID uint8, featID uint8, cmdID uint8, params map[string]any) (any, error)
+	invokeFunc  func(ctx context.Context, epID uint8, featID uint8, cmdID uint8, params map[uint8]any) (any, error)
 	deviceIDVal string
 }
 
@@ -34,7 +34,7 @@ func (m *mockSession) Write(ctx context.Context, epID uint8, featID uint8, attrs
 	return nil, nil
 }
 
-func (m *mockSession) Invoke(ctx context.Context, epID uint8, featID uint8, cmdID uint8, params map[string]any) (any, error) {
+func (m *mockSession) Invoke(ctx context.Context, epID uint8, featID uint8, cmdID uint8, params map[uint8]any) (any, error) {
 	if m.invokeFunc != nil {
 		return m.invokeFunc(ctx, epID, featID, cmdID, params)
 	}
@@ -258,7 +258,7 @@ func TestRemoteInspectorInvokeCommand(t *testing.T) {
 	tests := []struct {
 		name       string
 		path       string
-		params     map[string]any
+		params     map[uint8]any
 		setupMock  func(*mockSession)
 		wantResult any
 		wantErr    bool
@@ -266,19 +266,19 @@ func TestRemoteInspectorInvokeCommand(t *testing.T) {
 		{
 			name:   "invoke command by ID",
 			path:   "1/3/cmd/1",
-			params: map[string]any{"power": int64(5000000)},
+			params: map[uint8]any{1: int64(5000000)},
 			setupMock: func(m *mockSession) {
-				m.invokeFunc = func(_ context.Context, epID uint8, featID uint8, cmdID uint8, params map[string]any) (any, error) {
+				m.invokeFunc = func(_ context.Context, epID uint8, featID uint8, cmdID uint8, params map[uint8]any) (any, error) {
 					if epID != 1 || featID != 3 || cmdID != 1 {
 						t.Errorf("wrong endpoint/feature/command: got %d/%d/%d", epID, featID, cmdID)
 					}
-					if params["power"] != int64(5000000) {
+					if params[1] != int64(5000000) {
 						t.Errorf("wrong params: got %v", params)
 					}
-					return map[string]any{"status": "accepted"}, nil
+					return map[uint8]any{1: "accepted"}, nil
 				}
 			},
-			wantResult: map[string]any{"status": "accepted"},
+			wantResult: map[uint8]any{1: "accepted"},
 			wantErr:    false,
 		},
 		{
@@ -286,7 +286,7 @@ func TestRemoteInspectorInvokeCommand(t *testing.T) {
 			path:   "1/3/cmd/1",
 			params: nil,
 			setupMock: func(m *mockSession) {
-				m.invokeFunc = func(_ context.Context, _, _ uint8, _ uint8, _ map[string]any) (any, error) {
+				m.invokeFunc = func(_ context.Context, _, _ uint8, _ uint8, _ map[uint8]any) (any, error) {
 					return nil, errors.New("command not supported")
 				}
 			},
@@ -321,10 +321,10 @@ func TestRemoteInspectorInvokeCommand(t *testing.T) {
 
 			// Compare result (for map comparison)
 			if tt.wantResult != nil {
-				wantMap, wantOK := tt.wantResult.(map[string]any)
-				gotMap, gotOK := result.(map[string]any)
+				wantMap, wantOK := tt.wantResult.(map[uint8]any)
+				gotMap, gotOK := result.(map[uint8]any)
 				if wantOK && gotOK {
-					if wantMap["status"] != gotMap["status"] {
+					if wantMap[1] != gotMap[1] {
 						t.Errorf("result = %v, want %v", result, tt.wantResult)
 					}
 				}

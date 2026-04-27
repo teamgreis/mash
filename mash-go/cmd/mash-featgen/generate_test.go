@@ -709,13 +709,13 @@ func TestGenerateHandler_SimpleNoParams(t *testing.T) {
 		t.Fatalf("GenerateFeature failed: %v", err)
 	}
 
-	// Nil check
+	// Nil check — Issue #11 fix: integer-keyed return shape, id 1 = success.
 	mustContain(t, output, `if e.onResume == nil {`)
-	mustContain(t, output, `return map[string]any{"success": false}, nil`)
+	mustContain(t, output, `return map[uint8]any{1: false}, nil`)
 	// Call handler
 	mustContain(t, output, `err := e.onResume(ctx)`)
-	// Return
-	mustContain(t, output, `return map[string]any{"success": err == nil}, err`)
+	// Return — no YAML response declared, so id 1 is synthesised by convention.
+	mustContain(t, output, `return map[uint8]any{1: err == nil}, err`)
 }
 
 func TestGenerateHandler_SimpleWithParams(t *testing.T) {
@@ -742,8 +742,8 @@ func TestGenerateHandler_SimpleWithParams(t *testing.T) {
 	mustContain(t, output, `req := PauseRequest{}`)
 	// Call handler
 	mustContain(t, output, `err := e.onPause(ctx, req)`)
-	// Return
-	mustContain(t, output, `return map[string]any{"success": err == nil}, err`)
+	// Return — Issue #11 fix: integer-keyed; no YAML response so id 1 by convention.
+	mustContain(t, output, `return map[uint8]any{1: err == nil}, err`)
 }
 
 func TestGenerateHandler_ComplexResponse(t *testing.T) {
@@ -754,17 +754,17 @@ func TestGenerateHandler_ComplexResponse(t *testing.T) {
 		Commands: []specparse.RawCommandDef{
 			{ID: 1, Name: "setLimit", Description: "Set power limits",
 				Parameters: []specparse.RawParameterDef{
-					{Name: "consumptionLimit", Type: "int64", Required: false},
-					{Name: "productionLimit", Type: "int64", Required: false},
-					{Name: "duration", Type: "uint32", Required: false},
-					{Name: "cause", Type: "uint8", Enum: "LimitCause", Required: true},
+					{ID: 1, Name: "consumptionLimit", Type: "int64", Required: false},
+					{ID: 2, Name: "productionLimit", Type: "int64", Required: false},
+					{ID: 3, Name: "duration", Type: "uint32", Required: false},
+					{ID: 4, Name: "cause", Type: "uint8", Enum: "LimitCause", Required: true},
 				},
 				Response: []specparse.RawParameterDef{
-					{Name: "applied", Type: "bool", Required: true},
-					{Name: "controlState", Type: "uint8", Enum: "ControlState", Required: true},
-					{Name: "effectiveConsumptionLimit", Type: "int64", Required: false},
-					{Name: "effectiveProductionLimit", Type: "int64", Required: false},
-					{Name: "rejectReason", Type: "uint8", Enum: "LimitRejectReason", Required: false},
+					{ID: 1, Name: "applied", Type: "bool", Required: true},
+					{ID: 2, Name: "controlState", Type: "uint8", Enum: "ControlState", Required: true},
+					{ID: 3, Name: "effectiveConsumptionLimit", Type: "int64", Required: false},
+					{ID: 4, Name: "effectiveProductionLimit", Type: "int64", Required: false},
+					{ID: 5, Name: "rejectReason", Type: "uint8", Enum: "LimitRejectReason", Required: false},
 				},
 			},
 		},
@@ -777,15 +777,15 @@ func TestGenerateHandler_ComplexResponse(t *testing.T) {
 	// Call handler returns (Response, error)
 	mustContain(t, output, `resp, err := e.onSetLimit(ctx, req)`)
 	mustContain(t, output, `if err != nil {`)
-	// Response serialization
-	mustContain(t, output, `result["applied"] = resp.Applied`)
-	mustContain(t, output, `result["controlState"] = uint8(resp.ControlState)`)
+	// Response serialization — Issue #11 fix: integer-keyed via generated constants.
+	mustContain(t, output, `result[SetLimitRespApplied] = resp.Applied`)
+	mustContain(t, output, `result[SetLimitRespControlState] = uint8(resp.ControlState)`)
 	// Optional fields
 	mustContain(t, output, `if resp.EffectiveConsumptionLimit != nil {`)
-	mustContain(t, output, `result["effectiveConsumptionLimit"] = *resp.EffectiveConsumptionLimit`)
+	mustContain(t, output, `result[SetLimitRespEffectiveConsumptionLimit] = *resp.EffectiveConsumptionLimit`)
 	// Optional enum
 	mustContain(t, output, `if resp.RejectReason != nil {`)
-	mustContain(t, output, `result["rejectReason"] = uint8(*resp.RejectReason)`)
+	mustContain(t, output, `result[SetLimitRespRejectReason] = uint8(*resp.RejectReason)`)
 }
 
 func TestGenerateCallbackSetter_Typed(t *testing.T) {

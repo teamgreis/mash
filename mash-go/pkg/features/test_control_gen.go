@@ -68,6 +68,58 @@ const (
 	TestControlCmdSetCommissioningWindowDuration uint8 = 2
 )
 
+// TriggerTestEvent command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	TriggerTestEventParamEnableKey    uint8 = 1
+	TriggerTestEventParamEventTrigger uint8 = 2
+)
+
+// TriggerTestEventParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var TriggerTestEventParamNameToID = map[string]uint8{
+	"enableKey":    TriggerTestEventParamEnableKey,
+	"eventTrigger": TriggerTestEventParamEventTrigger,
+}
+
+// TriggerTestEvent command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+	TriggerTestEventRespSuccess uint8 = 1
+)
+
+// TriggerTestEventRespNameToID maps response field names to wire IDs.
+var TriggerTestEventRespNameToID = map[string]uint8{
+	"success": TriggerTestEventRespSuccess,
+}
+
+// SetCommissioningWindowDuration command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SetCommissioningWindowDurationParamEnableKey       uint8 = 1
+	SetCommissioningWindowDurationParamDurationSeconds uint8 = 2
+)
+
+// SetCommissioningWindowDurationParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SetCommissioningWindowDurationParamNameToID = map[string]uint8{
+	"enableKey":       SetCommissioningWindowDurationParamEnableKey,
+	"durationSeconds": SetCommissioningWindowDurationParamDurationSeconds,
+}
+
+// SetCommissioningWindowDuration command response field IDs (CBOR integer keys per
+// docs/interaction-model.md §7.2).
+const (
+	SetCommissioningWindowDurationRespSuccess uint8 = 1
+)
+
+// SetCommissioningWindowDurationRespNameToID maps response field names to wire IDs.
+var SetCommissioningWindowDurationRespNameToID = map[string]uint8{
+	"success": SetCommissioningWindowDurationRespSuccess,
+}
+
 // TriggerTestEventRequest represents the triggerTestEvent command parameters.
 type TriggerTestEventRequest struct {
 	EnableKey    string
@@ -87,8 +139,8 @@ func (t *TestControl) addCommands() {
 		Name:        "triggerTestEvent",
 		Description: "Trigger a test event by opcode. Requires matching 128-bit enableKey (hex-encoded, 32 chars). Matter-inspired safety gate.",
 		Parameters: []model.ParameterMetadata{
-			{Name: "enableKey", Type: model.DataTypeString, Required: true},
-			{Name: "eventTrigger", Type: model.DataTypeUint64, Required: true},
+			{ID: 1, Name: "enableKey", Type: model.DataTypeString, Required: true},
+			{ID: 2, Name: "eventTrigger", Type: model.DataTypeUint64, Required: true},
 		},
 	}, t.handleTriggerTestEvent))
 
@@ -97,53 +149,53 @@ func (t *TestControl) addCommands() {
 		Name:        "setCommissioningWindowDuration",
 		Description: "Set commissioning window duration (test mode only). Requires matching enableKey.",
 		Parameters: []model.ParameterMetadata{
-			{Name: "enableKey", Type: model.DataTypeString, Required: true},
-			{Name: "durationSeconds", Type: model.DataTypeUint32, Required: true},
+			{ID: 1, Name: "enableKey", Type: model.DataTypeString, Required: true},
+			{ID: 2, Name: "durationSeconds", Type: model.DataTypeUint32, Required: true},
 		},
 	}, t.handleSetCommissioningWindowDuration))
 
 }
 
-func (t *TestControl) handleTriggerTestEvent(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (t *TestControl) handleTriggerTestEvent(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if t.onTriggerTestEvent == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := TriggerTestEventRequest{}
-	if raw, exists := params["enableKey"]; exists {
+	if raw, exists := params[TriggerTestEventParamEnableKey]; exists {
 		if v, ok := raw.(string); ok {
 			req.EnableKey = v
 		}
 	}
-	if raw, exists := params["eventTrigger"]; exists {
+	if raw, exists := params[TriggerTestEventParamEventTrigger]; exists {
 		if v, ok := raw.(uint64); ok {
 			req.EventTrigger = v
 		}
 	}
 
 	err := t.onTriggerTestEvent(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{TriggerTestEventRespSuccess: err == nil}, err
 }
 
-func (t *TestControl) handleSetCommissioningWindowDuration(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (t *TestControl) handleSetCommissioningWindowDuration(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if t.onSetCommissioningWindowDuration == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SetCommissioningWindowDurationRequest{}
-	if raw, exists := params["enableKey"]; exists {
+	if raw, exists := params[SetCommissioningWindowDurationParamEnableKey]; exists {
 		if v, ok := raw.(string); ok {
 			req.EnableKey = v
 		}
 	}
-	if raw, exists := params["durationSeconds"]; exists {
+	if raw, exists := params[SetCommissioningWindowDurationParamDurationSeconds]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.DurationSeconds = v
 		}
 	}
 
 	err := t.onSetCommissioningWindowDuration(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{SetCommissioningWindowDurationRespSuccess: err == nil}, err
 }
 
 // OnTriggerTestEvent sets the handler for triggerTestEvent command.

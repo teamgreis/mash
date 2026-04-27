@@ -23,7 +23,9 @@ type WriteCallback func(endpointID uint8, featureID uint8, attrs map[uint16]any)
 
 // InvokeCallback is called after a successful invoke operation.
 // It receives the endpoint ID, feature ID, command ID, parameters, and result.
-type InvokeCallback func(endpointID uint8, featureID uint8, commandID uint8, params map[string]any, result any)
+//
+// params is integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
+type InvokeCallback func(endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any, result any)
 
 // ProtocolHandler handles MASH protocol messages for a device or controller.
 // It routes Read/Write/Subscribe/Invoke requests to the appropriate
@@ -588,41 +590,35 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Parse invoke payload - CBOR may decode as different types
+	// Parse invoke payload — CBOR may decode the parameters map either
+	// as ``map[any]any`` (generic decode path) or as a typed
+	// ``map[uint8]any`` (when the CBOR library knows the schema).
+	// Per docs/interaction-model.md §7.1 the parameters map is
+	// integer-keyed; we coerce both decode shapes into ``map[uint8]any``.
+	// (Pre-Issue-#11 mash-go silently dropped integer keys via a
+	// string-only converter; that violated the spec.)
 	var commandID uint8
-	var params map[string]any
+	var params map[uint8]any
 
 	switch p := req.Payload.(type) {
 	case *wire.InvokePayload:
 		commandID = p.CommandID
 		if p.Parameters != nil {
-			switch pm := p.Parameters.(type) {
-			case map[string]any:
-				params = pm
-			case map[any]any:
-				params = convertMapAnyAnyToStringAny(pm)
-			}
+			params = wire.ToUint8Map(p.Parameters)
 		}
 	case wire.InvokePayload:
 		commandID = p.CommandID
 		if p.Parameters != nil {
-			switch pm := p.Parameters.(type) {
-			case map[string]any:
-				params = pm
-			case map[any]any:
-				params = convertMapAnyAnyToStringAny(pm)
-			}
+			params = wire.ToUint8Map(p.Parameters)
 		}
 	case map[any]any:
-		// CBOR decoded payload as generic map with integer keys
+		// CBOR decoded payload as generic map with integer keys.
 		// InvokePayload: {1: commandId, 2: parameters}
 		if v, ok := p[uint64(1)].(uint64); ok {
 			commandID = uint8(v)
 		}
-		if v, ok := p[uint64(2)].(map[any]any); ok {
-			params = convertMapAnyAnyToStringAny(v)
-		} else if v, ok := p[uint64(2)].(map[string]any); ok {
-			params = v
+		if raw, ok := p[uint64(2)]; ok {
+			params = wire.ToUint8Map(raw)
 		}
 	default:
 		return &wire.Response{
@@ -732,15 +728,3 @@ func (h *ProtocolHandler) NotifyAttributeChange(endpointID, featureID uint8, att
 	return nil
 }
 
-// convertMapAnyAnyToStringAny converts a map[any]any to map[string]any,
-// keeping only entries with string keys. CBOR decoding sometimes produces
-// map[any]any instead of map[string]any.
-func convertMapAnyAnyToStringAny(m map[any]any) map[string]any {
-	result := make(map[string]any)
-	for k, v := range m {
-		if key, ok := k.(string); ok {
-			result[key] = v
-		}
-	}
-	return result
-}

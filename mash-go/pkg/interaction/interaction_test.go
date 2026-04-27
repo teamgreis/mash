@@ -45,10 +45,10 @@ func createTestDevice() *model.Device {
 		ID:   1,
 		Name: "setLimit",
 		Parameters: []model.ParameterMetadata{
-			{Name: "limit", Type: model.DataTypeInt64, Required: true},
+			{ID: 1, Name: "limit", Type: model.DataTypeInt64, Required: true},
 		},
-	}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
-		return map[string]any{"success": true}, nil
+	}, func(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
+		return map[uint8]any{1: true}, nil
 	}))
 	charger.AddFeature(f)
 
@@ -299,8 +299,8 @@ func TestServerInvoke(t *testing.T) {
 			FeatureID:  uint8(model.FeatureEnergyControl),
 			Payload: &wire.InvokePayload{
 				CommandID: 1, // setLimit
-				Parameters: map[string]any{
-					"limit": int64(5000000),
+				Parameters: map[uint8]any{
+					1: int64(5000000), // limit (id 1)
 				},
 			},
 		}
@@ -311,12 +311,12 @@ func TestServerInvoke(t *testing.T) {
 			t.Errorf("expected success, got %s", resp.Status)
 		}
 
-		result, ok := resp.Payload.(map[string]any)
+		result, ok := resp.Payload.(map[uint8]any)
 		if !ok {
-			t.Fatal("expected map result")
+			t.Fatal("expected map[uint8]any result (Issue #11 fix)")
 		}
-		if result["success"] != true {
-			t.Errorf("expected success=true, got %v", result["success"])
+		if result[1] != true {
+			t.Errorf("expected success=true at id 1, got %v", result[1])
 		}
 	})
 
@@ -467,6 +467,22 @@ func TestClientBasics(t *testing.T) {
 	}
 	if receivedNotif.SubscriptionID != 1 {
 		t.Errorf("expected subscriptionID 1, got %d", receivedNotif.SubscriptionID)
+	}
+}
+
+func TestMessageIDStartsAtOne(t *testing.T) {
+	// Per docs/interaction-model.md §3.5: "Start at 1 for new connections."
+	// A pre-2026-04 mash-go bug pre-incremented and emitted 2 first
+	// (mash-py-spec-issues.md Issue #10).
+	sender := &mockSender{}
+	client := NewClient(sender)
+	defer client.Close()
+
+	if got := client.nextMessageID(); got != 1 {
+		t.Errorf("first messageId must be 1 per spec §3.5; got %d", got)
+	}
+	if got := client.nextMessageID(); got != 2 {
+		t.Errorf("second messageId must be 2 (monotonic increment); got %d", got)
 	}
 }
 

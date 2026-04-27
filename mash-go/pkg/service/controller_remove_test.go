@@ -40,7 +40,7 @@ func (m *mockDeviceSessionForRemove) Unsubscribe(ctx context.Context, subscripti
 	return nil
 }
 
-func (m *mockDeviceSessionForRemove) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error) {
+func (m *mockDeviceSessionForRemove) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any) (any, error) {
 	m.invokeCalled = true
 
 	// Verify correct target
@@ -84,7 +84,7 @@ func TestControllerService_RemoveDevice_Success(t *testing.T) {
 	// Create mock session with success response
 	mockSession := &mockDeviceSessionForRemove{
 		deviceID: "device-abc",
-		invokeResult: map[string]any{
+		invokeResult: map[uint8]any{
 			features.RemoveZoneRespRemoved: true,
 		},
 	}

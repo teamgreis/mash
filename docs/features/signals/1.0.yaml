@@ -93,34 +93,34 @@ commands:
     mandatory: true
     description: "Send a price signal schedule to the device"
     parameters:
-      - { name: source, type: uint8, enum: SignalSource, required: true }
-      - { name: startTime, type: uint64, required: true }
-      - { name: validUntil, type: uint64, required: false }
-      - { name: slots, type: array, items: { type: object, structName: PriceSlot }, required: true }
+      - { id: 1, name: source, type: uint8, enum: SignalSource, required: true }
+      - { id: 2, name: startTime, type: uint64, required: true }
+      - { id: 3, name: validUntil, type: uint64, required: false }
+      - { id: 4, name: slots, type: array, items: { type: object, structName: PriceSlot }, required: true }
 
   - id: 2
     name: sendConstraintSignal
     mandatory: true
     description: "Send a power constraint signal to the device"
     parameters:
-      - { name: source, type: uint8, enum: SignalSource, required: true }
-      - { name: startTime, type: uint64, required: true }
-      - { name: validUntil, type: uint64, required: false }
-      - { name: slots, type: array, items: { type: object, structName: ConstraintSlot }, required: true }
+      - { id: 1, name: source, type: uint8, enum: SignalSource, required: true }
+      - { id: 2, name: startTime, type: uint64, required: true }
+      - { id: 3, name: validUntil, type: uint64, required: false }
+      - { id: 4, name: slots, type: array, items: { type: object, structName: ConstraintSlot }, required: true }
 
   - id: 3
     name: sendForecastSignal
     description: "Send a power forecast signal to the device"
     parameters:
-      - { name: source, type: uint8, enum: SignalSource, required: true }
-      - { name: startTime, type: uint64, required: true }
-      - { name: validUntil, type: uint64, required: false }
-      - { name: slots, type: array, items: { type: object, structName: ForecastSlot }, required: true }
+      - { id: 1, name: source, type: uint8, enum: SignalSource, required: true }
+      - { id: 2, name: startTime, type: uint64, required: true }
+      - { id: 3, name: validUntil, type: uint64, required: false }
+      - { id: 4, name: slots, type: array, items: { type: object, structName: ForecastSlot }, required: true }
 
   - id: 4
     name: clearSignals
     description: "Clear active signals"
     parameters:
-      - { name: signalType, type: string, required: false, description: "price, constraint, or forecast (omit to clear all)" }
+      - { id: 1, name: signalType, type: string, required: false, description: "price, constraint, or forecast (omit to clear all)" }
     response:
-      - { name: cleared, type: uint8, required: true, description: "Number of signal types cleared" }
+      - { id: 1, name: cleared, type: uint8, required: true, description: "Number of signal types cleared" }

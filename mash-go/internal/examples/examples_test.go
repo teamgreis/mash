@@ -318,9 +318,9 @@ func TestZoneInteraction(t *testing.T) {
 		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID: features.EnergyControlCmdSetLimit,
-			Parameters: map[string]any{
-				"consumptionLimit": int64(11000000), // 11 kW limit
-				"cause":            uint8(features.LimitCauseLocalOptimization),
+			Parameters: map[uint8]any{
+				features.SetLimitParamConsumptionLimit: int64(11000000), // 11 kW limit
+				features.SetLimitParamCause:            uint8(features.LimitCauseLocalOptimization),
 			},
 		},
 	}
@@ -353,7 +353,7 @@ func TestZoneInteraction(t *testing.T) {
 		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdClearLimit,
-			Parameters: map[string]any{},
+			Parameters: map[uint8]any{},
 		},
 	}
 
@@ -833,7 +833,7 @@ func TestPauseResume(t *testing.T) {
 		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdPause,
-			Parameters: map[string]any{},
+			Parameters: map[uint8]any{},
 		},
 	}
 
@@ -855,7 +855,7 @@ func TestPauseResume(t *testing.T) {
 		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdResume,
-			Parameters: map[string]any{},
+			Parameters: map[uint8]any{},
 		},
 	}
 
@@ -954,7 +954,7 @@ func TestHeatPumpPauseResume(t *testing.T) {
 		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdPause,
-			Parameters: map[string]any{},
+			Parameters: map[uint8]any{},
 		},
 	}
 
@@ -975,7 +975,7 @@ func TestHeatPumpPauseResume(t *testing.T) {
 		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdResume,
-			Parameters: map[string]any{},
+			Parameters: map[uint8]any{},
 		},
 	}
 

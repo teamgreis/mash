@@ -191,6 +191,25 @@ const (
 	TariffCmdSetTariff uint8 = 1
 )
 
+// SetTariff command parameter IDs (CBOR integer keys per
+// docs/interaction-model.md §7.1).
+const (
+	SetTariffParamTariffID    uint8 = 1
+	SetTariffParamCurrency    uint8 = 2
+	SetTariffParamPriceUnit   uint8 = 3
+	SetTariffParamDescription uint8 = 4
+)
+
+// SetTariffParamNameToID maps human-readable parameter names (used in
+// YAML test fixtures) to their wire IDs. Generated for the test harness;
+// production code should reference the per-parameter constants directly.
+var SetTariffParamNameToID = map[string]uint8{
+	"tariffId":    SetTariffParamTariffID,
+	"currency":    SetTariffParamCurrency,
+	"priceUnit":   SetTariffParamPriceUnit,
+	"description": SetTariffParamDescription,
+}
+
 // SetTariffRequest represents the setTariff command parameters.
 type SetTariffRequest struct {
 	TariffID    uint32
@@ -206,45 +225,45 @@ func (t *Tariff) addCommands() {
 		Name:        "setTariff",
 		Description: "Set tariff metadata",
 		Parameters: []model.ParameterMetadata{
-			{Name: "tariffId", Type: model.DataTypeUint32, Required: true},
-			{Name: "currency", Type: model.DataTypeString, Required: true},
-			{Name: "priceUnit", Type: model.DataTypeUint8, Required: false},
-			{Name: "description", Type: model.DataTypeString, Required: false},
+			{ID: 1, Name: "tariffId", Type: model.DataTypeUint32, Required: true},
+			{ID: 2, Name: "currency", Type: model.DataTypeString, Required: true},
+			{ID: 3, Name: "priceUnit", Type: model.DataTypeUint8, Required: false},
+			{ID: 4, Name: "description", Type: model.DataTypeString, Required: false},
 		},
 	}, t.handleSetTariff))
 
 }
 
-func (t *Tariff) handleSetTariff(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (t *Tariff) handleSetTariff(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	if t.onSetTariff == nil {
-		return map[string]any{"success": false}, nil
+		return map[uint8]any{1: false}, nil
 	}
 
 	req := SetTariffRequest{}
-	if raw, exists := params["tariffId"]; exists {
+	if raw, exists := params[SetTariffParamTariffID]; exists {
 		if v, ok := wire.ToUint32(raw); ok {
 			req.TariffID = v
 		}
 	}
-	if raw, exists := params["currency"]; exists {
+	if raw, exists := params[SetTariffParamCurrency]; exists {
 		if v, ok := raw.(string); ok {
 			req.Currency = v
 		}
 	}
-	if raw, exists := params["priceUnit"]; exists {
+	if raw, exists := params[SetTariffParamPriceUnit]; exists {
 		if v, ok := wire.ToUint8Public(raw); ok {
 			tmp := PriceUnit(v)
 			req.PriceUnit = &tmp
 		}
 	}
-	if raw, exists := params["description"]; exists {
+	if raw, exists := params[SetTariffParamDescription]; exists {
 		if v, ok := raw.(string); ok {
 			req.Description = &v
 		}
 	}
 
 	err := t.onSetTariff(ctx, req)
-	return map[string]any{"success": err == nil}, err
+	return map[uint8]any{1: err == nil}, err
 }
 
 // OnSetTariff sets the handler for setTariff command.

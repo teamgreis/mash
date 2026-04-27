@@ -65,20 +65,6 @@ const (
 	TriggerProcessStateAborted   uint64 = 0x0005_0000_0000_0016
 )
 
-// TriggerTestEvent command parameter and response keys.
-const (
-	TriggerTestEventParamEnableKey    = "enableKey"
-	TriggerTestEventParamEventTrigger = "eventTrigger"
-	TriggerTestEventRespSuccess       = "success"
-)
-
-// SetCommissioningWindowDuration command parameter and response keys.
-const (
-	SetCommWindowDurParamEnableKey       = "enableKey"
-	SetCommWindowDurParamDurationSeconds = "durationSeconds"
-	SetCommWindowDurRespSuccess          = "success"
-)
-
 // TriggerDomain extracts the feature domain from a trigger opcode.
 // The domain is encoded in the upper 2 bytes.
 func TriggerDomain(trigger uint64) uint16 {

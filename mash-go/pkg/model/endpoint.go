@@ -136,7 +136,10 @@ func (e *Endpoint) WriteAttribute(featureID uint8, attrID uint16, value any) err
 }
 
 // InvokeCommand invokes a command on a feature.
-func (e *Endpoint) InvokeCommand(ctx context.Context, featureID uint8, cmdID uint8, params map[string]any) (map[string]any, error) {
+//
+// params and the response map are integer-keyed per
+// docs/interaction-model.md §7.1 / §7.2 (Issue #11 fix).
+func (e *Endpoint) InvokeCommand(ctx context.Context, featureID uint8, cmdID uint8, params map[uint8]any) (map[uint8]any, error) {
 	feature, err := e.GetFeatureByID(featureID)
 	if err != nil {
 		return nil, err

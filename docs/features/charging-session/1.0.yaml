@@ -291,7 +291,7 @@ commands:
     mandatory: true
     description: "Set the optimization strategy"
     parameters:
-      - { name: mode, type: uint8, enum: ChargingMode, required: true }
-      - { name: surplusThreshold, type: int64, required: false }
-      - { name: startDelay, type: uint32, required: false }
-      - { name: stopDelay, type: uint32, required: false }
+      - { id: 1, name: mode, type: uint8, enum: ChargingMode, required: true }
+      - { id: 2, name: surplusThreshold, type: int64, required: false }
+      - { id: 3, name: startDelay, type: uint32, required: false }
+      - { id: 4, name: stopDelay, type: uint32, required: false }

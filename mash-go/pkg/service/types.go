@@ -636,7 +636,8 @@ type Event struct {
 	CommandID uint8
 
 	// CommandParams are the parameters passed to the command (for command events).
-	CommandParams map[string]any
+	// Integer-keyed per docs/interaction-model.md §7.1 (Issue #11 fix).
+	CommandParams map[uint8]any
 
 	// DiscoveredService contains the discovered service info (for discovery events).
 	DiscoveredService any

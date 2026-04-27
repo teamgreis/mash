@@ -29,9 +29,14 @@ var (
 )
 
 // CommandHandler is the function signature for command handlers.
-// The parameters map contains command-specific parameters.
-// Returns a result map (may be nil) or an error.
-type CommandHandler func(ctx context.Context, params map[string]any) (map[string]any, error)
+//
+// Per docs/interaction-model.md §7.1 / §2.2, the parameters map is keyed
+// by integer parameter ID (assigned in the YAML feature spec). The
+// response map is likewise integer-keyed per §7.2. mash-go used to use
+// string keys here; that violated the spec's "all CBOR maps use integer
+// keys" rule and was a hard interop break for spec-conformant clients.
+// Fixed alongside Issue #11 (mash-py-spec-issues.md).
+type CommandHandler func(ctx context.Context, params map[uint8]any) (map[uint8]any, error)
 
 // CommandMetadata describes a command's properties.
 type CommandMetadata struct {
@@ -52,8 +57,16 @@ type CommandMetadata struct {
 }
 
 // ParameterMetadata describes a command parameter or response field.
+//
+// ID is the integer wire key per docs/interaction-model.md §7.1 / §7.2.
+// Name is human-readable only — used for documentation, error messages,
+// and test-harness YAML resolution. The framework looks up parameters
+// by ID, never by Name.
 type ParameterMetadata struct {
-	// Name is the parameter name.
+	// ID is the integer wire key (1..255).
+	ID uint8
+
+	// Name is the human-readable parameter name.
 	Name string
 
 	// Type is the data type.
@@ -91,7 +104,7 @@ func (c *Command) Metadata() *CommandMetadata {
 }
 
 // Invoke executes the command with the given parameters.
-func (c *Command) Invoke(ctx context.Context, params map[string]any) (map[string]any, error) {
+func (c *Command) Invoke(ctx context.Context, params map[uint8]any) (map[uint8]any, error) {
 	// Validate required parameters
 	if err := c.validateParameters(params); err != nil {
 		return nil, err
@@ -106,10 +119,10 @@ func (c *Command) Invoke(ctx context.Context, params map[string]any) (map[string
 }
 
 // validateParameters checks that all required parameters are present.
-func (c *Command) validateParameters(params map[string]any) error {
+func (c *Command) validateParameters(params map[uint8]any) error {
 	for _, p := range c.metadata.Parameters {
 		if p.Required {
-			if _, exists := params[p.Name]; !exists {
+			if _, exists := params[p.ID]; !exists {
 				return ErrInvalidParameters
 			}
 		}

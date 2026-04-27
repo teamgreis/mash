@@ -437,7 +437,7 @@ func (s *DeviceService) makeWriteCallback(zoneID string) dispatch.WriteCallback 
 
 // makeInvokeCallback creates an invoke callback that emits events for command invocations.
 func (s *DeviceService) makeInvokeCallback(zoneID string) dispatch.InvokeCallback {
-	return func(endpointID uint8, featureID uint8, commandID uint8, params map[string]any, result any) {
+	return func(endpointID uint8, featureID uint8, commandID uint8, params map[uint8]any, result any) {
 		s.emitEvent(Event{
 			Type:          EventCommandInvoked,
 			ZoneID:        zoneID,
