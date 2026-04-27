@@ -442,6 +442,67 @@ The implementation cost is non-trivial: the runner has no existing step handler 
 
 ---
 
+### Issue #9 — `device_id` is overloaded: cert-CN identity vs. `DeviceInfo.deviceId` attribute
+
+**Status:** 🟡 Partially resolved — option 3 applied to `DeviceInfo.deviceId` (mash-go fix landed 2026-04-27); mDNS DI TXT alignment still open.
+**Surfaced during:** mash-py Phase 10, 2026-04-27.
+
+**The clash.**
+The spec uses "device id" for two distinct identifiers and gives them incompatible formats:
+
+| Concept | Spec source | Format | Example |
+|---|---|---|---|
+| Operational-cert CN | ``commissioning-pase.md §4.4`` | 16 uppercase hex chars (``SHA256(SPKI_DER)[:8].hex().upper()``) | ``8152A81882CD34C3`` |
+| ``DeviceInfo.deviceId`` (feature 0x01, attribute 1) | ``device-info.md §"Device ID Format"`` | Human-readable: ``PEN<number>.<serial>`` or ``<vendor>-<product>-<serial>`` | ``PEN12345.EVSE-001-A`` |
+| mDNS ``DI`` TXT record | ``discovery.md §2.3`` | Human-readable (per the spec example ``DI=PEN12345.EVSE001``) | — |
+
+Three observations:
+
+1. The **operational-cert CN** is cryptographically derived from the device's keypair. It cannot be the human-readable form because the keypair (and hence the CN) is generated only at commissioning time, while the human-readable identifier is stable across re-commissionings.
+2. The **mDNS instance name and DI TXT** in `discovery.md §2.3` use the human-readable form (``PEN12345-EVSE001._mash._tcp.local`` / ``DI=PEN12345.EVSE001``). But mash-go actually advertises with the cert-CN form (``8152A81882CD34C3._mash._tcp.local`` / ``DI=8152A81882CD34C3``), which is what mash-py's Phase 6 browser is built to parse.
+3. The **DeviceInfo.deviceId attribute** as implemented in mash-go is the bare CLI ``-serial`` value (``PHASE10-INTEROP-001``), which matches neither the spec's PEN-prefix nor the vendor-product-serial format.
+
+So three sources, three different format conventions, and the two implementations (spec and mash-go) disagree at every join.
+
+**What Phase 10 does.**
+Phase 10 acceptance verifies the end-to-end pipe (cert install → operational mTLS → Read DeviceInfo → response decoded). The interop test does NOT couple the two device-id concepts — it asserts ``snapshot.device_id`` (cert CN) is the 16-hex value and that ``DeviceInfo.deviceId`` is some non-empty string, and stops there. Strict format checks are gated on this issue's resolution.
+
+**Spec options to consider.**
+
+1. **Rename for clarity.** Keep both identifiers but rename them in the spec so neither is called "device id":
+   - ``CertCommonName`` or ``OperationalIdentity`` (the 16-hex one).
+   - ``DeviceInfo.deviceId`` stays as the human-readable attribute.
+   Then revise `discovery.md §2.3` so the mDNS examples are consistent with whichever ID actually lands in the ``DI`` TXT record (almost certainly the operational identity, since that is what controllers use to find a device they have already paired with).
+
+2. **Make ``DeviceInfo.deviceId`` equal the cert CN.** Drop the human-readable format from `device-info.md §"Device ID Format"` and re-spec attribute 1 as the 16-hex operational identity. The PEN-form / vendor-product-serial information becomes a derived view from ``vendorId``, ``productId``, ``serialNumber``. This matches the mDNS de-facto reality but breaks the existing `device-info.md` example and forces mash-go to change its CLI plumbing.
+
+3. **Fix mash-go to follow the spec.** Have mash-go return ``PEN<vendorId>.<serialNumber>`` (or the fallback form) for ``DeviceInfo.deviceId``, and have its mDNS ``DI`` TXT use that same value. Cert CN stays separate. This is the most spec-faithful resolution but requires updating mash-go and re-running every prior interop snapshot that pinned the 16-hex form.
+
+4. **Accept the overloading and document the disambiguation.** Add a note to `device-info.md` and `commissioning-pase.md` explaining that "device id" is overloaded and which one applies in each context. No code changes; lower portability cost but worse for newcomers.
+
+**mash-py impact today.**
+mash-py is the controller in Phase 10. The spec divergence is not blocking — Phase 10's acceptance test passes — but Phase 13 (Python device model) will have to commit to a value for `DeviceInfo.deviceId` and that value should match whatever the spec finally lands on. Until then, mash-py treats the two identifiers as orthogonal opaque strings.
+
+**Disposition.**
+- **Decision (2026-04-27):** option 3 — fix mash-go to produce a spec-compliant ``DeviceInfo.deviceId``. The spec (``device-info.md §"Device ID Format"``) is the reference; mash-go's prior behaviour of putting the bare ``-serial`` value into attribute 1 was wrong on its face.
+- **Resolution applied to:** ``mash-go/cmd/mash-device/main.go`` — added a ``specDeviceID(brand, model, serial)`` helper that returns ``<brand>-<model>-<serial>`` (the "without PEN" fallback form, since the reference CLI uses placeholder VendorIDs ``0x1234`` rather than real IANA PENs). All four device-creation paths (EVSE, Inverter, Battery, HeatPump) now plumb the spec-format ID through both ``model.NewDevice`` and ``deviceInfo.SetDeviceID``.
+- **Phase 10 acceptance:** ``tests/interop/transport/test_operational_connection.py`` now asserts the exact ``MASH-Phase10-EVSE-X-PHASE10-INTEROP-001`` value, not just "non-empty string". Live interop test green.
+- **Still open:** mDNS DI TXT alignment. ``discovery.md §2.3`` example shows ``DI=PEN12345.EVSE001`` (human-readable) but mash-go advertises with the cert-CN form (``DI=<16-hex>``). The mash-py Phase 6 browser is built around the cert-CN form. Reopening this would require coordinated changes to ``device_service_discovery.go``, ``mash-py/discovery/``, and the ``discovery.md`` example. Deferred to a follow-up — mDNS DI is independent of `DeviceInfo.deviceId` attribute semantics, and Phase 11 onwards does not depend on the human-readable form for discovery.
+- **Phase 13 (Python device model):** unblocked. Use the same fallback form ``<vendor>-<product>-<serial>`` (or ``PEN<n>.<serial>`` if a real PEN is available) when populating attribute 1.
+
+**Files changed.**
+- ``mash-go/cmd/mash-device/main.go`` — ``specDeviceID()`` helper + four call sites updated.
+- ``mash-py/tests/interop/transport/test_operational_connection.py`` — tightened assertion to spec-format.
+
+**Files still affected by the deferred mDNS alignment.**
+- ``docs/discovery.md §2.3`` — mDNS examples either revise to show 16-hex or stay human-readable depending on the eventual resolution.
+- ``mash-go/pkg/service/device_service_discovery.go`` — instance-name + DI TXT composition.
+- ``mash-py/mash_py/discovery/`` — the OperationalService TXT parsing already reads whatever string lands in DI, so no change needed there.
+
+**Related.** DEC-067, DEC-082 (operational reconnect), Phase 10 of the TDD plan.
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.

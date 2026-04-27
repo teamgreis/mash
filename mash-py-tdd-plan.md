@@ -1012,7 +1012,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 10 — Operational Connection (Post-Commissioning)
 
-**Status.** Pending.
+**Status.** ✅ Complete (2026-04-27). Spec issue surfaced and pending resolution: see `mash-py-spec-issues.md` Issue #9 (``device_id`` overloaded between cert-CN and ``DeviceInfo.deviceId`` attribute).
 
 **Goal.** After commissioning, Python controller reconnects to the Go device on the operational port with mTLS using the issued cert, and exchanges a successful Read on DeviceInfo.
 
