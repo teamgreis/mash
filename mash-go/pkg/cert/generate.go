@@ -294,7 +294,6 @@ func GenerateControllerOperationalCert(ca *ZoneCA, controllerID string) (*Operat
 		IsCA:                  false,
 		SubjectKeyId:          ski,
 		AuthorityKeyId:        ca.Certificate.SubjectKeyId,
-		DNSNames:              []string{controllerID}, // Required for Go TLS verification
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, keyPair.PublicKey, ca.PrivateKey)
