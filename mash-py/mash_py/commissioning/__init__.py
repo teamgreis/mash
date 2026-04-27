@@ -3,32 +3,47 @@
 Phase scope:
 - :mod:`mash_py.commissioning.mhf` — Memory-Hard KDF (PBKDF2 v1).
 - :mod:`mash_py.commissioning.spake2plus` — algorithm + state machines.
-- :mod:`mash_py.commissioning.messages` — PASE message dataclasses + CBOR codec (Phase 8).
-- :mod:`mash_py.commissioning.pase_client` — controller-side handshake driver (Phase 8).
+- :mod:`mash_py.commissioning.messages` — commissioning message dataclasses + CBOR codec (Phases 8, 9).
+- :mod:`mash_py.commissioning.pase_client` — controller-side PASE handshake driver (Phase 8).
+- :mod:`mash_py.commissioning.cert_store` — controller-side Zone CA + signing (Phase 9).
+- :mod:`mash_py.commissioning.cert_exchange` — controller-side cert install flow (Phase 9, DEC-085).
 
 Future phases:
-- Phase 9: CSR / certificate install.
 - Phase 11: Pairing window helpers.
 
-The public surface re-exports the SPAKE2+ primitives, the PASE message
-dataclasses, and the controller state machine so call sites do not need
-to know the module layout.
+The public surface re-exports the SPAKE2+ primitives, the commissioning
+message dataclasses, and the controller state machine so call sites do not
+need to know the module layout.
 """
 
 from __future__ import annotations
 
 from mash_py.commissioning.messages import (
+    CSR_NONCE_SIZE,
     ERR_CODE_AUTH_FAILED,
     ERR_CODE_BUSY,
+    ERR_CODE_CERT_INSTALL_FAILED,
+    ERR_CODE_CSR_FAILED,
     ERR_CODE_INTERNAL_ERROR,
     ERR_CODE_SUCCESS,
     ERR_CODE_TIMEOUT,
+    ERR_CODE_ZONE_TYPE_EXISTS,
+    MSG_CERT_INSTALL,
+    MSG_CERT_INSTALL_RESPONSE,
+    MSG_COMMISSIONING_COMPLETE,
     MSG_COMMISSIONING_ERROR,
+    MSG_CSR_REQUEST,
+    MSG_CSR_RESPONSE,
     MSG_PASE_COMPLETE,
     MSG_PASE_CONFIRM,
     MSG_PASE_REQUEST,
     MSG_PASE_RESPONSE,
+    CertInstall,
+    CertInstallResponse,
+    CommissioningComplete,
     CommissioningError,
+    CSRRequest,
+    CSRResponse,
     InvalidMessageError,
     MessageError,
     PASEComplete,
@@ -89,19 +104,28 @@ __all__ = [
     "CONFIRM_KEY_SIZE",
     "CONFIRM_MAC_SIZE",
     "CONTROLLER_IDENTITY",
+    "CSR_NONCE_SIZE",
     "DEVICE_IDENTITY",
     "ERR_CODE_AUTH_FAILED",
     "ERR_CODE_BUSY",
+    "ERR_CODE_CERT_INSTALL_FAILED",
+    "ERR_CODE_CSR_FAILED",
     "ERR_CODE_INTERNAL_ERROR",
     "ERR_CODE_SUCCESS",
     "ERR_CODE_TIMEOUT",
+    "ERR_CODE_ZONE_TYPE_EXISTS",
     "INFO_KCA_KCB",
     "INFO_K_CONFIRM",
     "INFO_K_ENCRYPT",
     "INFO_K_MAIN",
     "MHF_DKLEN",
     "MHF_ITERATIONS",
+    "MSG_CERT_INSTALL",
+    "MSG_CERT_INSTALL_RESPONSE",
+    "MSG_COMMISSIONING_COMPLETE",
     "MSG_COMMISSIONING_ERROR",
+    "MSG_CSR_REQUEST",
+    "MSG_CSR_RESPONSE",
     "MSG_PASE_COMPLETE",
     "MSG_PASE_CONFIRM",
     "MSG_PASE_REQUEST",
@@ -111,6 +135,11 @@ __all__ = [
     "SALT_PREFIX",
     "SCALAR_SIZE",
     "SHARED_SECRET_SIZE",
+    "CSRRequest",
+    "CSRResponse",
+    "CertInstall",
+    "CertInstallResponse",
+    "CommissioningComplete",
     "CommissioningError",
     "ConfirmationFailedError",
     "IdentityElementError",

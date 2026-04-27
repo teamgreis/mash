@@ -214,11 +214,114 @@ class CommissioningError:
     retry_after_ms: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Cert install dataclasses (DEC-085 — commissioning-pase.md §4.3)
+#
+# Post-PASE certificate-install messages on the commissioning ALPN. These
+# carry their own MsgType range (10–13, 20) to keep the namespace disjoint
+# from in-session renewal (30–33 on the operational ALPN). See
+# ``mash-py-spec-issues.md`` Issue #7 and DEC-085 for the rationale.
+# ---------------------------------------------------------------------------
+
+
+CSR_NONCE_SIZE: Final[int] = 32
+"""Spec: ``CSRRequest.nonce`` MUST be exactly 32 bytes
+(``commissioning-pase.md §4.3``)."""
+
+
+@dataclass(frozen=True, slots=True)
+class CSRRequest:
+    """Controller → Device. Asks the device to generate an operational key
+    pair and return a Certificate Signing Request.
+
+    Wire form: ``{1: 10, 2: nonce}``.
+
+    The 32-byte ``nonce`` is fresh per commissioning attempt and exists for
+    defense-in-depth against replay. The PASE-derived shared secret is the
+    primary anti-replay guarantee on this channel; the nonce is reserved
+    for future delegated-commissioning use (DEC-019) where a third party
+    relays the CSR.
+    """
+
+    nonce: bytes
+    """Random 32 bytes from a CSPRNG."""
+
+
+@dataclass(frozen=True, slots=True)
+class CSRResponse:
+    """Device → Controller. Returns a PKCS#10 CSR signed by a fresh P-256
+    key pair the device has just generated for this zone.
+
+    Wire form: ``{1: 11, 2: csr, 3: errorCode}``.
+
+    On non-zero ``error_code`` the device rejects the CSR step; ``csr`` may
+    be empty in that case. Otherwise ``csr`` is DER-encoded PKCS#10.
+    """
+
+    csr: bytes
+    error_code: int = ERR_CODE_SUCCESS
+
+
+@dataclass(frozen=True, slots=True)
+class CertInstall:
+    """Controller → Device. Delivers the Zone CA-signed operational
+    certificate plus the trust anchor (Zone CA cert) and zone metadata.
+
+    Wire form: ``{1: 12, 2: operationalCert, 3: caCert, 4: zoneType, 5: zonePriority}``.
+
+    ``zone_type`` is one of the values in DEC-060 (1=GRID, 2=LOCAL, 3=TEST).
+    ``zone_priority`` is 1 or 2 (controller-assigned within this zone type).
+    The device MUST verify the chain ``operational_cert ← ca_cert`` and
+    that ``operational_cert.SubjectPublicKeyInfo`` matches the public key
+    in the CSR it just sent. See ``commissioning-pase.md §4.3``.
+    """
+
+    operational_cert: bytes
+    ca_cert: bytes
+    zone_type: int
+    zone_priority: int
+
+
+@dataclass(frozen=True, slots=True)
+class CertInstallResponse:
+    """Device → Controller. Acks (or rejects) cert installation.
+
+    Wire form: ``{1: 13, 2: errorCode}``.
+
+    ``error_code`` is 0 on success; on failure it is one of:
+    ``ERR_CODE_CERT_INSTALL_FAILED`` (4), ``ERR_CODE_BUSY`` (5),
+    ``ERR_CODE_ZONE_TYPE_EXISTS`` (10). On a non-zero code the device does
+    NOT send ``CommissioningComplete``; the controller MUST treat the
+    commissioning attempt as failed and close the connection.
+    """
+
+    error_code: int = ERR_CODE_SUCCESS
+
+
+@dataclass(frozen=True, slots=True)
+class CommissioningComplete:
+    """Device → Controller. Terminator: signals the device has durably
+    installed the operational cert and is ready to accept an operational
+    TLS reconnection on ``mash/1``.
+
+    Wire form: ``{1: 20}`` — empty payload.
+
+    Sent only after ``CertInstallResponse{error_code = 0}``. The device
+    MUST close the commissioning connection immediately after sending this
+    frame (``security.md §4.5``).
+    """
+
+
 PASEMessage = Union[
     PASERequest,
     PASEResponse,
     PASEConfirm,
     PASEComplete,
+    CSRRequest,
+    CSRResponse,
+    CertInstall,
+    CertInstallResponse,
+    CommissioningComplete,
     CommissioningError,
 ]
 
@@ -266,6 +369,45 @@ def _to_cbor(msg: PASEMessage) -> dict[int, object]:
             2: bytes(msg.confirmation),
             3: msg.error_code,
         }
+    if isinstance(msg, CSRRequest):
+        _check_size("nonce", msg.nonce, CSR_NONCE_SIZE)
+        return {1: MSG_CSR_REQUEST, 2: msg.nonce}
+    if isinstance(msg, CSRResponse):
+        if not isinstance(msg.csr, (bytes, bytearray)):
+            raise InvalidMessageError("CSRResponse.csr must be bytes")
+        return {
+            1: MSG_CSR_RESPONSE,
+            2: bytes(msg.csr),
+            3: msg.error_code,
+        }
+    if isinstance(msg, CertInstall):
+        if not isinstance(msg.operational_cert, (bytes, bytearray)):
+            raise InvalidMessageError("CertInstall.operational_cert must be bytes")
+        if not isinstance(msg.ca_cert, (bytes, bytearray)):
+            raise InvalidMessageError("CertInstall.ca_cert must be bytes")
+        if msg.zone_type < 0 or msg.zone_type > 255:
+            raise InvalidMessageError(
+                f"CertInstall.zone_type out of range: {msg.zone_type}"
+            )
+        if msg.zone_priority < 0 or msg.zone_priority > 255:
+            raise InvalidMessageError(
+                f"CertInstall.zone_priority out of range: {msg.zone_priority}"
+            )
+        return {
+            1: MSG_CERT_INSTALL,
+            2: bytes(msg.operational_cert),
+            3: bytes(msg.ca_cert),
+            4: msg.zone_type,
+            5: msg.zone_priority,
+        }
+    if isinstance(msg, CertInstallResponse):
+        if msg.error_code < 0 or msg.error_code > 255:
+            raise InvalidMessageError(
+                f"CertInstallResponse.error_code out of range: {msg.error_code}"
+            )
+        return {1: MSG_CERT_INSTALL_RESPONSE, 2: msg.error_code}
+    if isinstance(msg, CommissioningComplete):
+        return {1: MSG_COMMISSIONING_COMPLETE}
     if isinstance(msg, CommissioningError):
         out: dict[int, object] = {1: MSG_COMMISSIONING_ERROR, 2: msg.error_code}
         # Field 3 is ``omitempty`` in mash-go (messages.go:177). Match
@@ -321,6 +463,16 @@ def decode(data: bytes) -> PASEMessage:
             return _decode_pase_confirm(obj)
         case 4:  # MSG_PASE_COMPLETE
             return _decode_pase_complete(obj)
+        case 10:  # MSG_CSR_REQUEST
+            return _decode_csr_request(obj)
+        case 11:  # MSG_CSR_RESPONSE
+            return _decode_csr_response(obj)
+        case 12:  # MSG_CERT_INSTALL
+            return _decode_cert_install(obj)
+        case 13:  # MSG_CERT_INSTALL_RESPONSE
+            return _decode_cert_install_response(obj)
+        case 20:  # MSG_COMMISSIONING_COMPLETE
+            return CommissioningComplete()
         case 255:  # MSG_COMMISSIONING_ERROR
             return _decode_commissioning_error(obj)
         case _:
@@ -358,6 +510,51 @@ def _decode_pase_complete(obj: dict[int, object]) -> PASEComplete:
             f"got {len(confirm)}"
         )
     return PASEComplete(confirmation=confirm, error_code=error_code)
+
+
+def _decode_csr_request(obj: dict[int, object]) -> CSRRequest:
+    nonce = _require_bytes(obj, 2, "CSRRequest.nonce", expected=CSR_NONCE_SIZE)
+    return CSRRequest(nonce=nonce)
+
+
+def _decode_csr_response(obj: dict[int, object]) -> CSRResponse:
+    csr = _require_bytes(obj, 2, "CSRResponse.csr", expected=None)
+    error_code = obj.get(3, ERR_CODE_SUCCESS)
+    if not isinstance(error_code, int) or error_code < 0 or error_code > 255:
+        raise InvalidMessageError("CSRResponse.errorCode must be a uint8")
+    if error_code == ERR_CODE_SUCCESS and len(csr) == 0:
+        raise InvalidMessageError("CSRResponse.csr must be non-empty on success")
+    return CSRResponse(csr=csr, error_code=error_code)
+
+
+def _decode_cert_install(obj: dict[int, object]) -> CertInstall:
+    operational_cert = _require_bytes(
+        obj, 2, "CertInstall.operationalCert", expected=None
+    )
+    if len(operational_cert) == 0:
+        raise InvalidMessageError("CertInstall.operationalCert must be non-empty")
+    ca_cert = _require_bytes(obj, 3, "CertInstall.caCert", expected=None)
+    if len(ca_cert) == 0:
+        raise InvalidMessageError("CertInstall.caCert must be non-empty")
+    zone_type = obj.get(4)
+    if not isinstance(zone_type, int) or zone_type < 0 or zone_type > 255:
+        raise InvalidMessageError("CertInstall.zoneType must be a uint8")
+    zone_priority = obj.get(5)
+    if not isinstance(zone_priority, int) or zone_priority < 0 or zone_priority > 255:
+        raise InvalidMessageError("CertInstall.zonePriority must be a uint8")
+    return CertInstall(
+        operational_cert=operational_cert,
+        ca_cert=ca_cert,
+        zone_type=zone_type,
+        zone_priority=zone_priority,
+    )
+
+
+def _decode_cert_install_response(obj: dict[int, object]) -> CertInstallResponse:
+    error_code = obj.get(2)
+    if not isinstance(error_code, int) or error_code < 0 or error_code > 255:
+        raise InvalidMessageError("CertInstallResponse.errorCode must be a uint8")
+    return CertInstallResponse(error_code=error_code)
 
 
 def _decode_commissioning_error(obj: dict[int, object]) -> CommissioningError:
@@ -417,6 +614,7 @@ def peek_msg_type(data: bytes) -> int:
 
 
 __all__ = [
+    "CSR_NONCE_SIZE",
     "ERR_CODE_AUTH_FAILED",
     "ERR_CODE_BUSY",
     "ERR_CODE_CERT_INSTALL_FAILED",
@@ -435,6 +633,11 @@ __all__ = [
     "MSG_PASE_CONFIRM",
     "MSG_PASE_REQUEST",
     "MSG_PASE_RESPONSE",
+    "CSRRequest",
+    "CSRResponse",
+    "CertInstall",
+    "CertInstallResponse",
+    "CommissioningComplete",
     "CommissioningError",
     "InvalidMessageError",
     "MessageError",
