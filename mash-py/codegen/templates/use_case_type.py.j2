@@ -1,0 +1,31 @@
+"""Generated use-case-type registry. DO NOT EDIT — regenerate via ``make generate``.
+
+Source: ``docs/features/protocol-versions.yaml`` (``use_case_types`` block).
+"""
+
+from __future__ import annotations
+
+from enum import IntEnum
+
+
+class UseCaseType(IntEnum):
+    """Wire identifier for each use case the spec defines.
+
+    The Go implementation keeps these as ``UseCaseName`` string
+    constants in ``pkg/usecase/types.go`` and an ``UseCaseID`` integer
+    type. Python collapses both into a single :class:`IntEnum` whose
+    members carry the human-readable short code as the name and the
+    wire id as the value.
+    """
+
+{% for t in types %}
+    {{ t.name }} = 0x{{ "%02X" % t.id }}
+    """{{ t.description }}"""
+
+{% endfor %}
+    @classmethod
+    def name_of(cls, value: int) -> str:
+        try:
+            return cls(value).name
+        except ValueError:
+            return "UNKNOWN"

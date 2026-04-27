@@ -1,0 +1,27 @@
+"""Generated feature-type registry. DO NOT EDIT — regenerate via ``make generate``.
+
+Source: ``docs/features/protocol-versions.yaml``.
+"""
+
+from __future__ import annotations
+
+from enum import IntEnum
+
+
+class FeatureType(IntEnum):
+    """Wire identifier for each feature defined in the protocol registry.
+
+    Keep in sync with ``mash-go/pkg/model/feature_type_gen.go``.
+    """
+
+{% for t in types %}
+    {{ upper_snake(t.name) }} = 0x{{ "%02X" % t.id }}
+    """{{ t.description }}"""
+
+{% endfor %}
+    @classmethod
+    def name_of(cls, value: int) -> str:
+        try:
+            return cls(value).name
+        except ValueError:
+            return "UNKNOWN"

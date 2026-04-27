@@ -1,0 +1,99 @@
+"""Generated use case definitions. DO NOT EDIT — regenerate via ``make generate``.
+
+Source: ``docs/usecases/{{ spec_version }}/*.yaml``.
+
+The :data:`REGISTRY` mirrors ``mash-go/pkg/usecase/definitions_gen.go``;
+each entry is fully resolved (feature/attribute/command names carry the
+spec-manifest IDs alongside the human-readable strings).
+"""
+
+from __future__ import annotations
+
+from mash_py.model import UseCaseType
+from mash_py.usecase.types import (
+    AttributeRequirement,
+    CommandRequirement,
+    FeatureRequirement,
+    ScenarioDef,
+    UseCaseDef,
+)
+
+REGISTRY: dict[UseCaseType, UseCaseDef] = {
+{% for uc in use_cases %}
+    UseCaseType.{{ uc.name }}: UseCaseDef(
+        name=UseCaseType.{{ uc.name }},
+        id=0x{{ "%02X" % uc.id }},
+        full_name={{ uc.fullName | quote }},
+        description={{ uc.description | quote }},
+        spec_version={{ uc.specVersion | quote }},
+        major={{ uc.major }},
+        minor={{ uc.minor }},
+{% if uc.endpointTypes %}
+        endpoint_types=[{% for et in uc.endpointTypes %}{{ et | quote }}{% if not loop.last %}, {% endif %}{% endfor %}],
+{% endif %}
+        scenarios=[
+{% for s in uc.scenarios %}
+            ScenarioDef(
+                bit={{ s.bit }},
+                name={{ s.name | quote }},
+                description={{ s.description | quote }},
+{% if s.requires %}
+                requires=[{% for r in s.requires %}{{ r | quote }}{% if not loop.last %}, {% endif %}{% endfor %}],
+{% endif %}
+{% if s.requiresAny %}
+                requires_any=[{% for r in s.requiresAny %}{{ r | quote }}{% if not loop.last %}, {% endif %}{% endfor %}],
+{% endif %}
+{% if s.endpointTypes %}
+                endpoint_types=[{% for et in s.endpointTypes %}{{ et | quote }}{% if not loop.last %}, {% endif %}{% endfor %}],
+{% endif %}
+                features=[
+{% for f in s.features %}
+                    FeatureRequirement(
+                        feature_name={{ f.feature | quote }},
+                        feature_id=0x{{ "%02X" % f.feature_id }},
+{% if f.required %}
+                        required=True,
+{% endif %}
+{% if f.attributes %}
+                        attributes=[
+{% for a in f.attributes %}
+                            AttributeRequirement(name={{ a.name | quote }}, attr_id={{ a.attr_id }}{% if a.required_value is not none %}, required_value={{ a.required_value | py_bool }}{% endif %}),
+{% endfor %}
+                        ],
+{% endif %}
+{% if f.commands %}
+                        commands=[
+{% for c in f.commands %}
+                            CommandRequirement(name={{ c.name | quote }}, command_id={{ c.command_id }}),
+{% endfor %}
+                        ],
+{% endif %}
+{% if f.subscribe == "all" %}
+                        subscribe_all=True,
+{% endif %}
+                    ),
+{% endfor %}
+                ],
+            ),
+{% endfor %}
+        ],
+{% if uc.commands %}
+        commands=[{% for c in uc.commands %}{{ c | quote }}{% if not loop.last %}, {% endif %}{% endfor %}],
+{% endif %}
+    ),
+{% endfor %}
+}
+
+
+NAME_TO_ID: dict[UseCaseType, int] = {
+{% for uc in use_cases %}
+    UseCaseType.{{ uc.name }}: 0x{{ "%02X" % uc.id }},
+{% endfor %}
+}
+
+
+ID_TO_NAME: dict[int, UseCaseType] = {
+{% for uc in use_cases %}
+    0x{{ "%02X" % uc.id }}: UseCaseType.{{ uc.name }},
+{% endfor %}
+}

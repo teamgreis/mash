@@ -1,0 +1,271 @@
+"""Generated {{ feature.name }} feature. DO NOT EDIT — regenerate via ``make generate``.
+
+Source: ``docs/features/{{ feature_dir }}/{{ feature.revision }}.0.yaml``.
+{% if feature.description %}
+
+{{ feature.description }}
+{% endif %}
+"""
+
+from __future__ import annotations
+
+{% if has_dataclass or has_local_enums or needs_any %}
+{% if has_dataclass %}
+from dataclasses import dataclass
+{% endif %}
+{% if has_local_enums %}
+from enum import IntEnum
+{% endif %}
+{% if needs_any %}
+from typing import Any
+{% endif %}
+
+{% endif %}
+from mash_py.model import (
+    Access,
+    AttributeMetadata,
+{% if has_commands %}
+    CommandMetadata,
+{% endif %}
+    DataType,
+    Feature,
+    FeatureType,
+{% if has_commands %}
+    ParameterMetadata,
+{% endif %}
+)
+{% if shared_imports %}
+from mash_py.model.shared_gen import (
+{% for s in shared_imports %}
+    {{ s }},
+{% endfor %}
+)
+{% endif %}
+
+# ---------------------------------------------------------------------------
+# Feature revision
+# ---------------------------------------------------------------------------
+
+{{ revision_const }}: int = {{ feature.revision }}
+
+
+# ---------------------------------------------------------------------------
+# Attribute IDs
+# ---------------------------------------------------------------------------
+{% for a in feature.attributes %}
+
+{{ attribute_const(feature.name, a.name) }}: int = {{ a.id }}
+{% endfor %}
+
+{% if feature.enums %}
+# ---------------------------------------------------------------------------
+# Feature-local enums
+# ---------------------------------------------------------------------------
+
+{% for enum in feature.enums %}
+
+class {{ enum.name }}(IntEnum):
+    """{{ enum.description }}."""
+
+{% for v in enum.values %}
+    {{ v.name }} = 0x{{ "%02X" % v.value }}
+{% endfor %}
+
+{% endfor %}
+{% endif %}
+
+{% if array_object_structs %}
+# ---------------------------------------------------------------------------
+# Array-element dataclasses
+# ---------------------------------------------------------------------------
+{% for s in array_object_structs %}
+
+
+@dataclass(slots=True)
+class {{ s.name }}:
+    """Element of the ``{{ s.attr_name }}`` array."""
+
+{% for f in s.fields %}
+    {{ f.py_name }}: {{ f.py_type }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+
+{% if feature.commands %}
+# ---------------------------------------------------------------------------
+# Command IDs
+# ---------------------------------------------------------------------------
+{% for c in feature.commands %}
+
+{{ command_const(feature.name, c.name) }}: int = {{ c.id }}
+{% endfor %}
+{% for c in feature.commands %}
+{% if c.parameters %}
+
+
+# ``{{ c.name }}`` parameter IDs (CBOR integer keys per docs/interaction-model.md §7.1).
+{% for p in c.parameters %}
+{{ param_const(c.name, p.name) }}: int = {{ p.id }}
+{% endfor %}
+
+{{ upper_snake(c.name) }}_PARAM_NAME_TO_ID: dict[str, int] = {
+{% for p in c.parameters %}
+    {{ p.name | quote }}: {{ param_const(c.name, p.name) }},
+{% endfor %}
+}
+{% endif %}
+{% if c.response %}
+
+
+# ``{{ c.name }}`` response field IDs (CBOR integer keys per docs/interaction-model.md §7.2).
+{% for r in c.response %}
+{{ resp_const(c.name, r.name) }}: int = {{ r.id }}
+{% endfor %}
+
+{{ upper_snake(c.name) }}_RESP_NAME_TO_ID: dict[str, int] = {
+{% for r in c.response %}
+    {{ r.name | quote }}: {{ resp_const(c.name, r.name) }},
+{% endfor %}
+}
+{% endif %}
+{% endfor %}
+
+
+# ---------------------------------------------------------------------------
+# Command request / response dataclasses
+# ---------------------------------------------------------------------------
+{% for c in feature.commands %}
+{% if c.parameters %}
+
+
+@dataclass(slots=True)
+class {{ c.name | pascal }}Request:
+    """Parameters for the ``{{ c.name }}`` command."""
+
+{% for p in dataclass_order(c.parameters) %}
+    {{ snake(p.name) }}: {{ py_param_type(p) }}{% if not p.required %} | None = None{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if c.response and not c.is_simple_response %}
+
+
+@dataclass(slots=True)
+class {{ c.name | pascal }}Response:
+    """Response shape for the ``{{ c.name }}`` command."""
+
+{% for r in dataclass_order(c.response) %}
+    {{ snake(r.name) }}: {{ py_param_type(r) }}{% if not r.required %} | None = None{% endif %}
+
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+
+# ---------------------------------------------------------------------------
+# Feature class
+# ---------------------------------------------------------------------------
+
+
+class {{ feature.name }}(Feature):
+    """{{ feature.description }}"""
+
+    def __init__(self) -> None:
+        super().__init__(FeatureType.{{ upper_snake(feature.name) }}, {{ revision_const }})
+{% for a in feature.attributes %}
+
+        self.add_attribute(
+            AttributeMetadata(
+                id={{ attribute_const(feature.name, a.name) }},
+                name={{ a.name | quote }},
+                type={{ data_type_const(a.type) }},
+                access={{ access_const(a.access) }},
+{% if a.nullable %}
+                nullable=True,
+{% endif %}
+{% if a.default_expr %}
+                default={{ a.default_expr }},
+{% endif %}
+{% if a.min_expr %}
+                min_value={{ a.min_expr }},
+{% endif %}
+{% if a.max_expr %}
+                max_value={{ a.max_expr }},
+{% endif %}
+{% if a.unit %}
+                unit={{ a.unit | quote }},
+{% endif %}
+{% if a.description %}
+                description={{ a.description | quote }},
+{% endif %}
+            )
+        )
+{% endfor %}
+{% for c in feature.commands %}
+
+        self.add_command(
+            CommandMetadata(
+                id={{ command_const(feature.name, c.name) }},
+                name={{ c.name | quote }},
+{% if c.description %}
+                description={{ c.description | quote }},
+{% endif %}
+{% if c.parameters %}
+                parameters=[
+{% for p in c.parameters %}
+                    ParameterMetadata(id={{ p.id }}, name={{ p.name | quote }}, type={{ data_type_const(p.type) }}, required={{ p.required | py_bool }}),
+{% endfor %}
+                ],
+{% endif %}
+            )
+        )
+{% endfor %}
+
+{% for a in feature.attributes %}
+{% set getter_name = snake(a.name) %}
+{% set setter_name = "set_" ~ snake(a.name) %}
+{% set clear_name = "clear_" ~ snake(a.name) %}
+{% set const = attribute_const(feature.name, a.name) %}
+{% set py_type = a.py_type %}
+    def {{ getter_name }}(self) -> {{ py_type }}{% if a.nullable %} | None{% endif %}:
+        """{{ a.description }}"""
+        value = self.read_attribute({{ const }})
+{% if a.nullable %}
+        return value  # may be None
+{% else %}
+{% if a.default_expr %}
+        return value if value is not None else {{ a.default_expr }}
+{% else %}
+        return value if value is not None else {{ py_zero_value(a.type) }}
+{% endif %}
+{% endif %}
+
+{% if a.access in ("readWrite", "read") %}
+    def {{ setter_name }}(self, value: {{ py_type }}{% if a.nullable %} | None{% endif %}) -> None:
+        """Set ``{{ a.name }}``."""
+        self.write_attribute({{ const }}, value)
+
+{% if a.nullable %}
+    def {{ clear_name }}(self) -> None:
+        """Clear ``{{ a.name }}`` (set to ``None``)."""
+        self.write_attribute({{ const }}, None)
+
+{% endif %}
+{% else %}
+    def {{ setter_name }}(self, value: {{ py_type }}{% if a.nullable %} | None{% endif %}) -> None:
+        """Internal setter for ``{{ a.name }}`` (declared ``{{ a.access }}``).
+
+        The wire-side write path rejects external writes; this method is
+        for the device implementation to publish telemetry / state.
+        """
+        self.write_attribute({{ const }}, value)
+
+{% if a.nullable %}
+    def {{ clear_name }}(self) -> None:
+        """Clear ``{{ a.name }}`` (set to ``None``)."""
+        self.write_attribute({{ const }}, None)
+
+{% endif %}
+{% endif %}
+{% endfor %}

@@ -1,0 +1,19 @@
+"""Generated shared enums. DO NOT EDIT — regenerate via ``make generate``.
+
+Source: ``docs/features/_shared/{{ shared.version }}.yaml``.
+"""
+
+from __future__ import annotations
+
+from enum import IntEnum
+
+{% for enum in shared.enums %}
+
+class {{ enum.name }}(IntEnum):
+    """{{ enum.description }}."""
+
+{% for v in enum.values %}
+    {{ v.name }} = 0x{{ "%02X" % v.value }}
+{% endfor %}
+
+{% endfor %}

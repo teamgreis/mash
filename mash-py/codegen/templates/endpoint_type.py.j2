@@ -1,0 +1,27 @@
+"""Generated endpoint-type registry. DO NOT EDIT — regenerate via ``make generate``.
+
+Source: ``docs/features/protocol-versions.yaml``.
+"""
+
+from __future__ import annotations
+
+from enum import IntEnum
+
+
+class EndpointType(IntEnum):
+    """Wire identifier for each endpoint type the spec defines.
+
+    Keep in sync with ``mash-go/pkg/model/endpoint_type_gen.go``.
+    """
+
+{% for t in types %}
+    {{ t.name }} = 0x{{ "%02X" % t.id }}
+    """{{ t.description }}"""
+
+{% endfor %}
+    @classmethod
+    def name_of(cls, value: int) -> str:
+        try:
+            return cls(value).name
+        except ValueError:
+            return "UNKNOWN"
