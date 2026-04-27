@@ -1046,7 +1046,7 @@ Check `mash-go/pkg/cert/generate.go` for the exact extension set.
 
 ### Phase 11 — Interaction Model Client (Read/Write/Subscribe/Invoke)
 
-**Status.** Pending.
+**Status.** ✅ Mostly complete (2026-04-27). Read / Write / Subscribe / Unsubscribe pass end-to-end against mash-go; Invoke is gated on Issue #11 (mash-go uses string-keyed parameter maps; spec specifies integer keys per ``§7.1``). Interop test for Invoke is marked ``xfail(strict=True)`` and will flip to passing once mash-go is updated. Issue #10 (Go's messageId off-by-one) also captured.
 
 **Goal.** Full request/response correlation for the controller side, with subscription notification dispatch.
 

@@ -503,6 +503,121 @@ mash-py is the controller in Phase 10. The spec divergence is not blocking — P
 
 ---
 
+### Issue #10 — Initial messageId: spec says "Start at 1," mash-go emits `2`
+
+**Status:** Open (mash-go bug)
+**Surfaced in:** Phase 11 — InteractionClient implementation (2026-04-27)
+
+**The divergence.**
+
+`docs/interaction-model.md §3.5` is unambiguous:
+
+> **Allocation Rules:**
+> 1. Start at 1 for new connections
+> 2. Increment monotonically for each request
+> 3. On overflow (reaching 2³²-1), wrap to 1 (skipping 0)
+
+mash-go (`pkg/interaction/client.go:54`, `93–101`) initialises the counter at `1` and uses `atomic.AddUint32(&c.nextMsgID, 1)`, which **pre-increments**. The first request from a Go client therefore carries `messageId = 2`, not `1`. mash-py honours the spec literally: first request → `messageId = 1`.
+
+**Severity.** Cosmetic. Both peers accept any non-zero messageId, so interop is unaffected. The divergence is visible in wire dumps and protocol logs — a controller-side log analyser comparing Go and Python traces will see different starting ids.
+
+**Disposition.** mash-go bug. The fix is one line:
+
+```go
+// Current (pkg/interaction/client.go:54):
+nextMsgID: 1,
+// Fix:
+nextMsgID: 0,  // first AddUint32 returns 1 per spec §3.5
+```
+
+The wraparound check (`if id != wire.NotificationMessageID`) already protects the case where the counter rolls past `0xFFFF_FFFF` back to `0`.
+
+**Why file it as a portability issue rather than skip.** This issue is a tell that mash-go's wire-level behaviour was occasionally written-then-tested rather than spec-then-tested. The same code-shape risk (off-by-one introduced by a `&counter, 1` paired with a `1` initialiser) is likely to recur elsewhere; flagging keeps the principle visible.
+
+**Related.** Phase 11 of the TDD plan; Issue #11 (also surfaced in Phase 11).
+
+---
+
+### Issue #11 — Invoke command parameters: spec specifies integer keys, mash-go uses string keys
+
+**Status:** Open (mash-go bug — interop-breaking for Invoke)
+**Surfaced in:** Phase 11 — interop test against `mash-device` removeZone command (2026-04-27)
+
+**The divergence.**
+
+`docs/interaction-model.md §7.1` shows command parameters as an integer-keyed CBOR map:
+
+```cbor
+5: {
+  1: 1,              // commandId: SetLimit
+  2: {               // command parameters
+    1: 6000000,      // consumptionLimit  ← INTEGER key
+    4: 2             // cause: LOCAL_PROTECTION
+  }
+}
+```
+
+This is consistent with the protocol-wide design choice in `§2.2`:
+
+> All CBOR maps use integer keys for efficiency.
+
+mash-go (`pkg/service/dispatch/protocol_handler.go:738`) decodes Invoke parameters as `map[string]any` and silently drops every entry whose CBOR key isn't a string:
+
+```go
+func convertMapAnyAnyToStringAny(m map[any]any) map[string]any {
+    result := make(map[string]any)
+    for k, v := range m {
+        if key, ok := k.(string); ok {
+            result[key] = v   // integer-keyed entries are dropped silently
+        }
+    }
+    return result
+}
+```
+
+Downstream, `pkg/service/remove_zone_handler.go:81` looks up parameters by name constants (`features.RemoveZoneParamZoneID = "zoneId"`), and the response payload is built the same way (`{"removed": true}` instead of `{1: true}`).
+
+**Severity.** Hard interop break for the Invoke operation. A spec-conformant client (mash-py, integer keys) sends `{1: "zone-id"}`; mash-go's decoder drops the only entry, `removeZone` finds no `zoneId`, returns `INVALID_PARAMETER`. Symmetrically, a mash-go-style invoke against a spec-conformant device fails the same way. Read / Write / Subscribe are unaffected — they correctly use integer keys throughout.
+
+**Why integer keys are correct (per the spec design).**
+
+1. **Wire size.** Typical command names are 8–20 chars. With ten parameters that's ~150 bytes of overhead in keys alone vs ~10 bytes for integer keys. At the 8 KB hard ceiling (DEC-069), those bytes come out of payload room.
+2. **MCU dispatch cost.** DEC-003 targets 256 KB ESP32-class MCUs. Integer-keyed parameters allow `switch (param_id)` dispatch into a packed struct; string-keyed parameters force `strcmp` per key plus heap allocation for the key strings unless the parser is unusually careful.
+3. **Consistency.** Every other map in the protocol is integer-keyed (Read response §4.2, Write request/response §5.1/§5.2, Subscribe priming §6.2, Notification §3.3, Error §8.2). Invoke params being the lone string-keyed map breaks the codec author's reasonable invariant "all map keys are int."
+4. **Schema discipline.** Explicit parameter IDs in YAML force allocation review, the same way attribute IDs do; names alone allow silent collisions across feature versions.
+5. **Identity stability.** Renaming a parameter is display-only with integer IDs; with string keys, every rename is a wire-breaking change for every existing peer.
+
+The string-key approach offers exactly one benefit: human-readable wire dumps. That is real but mitigated by tooling (`mash-log` already pretty-names attribute IDs).
+
+**Disposition.** mash-go bug. Fix in `pkg/service/dispatch/protocol_handler.go` and the per-command handlers:
+
+1. Decode Invoke parameters as `map[uint8]any` (or `map[uint16]any`) keyed by parameter ID, with a converter that accepts both string and integer keys during a deprecation window.
+2. Update each command handler (`pkg/service/remove_zone_handler.go` and friends) to look up by parameter ID constants instead of name strings. Generated handlers in `pkg/features/*_gen.go` already have access to the parameter list — codegen needs to synthesise ID constants and ID-keyed lookups.
+3. Build response payloads with integer keys.
+4. Update `pkg/interaction/client.go::Invoke` signature: parameters become `map[uint8]any` or a typed payload struct.
+
+**Codegen impact.** Each command in the YAML feature spec needs explicit parameter `id:` fields, parallel to attribute IDs. `device-info/1.0.yaml` for example would change:
+
+```yaml
+commands:
+  - id: 0x10
+    name: removeZone
+    parameters:
+      - { id: 1, name: zoneId, type: string, required: true }   # ← add id: 1
+    response:
+      - { id: 1, name: removed, type: bool, required: true }    # ← add id: 1
+```
+
+This is a small YAML migration touching every command in every feature; the codegen template change is mechanical.
+
+**mash-py disposition.** mash-py is spec-faithful as of Phase 11 (sends integer keys, expects integer-keyed responses). The Phase 11 interop test for Invoke is marked `xfail(strict=True)` — it expects the divergence today and will flip to passing the moment mash-go is updated.
+
+**Open question — controller-side bidirectional Invoke.** §11 mentions devices invoking commands on controllers (SMGW/EMS scenarios). When that lands in mash-py (Phase 13+), the same encoding will apply. Settling integer-keyed parameters now avoids two divergence points later.
+
+**Related.** Phase 11 of the TDD plan; Issue #10 (also Phase 11). DEC-069 (8 KB max msg), DEC-003 (256 KB MCU target).
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.
