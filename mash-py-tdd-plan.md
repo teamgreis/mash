@@ -1287,7 +1287,7 @@ mash-go fixes landed in the same workstream: `pkg/wire/message.go::ExtractReadAt
 
 ### Phase 16 — Subscriptions & Notifications
 
-**Status.** Pending.
+**Status.** Done (2026-04-27). DEC-086 ratified seven spec gaps; mash-go updated in lockstep.
 
 **Goal.** Python device emits notifications when subscribed attributes change. Python controller receives and routes them.
 
