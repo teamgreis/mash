@@ -149,6 +149,14 @@ type Config struct {
 	// dialer falls back to the literal Target so the flag is strictly
 	// safer than its absence.
 	SRVResolve bool
+
+	// SRVDiscriminator, when non-zero, filters the SRV-resolve commissionable
+	// browse to the device whose TXT discriminator matches. Required when
+	// multiple commissionable records are visible on the LAN (typical in
+	// CI / dev environments with stale mDNS caches). Per DEC-088, the
+	// canonical commissioning instance name is MASH-NNNN where NNNN is the
+	// zero-padded discriminator -- this flag honours that disambiguator.
+	SRVDiscriminator uint16
 }
 
 // ConnState represents the connection lifecycle state.
@@ -347,7 +355,7 @@ func New(config *Config) *Runner {
 	// port via mDNS (DEC-082 two-port support).
 	r.dialer = NewDialer(config.InsecureSkipVerify, r.debugf)
 	if config.SRVResolve {
-		r.dialer = NewSRVResolvingDialer(r.dialer, r.debugf)
+		r.dialer = NewSRVResolvingDialer(r.dialer, r.debugf, config.SRVDiscriminator)
 	}
 
 	// Initialize connection manager with callbacks into Runner for
@@ -1021,9 +1029,20 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	if needsDisconnectWait {
 		maxAttempts = 5
 	}
+	// When -srv-resolve is enabled, the dialer can resolve a per-ALPN
+	// SRV port that overrides the literal -target. This makes handleConnect
+	// honour DEC-082 two-port deployments (mash-py): the commissioning
+	// service may live on a different port from the operational one.
+	dialTarget := target
+	if resolver, ok := r.dialer.(targetResolver); ok {
+		dialTarget = resolver.ResolveTarget(ctx, target, commissioning)
+		if dialTarget != target {
+			r.debugf("handleConnect: srv-resolve %s -> %s (commissioning=%v)", target, dialTarget, commissioning)
+		}
+	}
 	conn, err := dialWithRetry(ctx, maxAttempts, func() (*tls.Conn, error) {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		return tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		return tls.DialWithDialer(dialer, "tcp", dialTarget, tlsConfig)
 	})
 	if err != nil {
 		state.Set(StateEndTime, time.Now())

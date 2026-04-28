@@ -92,6 +92,7 @@ var (
 	shuffleSeed     = flag.Int64("shuffle-seed", 0, "Seed for shuffle randomization (0 = auto-generate)")
 	strictLifecycle = flag.Bool("strict-lifecycle", false, "Fail tests when teardown cleanup invariants are violated")
 	srvResolve      = flag.Bool("srv-resolve", false, "Resolve TCP port via mDNS SRV records per ALPN before each dial (required for DEC-082 two-port devices; falls back to -target on mDNS failure)")
+	srvDiscriminator = flag.Uint("discriminator", 0, "Filter -srv-resolve commissionable browse to this discriminator (per DEC-088 MASH-NNNN). Required on shared LANs where stale records may be visible.")
 	spake2plusVecs  = flag.String("spake2plus-vectors", "", "Run SPAKE2+ algorithmic conformance vectors from the given JSON file and exit (Phase 7B). When set, all other flags except -verbose are ignored.")
 )
 
@@ -211,6 +212,7 @@ func run() int {
 		ShuffleSeed:        *shuffleSeed,
 		StrictLifecycle:    *strictLifecycle,
 		SRVResolve:         *srvResolve,
+		SRVDiscriminator:   uint16(*srvDiscriminator),
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
 	if protocolLogger != nil {
