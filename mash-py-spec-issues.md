@@ -155,7 +155,9 @@ A. **Update mash-go to match the spec.** SHA-1 SKI is RFC 5280 method 1, ubiquit
 B. **Update the spec to match mash-go.** SHA-256[:20] SKI is more collision-resistant (DEC-040 made a similar argument for full-cert fingerprint as device identity). Subject-DN composition could be argued either way. Cost: revise `commissioning-pase.md` lines 388-475, file a DEC, possibly document the SKI choice as a deliberate non-default.
 C. **Acknowledge both, treat operational-cert content as implementation-defined within constraints.** Spec specifies only what TLS verification depends on (signature alg, validity, AKI/SKI consistency *within an implementation*) and lets each side pick its hash and subject layout. Cost: weakest interop guarantee; Phase 22 cross-implementation cert tests become very narrow.
 
-**Disposition.** Open — needs spec-owner decision. mash-py implements the spec as written (SHA-1 SKI, spec-conformant subject DN, -5 min NotBefore, uppercase device-ID hex) and tests against itself. Phase 22 will be the forcing function: the cross-language conformance run will surface whichever mismatch actually breaks chain validation in practice, and the resolution chosen there will dictate which side updates.
+**Disposition.** Open — needs spec-owner decision. mash-py implements the spec as written (SHA-1 SKI, spec-conformant subject DN, -5 min NotBefore, uppercase device-ID hex) and tests against itself. Phase 22 was the forcing function: the cross-language conformance run will surface whichever mismatch actually breaks chain validation in practice, and the resolution chosen there will dictate which side updates.
+
+**Phase 22 finding (2026-04-28).** Cross-implementation TLS handshake works in practice: a mash-go controller drives PASE + cert install + operational mTLS against `mash-py-device` end-to-end (auto-PICS reads 156 PICS items, which means the entire Read pipeline including chain validation succeeded). The five-field divergence is therefore **benign at the chain-validation layer** — the AKI-matches-SKI consistency check that worried us doesn't bite because both Go's and Python's TLS implementations happen to be lenient about this hint when issuer DN matches the CA cert's subject. The "weakest interop guarantee" risk in option C downgrades from theoretical to "observed working." Decision still pending; the impact assessment can be downgraded in any future spec-owner review.
 
 **Why mash-py implements the spec rather than mash-go's behavior.**
 - Per the project's stated multi-implementation goal (DEC-082 framing), the spec is the contract. Cloning mash-go would defeat the portability check that mash-py exists to perform.
@@ -175,8 +177,9 @@ C. **Acknowledge both, treat operational-cert content as implementation-defined 
 
 ### Issue #3 — `mash-test` is single-port-shaped at the harness layer
 
-**Status:** Deferred (until mash-py Phase 4 ships)
+**Status:** ✅ Resolved (Phase 22, 2026-04-28)
 **Surfaced during:** post-DEC-083 review of conformance coverage (2026-04-25)
+**Resolution:** Phase 22 landed `-srv-resolve` and `-discriminator` flags on `mash-go/cmd/mash-test`. The runner now browses `_mash-comm._tcp` per the `mash-comm/1` ALPN, filters by discriminator (per DEC-088 `MASH-NNNN`), and dials the SRV-advertised port. `handleConnect` consults the SRV-resolving dialer via a `targetResolver` interface so the precondition-connect path (auto-PICS) honours the flag too. Operational SRV resolution skipped for now (zone-id filter unknown at construction time); operational dials use the literal target — a deferred follow-up. Verified end-to-end against mash-py's two-port deployment (`mash-py-device`); TC-COMM-001 passes, auto-PICS discovers 156 items.
 
 **Implicit assumption.**
 DEC-082 declares two-port deployment conformant alongside single-port and states that "mDNS SRV records carry the actual port per service." A real controller dialing the SRV-advertised port is indifferent to deployment shape. But `mash-go/cmd/mash-test` — which is itself a synthetic controller used to verify conformance — accepts a single `-target host:port` flag and dials it for both ALPN values (`internal/testharness/runner/runner.go:825-831`). The runner reads SRV records (`discovery_handlers.go:591-594`) for *verification* assertions but never *uses* them to drive TCP connections.
@@ -856,6 +859,8 @@ C. **Replace §6.5 with "fixed floor only."** Mandates the constant-time floor a
 - `mash-go/pkg/commissioning/session.go` — already correct under proposed §6.5.
 
 **Related.** DEC-047 (consolidated error codes, source of §6.5); §2.5 (constant-time MAC comparison — same family of mitigation); §5.3 (device-class compute bounds).
+
+**Phase 22 update (2026-04-28).** No conformance test exercises the timing-oracle scenario (no negative-timing case in the YAML corpus), so Phase 22 did not surface this issue. Both reference impls continue to ship the constant-time floor; spec text remains the only loose end.
 
 ---
 
