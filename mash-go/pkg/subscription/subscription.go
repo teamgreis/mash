@@ -23,30 +23,12 @@ const (
 	DefaultMaxAttributesPerSub = 100
 )
 
-// HeartbeatMode specifies what content is sent in heartbeat notifications.
-type HeartbeatMode uint8
-
-const (
-	// HeartbeatEmpty sends only subscriptionId and timestamp.
-	HeartbeatEmpty HeartbeatMode = iota
-
-	// HeartbeatFull sends all subscribed attributes with current values.
-	HeartbeatFull
-)
-
-// String returns a human-readable heartbeat mode name.
-func (m HeartbeatMode) String() string {
-	switch m {
-	case HeartbeatEmpty:
-		return "EMPTY"
-	case HeartbeatFull:
-		return "FULL"
-	default:
-		return "UNKNOWN"
-	}
-}
-
 // Config holds subscription manager configuration.
+//
+// Per DEC-086, heartbeat content is fixed: every heartbeat carries the
+// full current values of subscribed attributes (the spec rules out an
+// empty-body heartbeat — interaction-model.md §6.5). The earlier
+// HeartbeatMode toggle was removed when the spec was tightened.
 type Config struct {
 	// MaxSubscriptions is the maximum number of subscriptions allowed.
 	MaxSubscriptions int
@@ -54,10 +36,9 @@ type Config struct {
 	// MaxAttributesPerSub is the maximum attributes per subscription.
 	MaxAttributesPerSub int
 
-	// HeartbeatMode specifies heartbeat content (empty or full).
-	HeartbeatMode HeartbeatMode
-
-	// SuppressBounceBack enables bounce-back suppression.
+	// SuppressBounceBack enables bounce-back suppression. DEC-086
+	// makes this MUST behavior; the field is kept for test injection
+	// of the off-state but production callers should leave it true.
 	SuppressBounceBack bool
 
 	// AutoCorrectIntervals swaps min/max if min > max.
@@ -69,7 +50,6 @@ func DefaultConfig() Config {
 	return Config{
 		MaxSubscriptions:     DefaultMaxSubscriptions,
 		MaxAttributesPerSub:  DefaultMaxAttributesPerSub,
-		HeartbeatMode:        HeartbeatFull,
 		SuppressBounceBack:   true,
 		AutoCorrectIntervals: false,
 	}

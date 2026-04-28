@@ -200,6 +200,11 @@ func TestSubscriptionMultipleAttributes(t *testing.T) {
 }
 
 func TestManagerSubscribe(t *testing.T) {
+	// DEC-086: Subscribe no longer fires a priming notification
+	// through the OnNotification callback. The priming values live
+	// in the Subscribe Response that the *caller* (the protocol
+	// handler / dispatcher) builds. The manager just stores them as
+	// the bounce-back baseline.
 	m := NewManager()
 
 	currentValues := map[uint16]any{
@@ -207,11 +212,9 @@ func TestManagerSubscribe(t *testing.T) {
 		21: int64(5000000),
 	}
 
-	var primingReceived bool
-	var primingNotification Notification
+	var spuriousNotifications []Notification
 	m.OnNotification(func(n Notification) {
-		primingReceived = true
-		primingNotification = n
+		spuriousNotifications = append(spuriousNotifications, n)
 	})
 
 	id, err := m.Subscribe(1, 0x0003, nil, time.Second, 60*time.Second, currentValues)
@@ -220,19 +223,26 @@ func TestManagerSubscribe(t *testing.T) {
 	}
 
 	if id == 0 {
-		t.Error("Subscribe() returned ID = 0")
+		t.Error("Subscribe() returned ID = 0 (reserved per §3.3 / DEC-086)")
 	}
 
-	if !primingReceived {
-		t.Error("Priming notification was not sent")
+	// DEC-086 forbids the spurious priming wire emission.
+	if len(spuriousNotifications) != 0 {
+		t.Errorf("Subscribe must NOT fire OnNotification (DEC-086 priming uniqueness); "+
+			"got %d notifications", len(spuriousNotifications))
 	}
 
-	if !primingNotification.IsPriming {
-		t.Error("Notification should have IsPriming = true")
+	// The subscription itself MUST have remembered the priming values
+	// so subsequent bounce-back checks compare against them.
+	sub, getErr := m.Get(id)
+	if getErr != nil {
+		t.Fatalf("Get() error = %v", getErr)
 	}
-
-	if len(primingNotification.Attributes) != 2 {
-		t.Errorf("Priming should have 2 attributes, got %d", len(primingNotification.Attributes))
+	sub.mu.RLock()
+	gotLast := len(sub.lastValues)
+	sub.mu.RUnlock()
+	if gotLast != 2 {
+		t.Errorf("Subscription should hold 2 priming values for bounce-back, got %d", gotLast)
 	}
 
 	if m.Count() != 1 {
@@ -351,9 +361,12 @@ func TestManagerNotifyChange(t *testing.T) {
 }
 
 func TestManagerHeartbeat(t *testing.T) {
-	config := DefaultConfig()
-	config.HeartbeatMode = HeartbeatFull
-	m := NewManagerWithConfig(config)
+	// DEC-086: heartbeats always carry full current values; the
+	// HeartbeatMode toggle was removed. The manager also no longer
+	// fires a wire-callback for priming (priming lives in the
+	// Subscribe Response only), so this test asserts on the heartbeat
+	// notification alone.
+	m := NewManager()
 
 	var notifications []Notification
 	var mu sync.Mutex
@@ -377,25 +390,16 @@ func TestManagerHeartbeat(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Should have priming + heartbeat
-	if len(notifications) < 2 {
-		t.Fatalf("Expected at least 2 notifications (priming + heartbeat), got %d", len(notifications))
+	if len(notifications) == 0 {
+		t.Fatal("Expected at least one heartbeat notification, got none")
 	}
-
-	// First should be priming
-	if !notifications[0].IsPriming {
-		t.Error("First notification should be priming")
-	}
-
-	// Last one should be heartbeat
 	last := notifications[len(notifications)-1]
 	if !last.IsHeartbeat {
-		t.Error("Last notification should be heartbeat")
+		t.Errorf("Last notification should be heartbeat, got %+v", last)
 	}
-
-	// With HeartbeatFull, should have attributes
+	// DEC-086: heartbeat MUST carry full current values.
 	if len(last.Attributes) == 0 {
-		t.Error("Heartbeat with HeartbeatFull should have attributes")
+		t.Error("Heartbeat must carry current values per DEC-086 / §6.5")
 	}
 }
 
@@ -417,24 +421,10 @@ func TestManagerClearAll(t *testing.T) {
 	}
 }
 
-func TestHeartbeatModeString(t *testing.T) {
-	tests := []struct {
-		mode HeartbeatMode
-		want string
-	}{
-		{HeartbeatEmpty, "EMPTY"},
-		{HeartbeatFull, "FULL"},
-		{HeartbeatMode(99), "UNKNOWN"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			if got := tt.mode.String(); got != tt.want {
-				t.Errorf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
+// TestHeartbeatModeString was removed — DEC-086 collapses heartbeat
+// to a single (always-full) mode and the HeartbeatMode type itself
+// was deleted from subscription.go. See pkg/subscription/manager.go's
+// ProcessNotifications heartbeat branch for the current behaviour.
 
 func TestValuesEqual(t *testing.T) {
 	tests := []struct {
@@ -465,6 +455,10 @@ func TestValuesEqual(t *testing.T) {
 }
 
 func TestPartialAttributeSubscription(t *testing.T) {
+	// DEC-086: priming lives in the Subscribe Response, not in an
+	// OnNotification callback. Assert the *subscription* has the
+	// expected (filtered) priming baseline rather than peeking via a
+	// callback that no longer fires.
 	m := NewManager()
 
 	// Subscribe to only one attribute
@@ -474,20 +468,22 @@ func TestPartialAttributeSubscription(t *testing.T) {
 		2:  uint8(1),
 	}
 
-	var priming Notification
-	m.OnNotification(func(n Notification) {
-		if n.IsPriming {
-			priming = n
-		}
-	})
-
-	m.Subscribe(1, 0x0003, []uint16{20}, 100*time.Millisecond, time.Second, currentValues)
-
-	// Priming should only contain subscribed attribute
-	if len(priming.Attributes) != 1 {
-		t.Errorf("Priming should have 1 attribute, got %d", len(priming.Attributes))
+	id, err := m.Subscribe(1, 0x0003, []uint16{20}, 100*time.Millisecond, time.Second, currentValues)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
 	}
-	if _, exists := priming.Attributes[20]; !exists {
+	sub, _ := m.Get(id)
+	sub.mu.RLock()
+	last := make(map[uint16]any, len(sub.lastValues))
+	for k, v := range sub.lastValues {
+		last[k] = v
+	}
+	sub.mu.RUnlock()
+
+	if len(last) != 1 {
+		t.Errorf("Priming should have 1 attribute (filtered), got %d", len(last))
+	}
+	if _, exists := last[20]; !exists {
 		t.Error("Priming should contain attr 20")
 	}
 }

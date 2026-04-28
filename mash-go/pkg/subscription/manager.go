@@ -74,7 +74,13 @@ func NewManagerWithConfig(config Config) *Manager {
 }
 
 // Subscribe creates a new subscription and returns the subscription ID.
-// It sends a priming notification with all current values via the callback.
+//
+// Per DEC-086 the priming report lives ONLY in the Subscribe Response
+// payload that the caller builds — this method does NOT fire a separate
+// priming Notification through the OnNotification callback. The
+// returned subscription is seeded with the priming values so subsequent
+// bounce-back checks compare against the values the controller has
+// already received in the Subscribe Response.
 func (m *Manager) Subscribe(
 	endpointID, featureID uint16,
 	attributeIDs []uint16,
@@ -110,7 +116,9 @@ func (m *Manager) Subscribe(
 	id := nextID()
 	sub := NewSubscription(id, featureID, endpointID, attributeIDs, minInterval, maxInterval)
 
-	// Filter current values to subscribed attributes
+	// Filter current values to subscribed attributes and seed
+	// last-delivered state so bounce-back comparisons after a Subscribe
+	// reference what the controller saw in the Subscribe Response.
 	primingValues := filterAttributes(currentValues, attributeIDs)
 	sub.SetPrimingValues(primingValues)
 
@@ -121,22 +129,7 @@ func (m *Manager) Subscribe(
 	key := featureKey{endpointID: endpointID, featureID: featureID}
 	m.featureIndex[key] = append(m.featureIndex[key], sub)
 
-	// Capture callback for use outside lock
-	onNotify := m.onNotification
-
 	m.mu.Unlock()
-
-	// Send priming notification outside lock
-	if onNotify != nil && len(primingValues) > 0 {
-		onNotify(Notification{
-			SubscriptionID: id,
-			FeatureID:      featureID,
-			EndpointID:     endpointID,
-			Attributes:     primingValues,
-			IsPriming:      true,
-			Timestamp:      time.Now(),
-		})
-	}
 
 	return id, nil
 }
@@ -225,29 +218,27 @@ func (m *Manager) ProcessNotifications() {
 			})
 		}
 
-		// Check for heartbeat
+		// Check for heartbeat. DEC-086: heartbeat MUST carry the full
+		// current values of subscribed attributes (interaction-model.md
+		// §6.5). The empty-body variant the codebase used to support
+		// has been removed.
 		if sub.NeedsHeartbeat() {
-			notification := Notification{
+			sub.mu.RLock()
+			attrs := make(map[uint16]any, len(sub.lastValues))
+			for k, v := range sub.lastValues {
+				attrs[k] = v
+			}
+			sub.mu.RUnlock()
+
+			sub.RecordHeartbeat()
+			onNotify(Notification{
 				SubscriptionID: sub.ID,
 				FeatureID:      sub.FeatureID,
 				EndpointID:     sub.EndpointID,
+				Attributes:     attrs,
 				IsHeartbeat:    true,
 				Timestamp:      time.Now(),
-			}
-
-			if config.HeartbeatMode == HeartbeatFull {
-				// Include all last known values
-				sub.mu.RLock()
-				attrs := make(map[uint16]any, len(sub.lastValues))
-				for k, v := range sub.lastValues {
-					attrs[k] = v
-				}
-				sub.mu.RUnlock()
-				notification.Attributes = attrs
-			}
-
-			sub.RecordHeartbeat()
-			onNotify(notification)
+			})
 		}
 	}
 }
