@@ -43,11 +43,14 @@ steps:
       required_keys:
         - "ZI"  # Zone ID (16 hex chars)
         - "DI"  # Device ID (16 hex chars)
+      # FM (feature map) is intentionally absent: DEC-074 forbids it in
+      # operational TXT records (capability discovery is a wire read of
+      # featureMap attribute 0xFFFC, not an mDNS lookup). Pinned by
+      # pkg/discovery TestOperationalTXT_OmitsFeatureMap.
       optional_keys:
         - "VP"  # Vendor:Product
         - "FW"  # Firmware version
         - "EP"  # Endpoint count
-        - "FM"  # Feature map
     expect:
       txt_valid: true
       zone_id_length: 16
