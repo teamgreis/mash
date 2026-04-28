@@ -63,9 +63,16 @@ func TestCertRenewalCSR_Encode(t *testing.T) {
 	// Mock DER-encoded CSR (real CSRs start with 0x30 0x82 for SEQUENCE)
 	mockCSR := []byte{0x30, 0x82, 0x01, 0x00, 0xDE, 0xAD, 0xBE, 0xEF}
 
+	// docs/security.md §11.3: NonceHash is required and exactly 16 bytes.
+	mockNonceHash := make([]byte, commissioning.NonceHashLen)
+	for i := range mockNonceHash {
+		mockNonceHash[i] = byte(i)
+	}
+
 	csr := &commissioning.CertRenewalCSR{
-		MsgType: commissioning.MsgCertRenewalCSR,
-		CSR:     mockCSR,
+		MsgType:   commissioning.MsgCertRenewalCSR,
+		CSR:       mockCSR,
+		NonceHash: mockNonceHash,
 	}
 
 	// Encode
@@ -268,9 +275,11 @@ func TestDecodeRenewalMessage(t *testing.T) {
 	})
 
 	t.Run("CertRenewalCSR", func(t *testing.T) {
+		nonce := make([]byte, 32)
 		csr := &commissioning.CertRenewalCSR{
-			MsgType: commissioning.MsgCertRenewalCSR,
-			CSR:     []byte{0x30, 0x82},
+			MsgType:   commissioning.MsgCertRenewalCSR,
+			CSR:       []byte{0x30, 0x82},
+			NonceHash: commissioning.ComputeNonceHash(nonce),
 		}
 		data, _ := cbor.Marshal(csr)
 
@@ -281,6 +290,32 @@ func TestDecodeRenewalMessage(t *testing.T) {
 
 		if _, ok := decoded.(*commissioning.CertRenewalCSR); !ok {
 			t.Errorf("Expected *CertRenewalCSR, got %T", decoded)
+		}
+	})
+
+	t.Run("CertRenewalCSR_RejectsMissingNonceHash", func(t *testing.T) {
+		// Spec: docs/security.md §11.3 — NonceHash is required.
+		raw := map[int]any{
+			1: commissioning.MsgCertRenewalCSR,
+			2: []byte{0x30, 0x82},
+		}
+		data, _ := cbor.Marshal(raw)
+
+		if _, err := commissioning.DecodeRenewalMessage(data); err == nil {
+			t.Error("Expected error decoding CertRenewalCSR without NonceHash")
+		}
+	})
+
+	t.Run("CertRenewalCSR_RejectsWrongLengthNonceHash", func(t *testing.T) {
+		raw := map[int]any{
+			1: commissioning.MsgCertRenewalCSR,
+			2: []byte{0x30, 0x82},
+			3: make([]byte, 8), // wrong length, must be 16
+		}
+		data, _ := cbor.Marshal(raw)
+
+		if _, err := commissioning.DecodeRenewalMessage(data); err == nil {
+			t.Error("Expected error decoding CertRenewalCSR with 8-byte NonceHash")
 		}
 	})
 

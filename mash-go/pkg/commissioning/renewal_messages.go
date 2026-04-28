@@ -62,28 +62,31 @@ const (
 // CertRenewalRequest initiates certificate renewal.
 // Sent by controller to device to start renewal process.
 //
-// For initial commissioning (post-PASE), ZoneCA must be provided so the device
-// can verify future controller connections. For normal renewal, ZoneCA is optional
-// (only needed if the Zone CA is being rotated).
+// CBOR: { 1: msgType, 2: nonce[32] }
 //
-// CBOR: { 1: msgType, 2: nonce, 3?: zoneCA }
+// Spec: docs/security.md §11.3, docs/message-types.md §4. Cert install during
+// commissioning uses the disjoint MsgTypes 10/11/12/13/20 on `mash-comm/1` per
+// DEC-085 — no field on this envelope carries the Zone CA.
 type CertRenewalRequest struct {
 	MsgType uint8  `cbor:"1,keyasint"`
-	Nonce   []byte `cbor:"2,keyasint"`           // 32-byte anti-replay nonce
-	ZoneCA  []byte `cbor:"3,keyasint,omitempty"` // X.509 DER-encoded Zone CA cert (required for initial exchange)
+	Nonce   []byte `cbor:"2,keyasint"` // 32-byte anti-replay nonce
 }
 
 // CertRenewalCSR contains the device's new CSR.
 // Sent by device in response to CertRenewalRequest.
-// CBOR: { 1: msgType, 2: csr, 3?: nonceHash }
+// CBOR: { 1: msgType, 2: csr, 3: nonceHash[16] }
 //
 // DEC-047: NonceHash binds the CSR to the renewal request nonce.
 // This prevents replay attacks where an attacker captures a CSR and
 // attempts to use it with a different renewal session.
+//
+// NonceHash is REQUIRED on the wire (docs/security.md §11.3): it MUST be
+// exactly 16 bytes (SHA256(nonce)[0:16]). Receivers reject frames that
+// omit field 3 or whose length differs.
 type CertRenewalCSR struct {
 	MsgType   uint8  `cbor:"1,keyasint"`
-	CSR       []byte `cbor:"2,keyasint"`           // PKCS#10 DER-encoded CSR
-	NonceHash []byte `cbor:"3,keyasint,omitempty"` // SHA256(nonce)[0:16] - binds CSR to request
+	CSR       []byte `cbor:"2,keyasint"` // PKCS#10 DER-encoded CSR
+	NonceHash []byte `cbor:"3,keyasint"` // SHA256(nonce)[0:16] - binds CSR to request (required)
 }
 
 // CertRenewalInstall delivers the new certificate.
@@ -132,6 +135,11 @@ func DecodeRenewalMessage(data []byte) (any, error) {
 		var msg CertRenewalCSR
 		if err := cbor.Unmarshal(data, &msg); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidMessage, err)
+		}
+		// NonceHash is required on the wire per docs/security.md §11.3.
+		if len(msg.NonceHash) != NonceHashLen {
+			return nil, fmt.Errorf("%w: CertRenewalCSR.NonceHash must be %d bytes, got %d",
+				ErrInvalidMessage, NonceHashLen, len(msg.NonceHash))
 		}
 		return &msg, nil
 
