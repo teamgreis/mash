@@ -104,6 +104,31 @@ async def test_publish_operational_returns_canonical_instance_name():
         assert name == f"{zi}-{di}"
 
 
+async def test_published_records_use_dec089_uniform_ttl():
+    """DEC-089: PTR/SRV/TXT/A/AAAA all advertised at 120 s TTL.
+
+    Without the explicit override, python-zeroconf defaults host_ttl to
+    4500 s -- a silent spec deviation if the library default ever changes
+    or somebody refactors the ServiceInfo construction. Pinning the TTLs
+    on the registered ServiceInfo is the cheapest way to keep us
+    conformant.
+    """
+    async with Advertiser() as adv:
+        await adv.publish_commissionable(_commissionable(1234))
+        # _commissionable lives in adv._commissionable as a ServiceInfo
+        info = adv._commissionable
+        assert info is not None
+        assert info.host_ttl == 120, f"host_ttl should be 120 s, got {info.host_ttl}"
+        assert info.other_ttl == 120, f"other_ttl should be 120 s, got {info.other_ttl}"
+
+        zi = "A1B2C3D4E5F6A7B8"
+        di = "F9E8D7C6B5A49382"
+        await adv.publish_operational(_operational(zi, di))
+        op_info = adv._operational[(zi, di)]
+        assert op_info.host_ttl == 120
+        assert op_info.other_ttl == 120
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: advertiser → browser on loopback
 # ---------------------------------------------------------------------------

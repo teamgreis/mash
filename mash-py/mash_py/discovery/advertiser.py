@@ -170,7 +170,14 @@ class Advertiser:
         if azc is None or info is None:
             self._commissionable = None
             return
-        await azc.async_unregister_service(info)
+        # async_unregister_service returns a future scheduling the goodbye
+        # broadcast burst (RFC 6762 §10.1: 3 packets, 125 ms apart). The
+        # outer `await` only awaits getting the future; we MUST also await
+        # the future itself or asyncio.run shutdown cancels the broadcast
+        # before any goodbye reaches the wire -- leaving stale records on
+        # the LAN for the full TTL.
+        goodbye = await azc.async_unregister_service(info)
+        await goodbye
         self._commissionable = None
 
     # ------------------------------------------------------------------
@@ -229,7 +236,14 @@ class Advertiser:
                 f"zone_id={zone_id!r}, device_id={device_id!r}"
             )
         if azc is not None:
-            await azc.async_unregister_service(info)
+            # async_unregister_service returns a future scheduling the
+            # goodbye broadcast burst (RFC 6762 §10.1: 3 packets, 125 ms
+            # apart). The outer `await` only awaits getting the future;
+            # we MUST also await the future itself or asyncio.run shutdown
+            # cancels the broadcast before any goodbye reaches the wire --
+            # leaving stale records on the LAN for the full TTL.
+            goodbye = await azc.async_unregister_service(info)
+            await goodbye
         del self._operational[key]
 
     def is_operational_published(self, zone_id: str, device_id: str) -> bool:
@@ -291,6 +305,12 @@ class Advertiser:
             properties=txt,
             server=server,
             addresses=addr_bytes,
+            # DEC-089: uniform 120 s TTL across all record types. python-zeroconf's
+            # default `host_ttl` is 4500 s for A/AAAA which would diverge from the
+            # spec; pin both knobs explicitly so a bumped library default doesn't
+            # silently take us out of conformance.
+            host_ttl=120,
+            other_ttl=120,
         )
 
 
