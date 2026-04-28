@@ -287,7 +287,13 @@ func commissionableToDiscovered(svc *discovery.CommissionableService) discovered
 		Addresses:     svc.Addresses,
 		ServiceType:   discovery.ServiceTypeCommissionable,
 		Discriminator: svc.Discriminator,
+		// DEC-078 mandates D / cat / serial / brand / model on every
+		// commissionable record; mirror that here so verify_txt_records
+		// sees the same key set the device actually advertises. The old
+		// runner-side synthesizer in handleVerifyTXTRecordsReal was
+		// removed in lockstep with mash-py-tdd-plan.md Phase 21.
 		TXTRecords: map[string]string{
+			"D":      strconv.FormatUint(uint64(svc.Discriminator), 10),
 			"brand":  svc.Brand,
 			"model":  svc.Model,
 			"DN":     svc.DeviceName,

@@ -470,7 +470,12 @@ func TestVerifyTXTRecords_RequiredKeys(t *testing.T) {
 		t.Error("expected txt_valid=true with required_keys")
 	}
 
-	// Synthetic fields (id, cat, proto) should be populated for commissionable.
+	// Per DEC-078, the canonical commissionable TXT keys are
+	// D / cat / serial / brand / model. The handler used to synthesize
+	// legacy `id` / `cat=device` / `proto=1.0` keys when absent — that
+	// shim was removed in lockstep with mash-py-tdd-plan.md Phase 21
+	// because it propped up an out-of-spec YAML test (TC-DISC-001).
+	// A request for an unsupported legacy key MUST now be rejected.
 	step = &loader.Step{
 		Params: map[string]any{
 			"required_keys": []any{"id", "cat", "proto", "D"},
@@ -480,8 +485,8 @@ func TestVerifyTXTRecords_RequiredKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["txt_valid"] != true {
-		t.Error("expected txt_valid=true for synthetic fields (id, cat, proto, D)")
+	if out["txt_valid"] != false {
+		t.Error("expected txt_valid=false for legacy keys (id, proto) — see DEC-078")
 	}
 }
 

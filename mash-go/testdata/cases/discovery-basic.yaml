@@ -33,10 +33,18 @@ steps:
   - name: Verify device TXT records
     action: verify_txt_records
     params:
+      # DEC-078 commissionable TXT schema (docs/discovery.md §2.2):
+      # D (discriminator), cat (categories), serial, brand, model are
+      # required; DN is optional. Pre-DEC-078 this case asked for legacy
+      # keys (id/cat/proto) that the Go runner papered over with a
+      # synthesizer in discovery_handlers.go — removed in lockstep with
+      # this change.
       required_keys:
-        - "id"
+        - "D"
         - "cat"
-        - "proto"
+        - "serial"
+        - "brand"
+        - "model"
     expect:
       txt_valid: true
 

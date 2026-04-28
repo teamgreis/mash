@@ -1039,12 +1039,23 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 	}
 
 	// No discriminator -- fall back to simulated success for non-mDNS test modes.
-	// Populate ds.services so that subsequent verify_txt_records sees a non-empty list.
+	// Populate ds.services with a spec-compliant TXT shape (DEC-078) so
+	// verify_txt_records sees the same key set a real device would emit.
+	// Pre-Phase-21, an empty TXT map was paired with a runtime synthesizer
+	// in handleVerifyTXTRecordsReal that injected legacy id / cat / proto
+	// keys; that shim was removed when TC-DISC-001's YAML was migrated to
+	// the spec-canonical key set.
 	ds := getDiscoveryState(state)
 	ds.services = []discoveredService{{
 		InstanceName: "MASH-SIM-0000",
 		ServiceType:  discovery.ServiceTypeCommissionable,
-		TXTRecords:   map[string]string{},
+		TXTRecords: map[string]string{
+			"D":      "0",
+			"cat":    "0",
+			"serial": "SIM",
+			"brand":  "MASH",
+			"model":  "SIM",
+		},
 	}}
 	return map[string]any{
 		KeyDeviceFound:         true,
@@ -1070,22 +1081,6 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 	}
 
 	svc := ds.services[0]
-
-	// Ensure synthetic TXT fields are populated for commissionable services.
-	if svc.ServiceType == discovery.ServiceTypeCommissionable {
-		if _, ok := svc.TXTRecords["D"]; !ok {
-			svc.TXTRecords["D"] = fmt.Sprintf("%d", svc.Discriminator)
-		}
-		if _, ok := svc.TXTRecords["id"]; !ok {
-			svc.TXTRecords["id"] = svc.InstanceName
-		}
-		if _, ok := svc.TXTRecords["cat"]; !ok {
-			svc.TXTRecords["cat"] = "device"
-		}
-		if _, ok := svc.TXTRecords["proto"]; !ok {
-			svc.TXTRecords["proto"] = "1.0"
-		}
-	}
 
 	// Check required fields -- accept both "required_fields" and "required_keys".
 	allValid := true
