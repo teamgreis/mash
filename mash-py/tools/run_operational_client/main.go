@@ -57,7 +57,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
-// DeviceInfo / Status / Measurement IDs — pinned per
+// DeviceInfo / Status / Measurement / TestControl IDs — pinned per
 // docs/features/protocol-versions.yaml. We hard-code so the helper has no
 // build-time coupling on generated feature constants.
 const (
@@ -69,13 +69,24 @@ const (
 	cmdRemoveZone        uint8 = 0x10
 	removeZoneParamZone  uint8 = 1
 	removeZoneRespRemove uint8 = 1
+
+	// TestControl (0x0A) per docs/features/test-control/1.0.yaml.
+	featureTestControl   uint8 = 0x0A
+	cmdTriggerTestEvent  uint8 = 0x01
+	triggerParamKey      uint8 = 1
+	triggerParamOpcode   uint8 = 2
+	triggerRespSuccess   uint8 = 1
 )
 
 type output struct {
-	ReadDeviceInfo   map[string]any `json:"read_device_info"`
-	WriteLabel       writeResult    `json:"write_label"`
-	InvokeRemoveZone invokeResult   `json:"invoke_remove_zone"`
-	SubscribeStatus  uint8          `json:"subscribe_status"`
+	ReadDeviceInfo   map[string]any `json:"read_device_info,omitempty"`
+	WriteLabel       *writeResult   `json:"write_label,omitempty"`
+	InvokeRemoveZone *invokeResult  `json:"invoke_remove_zone,omitempty"`
+	SubscribeStatus  *uint8         `json:"subscribe_status,omitempty"`
+	// Phase 17: trigger_test_event is reported when --trigger-opcode is
+	// set. The helper invokes triggerTestEvent on TestControl (feature
+	// 0x0A) on endpoint 0 and reports the wire status + payload-success.
+	TriggerTestEvent *triggerResult `json:"trigger_test_event,omitempty"`
 	// Phase 16: when --observe-subscribe is set, the helper subscribes
 	// to DeviceInfo and reports the priming + first delta notification
 	// observed after the test triggers a Write.
@@ -90,6 +101,14 @@ type writeResult struct {
 type invokeResult struct {
 	Status  uint8 `json:"status"`
 	Removed bool  `json:"removed"`
+}
+
+// triggerResult captures the Phase 17 acceptance evidence: the
+// triggerTestEvent invoke produced a Response with the listed wire
+// Status and (on success) the integer-keyed ``{1: success}`` payload.
+type triggerResult struct {
+	Status  uint8 `json:"status"`
+	Success bool  `json:"success"`
 }
 
 // subscribeObservation captures the Phase 16 acceptance evidence:
@@ -124,6 +143,14 @@ func main() {
 		"Phase 16: minInterval to send in the Subscribe payload (key 2)")
 	subscribeMaxIntervalMs := flag.Int("subscribe-max-interval-ms", 60000,
 		"Phase 16: maxInterval to send in the Subscribe payload (key 3)")
+	// Phase 17 evidence flags
+	triggerOpcode := flag.String("trigger-opcode", "",
+		"Phase 17: invoke triggerTestEvent on TestControl with this opcode "+
+			"(decimal or 0x-prefixed hex). When set, the helper also reports trigger_test_event.")
+	triggerEnableKey := flag.String("trigger-enable-key", "00112233445566778899aabbccddeeff",
+		"Phase 17: enableKey to pass to triggerTestEvent (32 hex chars / 128-bit)")
+	skipDefaultOps := flag.Bool("skip-default-ops", false,
+		"Phase 17: skip the default Read/Write/RemoveZone/Subscribe sequence; useful when the device under test only has TestControl wired up")
 	flag.Parse()
 
 	for _, p := range []struct {
@@ -179,46 +206,55 @@ func main() {
 		runReadLoop(conn, client)
 	}()
 
-	// 1. Read DeviceInfo (all attributes).
-	readResult, err := client.Read(ctx, 0, featureDeviceInfo, nil)
-	if err != nil {
-		fail(fmt.Sprintf("Read DeviceInfo: %v", err))
-	}
-
-	// 2. Write DeviceInfo.label.
-	writeResp, err := client.Write(ctx, 0, featureDeviceInfo, map[uint16]any{
-		attrLabel: *labelWrite,
-	})
-	if err != nil {
-		fail(fmt.Sprintf("Write label: %v", err))
-	}
-	storedLabel, _ := writeResp[attrLabel].(string)
-
-	// 3. Invoke removeZone with integer-keyed parameters per §7.1.
-	invokeResultRaw, err := client.Invoke(ctx, 0, featureDeviceInfo, cmdRemoveZone, map[uint8]any{
-		removeZoneParamZone: *zoneArg,
-	})
+	var readResult map[uint16]any
+	var storedLabel string
 	var invStatus uint8
 	var invRemoved bool
-	if err != nil {
-		var se *interaction.StatusError
-		if errors.As(err, &se) {
-			invStatus = uint8(se.Status)
-		} else {
-			fail(fmt.Sprintf("Invoke removeZone: %v", err))
+	var subStatus uint8
+	var subObs *subscribeObservation
+	var triggerObs *triggerResult
+
+	if !*skipDefaultOps {
+		// 1. Read DeviceInfo (all attributes).
+		var rerr error
+		readResult, rerr = client.Read(ctx, 0, featureDeviceInfo, nil)
+		if rerr != nil {
+			fail(fmt.Sprintf("Read DeviceInfo: %v", rerr))
 		}
-	} else {
-		// Pull "removed" out of the response map. Spec §7.2: integer keys.
-		if m, ok := invokeResultRaw.(map[any]any); ok {
-			if v, ok := m[uint64(removeZoneRespRemove)]; ok {
-				if b, ok := v.(bool); ok {
-					invRemoved = b
-				}
+
+		// 2. Write DeviceInfo.label.
+		writeResp, werr := client.Write(ctx, 0, featureDeviceInfo, map[uint16]any{
+			attrLabel: *labelWrite,
+		})
+		if werr != nil {
+			fail(fmt.Sprintf("Write label: %v", werr))
+		}
+		storedLabel, _ = writeResp[attrLabel].(string)
+
+		// 3. Invoke removeZone with integer-keyed parameters per §7.1.
+		invokeResultRaw, ierr := client.Invoke(ctx, 0, featureDeviceInfo, cmdRemoveZone, map[uint8]any{
+			removeZoneParamZone: *zoneArg,
+		})
+		if ierr != nil {
+			var se *interaction.StatusError
+			if errors.As(ierr, &se) {
+				invStatus = uint8(se.Status)
+			} else {
+				fail(fmt.Sprintf("Invoke removeZone: %v", ierr))
 			}
-		} else if m, ok := invokeResultRaw.(map[uint8]any); ok {
-			if v, ok := m[removeZoneRespRemove]; ok {
-				if b, ok := v.(bool); ok {
-					invRemoved = b
+		} else {
+			// Pull "removed" out of the response map. Spec §7.2: integer keys.
+			if m, ok := invokeResultRaw.(map[any]any); ok {
+				if v, ok := m[uint64(removeZoneRespRemove)]; ok {
+					if b, ok := v.(bool); ok {
+						invRemoved = b
+					}
+				}
+			} else if m, ok := invokeResultRaw.(map[uint8]any); ok {
+				if v, ok := m[removeZoneRespRemove]; ok {
+					if b, ok := v.(bool); ok {
+						invRemoved = b
+					}
 				}
 			}
 		}
@@ -233,9 +269,9 @@ func main() {
 	//         Response, but we don't reliably observe ordering on the
 	//         same connection; same-conn delivery is the looser test
 	//         that still proves notifications fan out end-to-end)
-	var subStatus uint8
-	var subObs *subscribeObservation
-	if !*observeSubscribe {
+	if *skipDefaultOps {
+		// Subscribe is part of the default-ops sequence; skip cleanly.
+	} else if !*observeSubscribe {
 		_, _, sErr := client.Subscribe(ctx, 0, featureDeviceInfo, nil)
 		if sErr != nil {
 			var se *interaction.StatusError
@@ -311,6 +347,47 @@ func main() {
 		subObs = obs
 	}
 
+	// Phase 17: triggerTestEvent on TestControl (feature 0x0A, cmd 0x01).
+	// We invoke the spec-strict integer-keyed parameter shape per §7.1.
+	if *triggerOpcode != "" {
+		opcode, parseErr := parseUint64(*triggerOpcode)
+		if parseErr != nil {
+			fail(fmt.Sprintf("--trigger-opcode: %v", parseErr))
+		}
+		tr := &triggerResult{}
+		raw, terr := client.Invoke(ctx, 0, featureTestControl, cmdTriggerTestEvent, map[uint8]any{
+			triggerParamKey:    *triggerEnableKey,
+			triggerParamOpcode: opcode,
+		})
+		if terr != nil {
+			var se *interaction.StatusError
+			if errors.As(terr, &se) {
+				tr.Status = uint8(se.Status)
+			} else {
+				fail(fmt.Sprintf("Invoke triggerTestEvent: %v", terr))
+			}
+		} else {
+			tr.Status = 0 // Status.SUCCESS
+			// Extract success bool. Same defensive type-switch as removeZone:
+			// cbor2-decoded maps surface as map[any]any, while the Go
+			// interaction client may return map[uint8]any directly.
+			if m, ok := raw.(map[any]any); ok {
+				if v, ok := m[uint64(triggerRespSuccess)]; ok {
+					if b, ok := v.(bool); ok {
+						tr.Success = b
+					}
+				}
+			} else if m, ok := raw.(map[uint8]any); ok {
+				if v, ok := m[triggerRespSuccess]; ok {
+					if b, ok := v.(bool); ok {
+						tr.Success = b
+					}
+				}
+			}
+		}
+		triggerObs = tr
+	}
+
 	// Stringify the read map so the JSON is human-friendly.
 	readPretty := make(map[string]any, len(readResult))
 	for k, v := range readResult {
@@ -327,21 +404,47 @@ func main() {
 	}
 
 	out := output{
-		ReadDeviceInfo: readPretty,
-		WriteLabel: writeResult{
+		Subscription:     subObs,
+		TriggerTestEvent: triggerObs,
+	}
+	if !*skipDefaultOps {
+		out.ReadDeviceInfo = readPretty
+		out.WriteLabel = &writeResult{
 			Echo:   *labelWrite,
 			Stored: storedLabel,
-		},
-		InvokeRemoveZone: invokeResult{
+		}
+		out.InvokeRemoveZone = &invokeResult{
 			Status:  invStatus,
 			Removed: invRemoved,
-		},
-		SubscribeStatus: subStatus,
-		Subscription:    subObs,
+		}
+		// SubscribeStatus is a pointer so the absent case round-trips as
+		// JSON null / omitted. With --skip-default-ops we don't issue a
+		// Subscribe at all, so leave it nil.
+		ss := subStatus
+		out.SubscribeStatus = &ss
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		fail(fmt.Sprintf("encode output: %v", err))
 	}
+}
+
+// parseUint64 accepts decimal or 0x-prefixed hex.
+func parseUint64(s string) (uint64, error) {
+	if s == "" {
+		return 0, errors.New("empty string")
+	}
+	if len(s) > 2 && (s[:2] == "0x" || s[:2] == "0X") {
+		var v uint64
+		if _, err := fmt.Sscanf(s[2:], "%x", &v); err != nil {
+			return 0, fmt.Errorf("hex %q: %w", s, err)
+		}
+		return v, nil
+	}
+	var v uint64
+	if _, err := fmt.Sscanf(s, "%d", &v); err != nil {
+		return 0, fmt.Errorf("decimal %q: %w", s, err)
+	}
+	return v, nil
 }
 
 // dialWithRetry dials with optional retry — useful when the Python device's
