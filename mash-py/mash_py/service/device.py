@@ -259,8 +259,21 @@ class DeviceService:
         # under the same event-loop tick that asyncio.Server tracks.
         self._stop_event.set()
 
+        # ``listener.wait_closed()`` blocks until every active connection
+        # has fully drained, including TLS shutdown (close_notify
+        # round-trip). Under SIGTERM teardown that means we wait for the
+        # peer's ack on every in-flight session — slow peers pin this
+        # for many seconds. Because ``_teardown`` runs ``stop()`` BEFORE
+        # ``unpublish_operational``, a stalled ``wait_closed`` here
+        # delays the operational-record goodbye burst, and if the parent
+        # script (``tools/run_conformance.sh``) escalates to SIGKILL at
+        # 30 s, the goodbye never reaches the wire — orphaning the
+        # ``_mash._tcp`` instance in mDNS caches for the full 120 s TTL
+        # (DEC-089). Bound the drain so the goodbye always gets a
+        # chance; ``listener.close()`` already stopped accepting, so the
+        # only thing we'd be waiting on is courtesy cleanup.
         with contextlib.suppress(Exception):
-            await listener.wait_closed()
+            await asyncio.wait_for(listener.wait_closed(), timeout=0.5)
 
     async def __aenter__(self) -> Self:
         return self

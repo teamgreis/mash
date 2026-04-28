@@ -86,7 +86,20 @@ echo "[run_conformance] exclude-tags=$EXCLUDE_TAGS"
 
 # Boot the device. Force unbuffered stdio so the device log doesn't lose
 # tail bytes when we SIGTERM at the end of the run.
-( cd "$MASH_PY_ROOT" && PYTHONUNBUFFERED=1 "$PYTHON" -m mash_py.cli.device \
+#
+# We MUST ``exec`` into python inside the subshell so that ``$!`` captures
+# the python PID rather than the (transient) subshell PID. Without
+# ``exec``, bash forks one extra process to run ``cd && python``: the
+# subshell ends up as $!, the python becomes its child and is reparented
+# to init when the subshell exits, and the trap's
+# ``kill -TERM "$DEVICE_PID"`` signals an already-dead subshell — leaving
+# the device alive on the LAN with active mDNS advertisements. Past
+# session debris (stale ``_mash._tcp`` records that outlive the script)
+# always traces back to this exact PID-mismatch. The ``cd`` runs before
+# ``exec`` so the python's working directory is correct, and we set
+# ``PYTHONUNBUFFERED`` via ``env`` because the ``KEY=val cmd`` shell
+# syntax requires a real command, not ``exec``.
+( cd "$MASH_PY_ROOT" && exec env PYTHONUNBUFFERED=1 "$PYTHON" -m mash_py.cli.device \
     --discriminator "$DISCRIMINATOR" \
     --setup-code "$SETUP_CODE" \
     --port "$OP_PORT" \

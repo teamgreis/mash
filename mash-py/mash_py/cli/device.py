@@ -530,6 +530,23 @@ class _DeviceLifecycle:
         # exit, teardown) through this lock so concurrent triggers + the
         # SIGTERM teardown can't race a half-bound asyncio.Server.
         self._comm_lock = asyncio.Lock()
+        # Generation counter for the commissioning window. Mirrors
+        # mash-go's ``DeviceService.commissioningEpoch`` (see
+        # ``device_service_commissioning.go::exitCommissioningForEpoch``).
+        # Every call into :meth:`_enter_commissioning_mode` bumps this
+        # under the lock, including the no-op "already up" path — the
+        # counter expresses intent ("a peer asked us to keep the window
+        # open"), not just physical bind events. Callers that issue an
+        # exit *after* a slow operation (e.g. ``_enter_uncommissioned``
+        # waits on mDNS publish before its trailing close) capture the
+        # epoch beforehand and call :meth:`_exit_commissioning_for_epoch`,
+        # which skips the close if a re-entry has overtaken them. Without
+        # this, the post-initial-commission close races trigger-driven
+        # re-entry from the operational connection and tears down the
+        # listener the harness expects to be open — every subsequent
+        # ``device_in_commissioning_mode`` precondition then dials a
+        # closed comm port and times out at PASE-read.
+        self._comm_epoch: int = 0
         # Latest setCommissioningWindowDuration request from the harness.
         # Persisted across enter/exit cycles so the next enter can honor
         # it (matches mash-go's CommissioningWindowDuration). Currently
@@ -572,6 +589,7 @@ class _DeviceLifecycle:
                 ssl_handshake_timeout=30.0,
                 start_serving=True,
             )
+            self._comm_epoch += 1
             actual_port = _resolve_first_port(self._comm_server)
             _log.info("commissioning listener up on :%d", actual_port)
 
@@ -640,11 +658,25 @@ class _DeviceLifecycle:
         # because the same socket continues to accept after the
         # commissioning ALPN handshake completes; two-port devices need
         # the explicit barrier.
+        #
+        # Capture the comm epoch BEFORE the slow ``_enter_commissioned``
+        # step. The harness's auto-PICS phase opens an operational TLS
+        # session as soon as the listener is bound (well before our mDNS
+        # publish completes) and immediately dispatches
+        # TriggerEnterCommissioningMode (and, at test boundaries,
+        # TriggerResetTestState). Those triggers race with our trailing
+        # close below; the epoch lets the trailing close detect that a
+        # peer has re-armed the window and skip itself, mirroring
+        # mash-go's ``exitCommissioningForEpoch``. Without it, the close
+        # always tears down the just-reopened listener and every
+        # subsequent ``device_in_commissioning_mode`` precondition fails
+        # at PASE-read.
+        captured_epoch = self._comm_epoch
         await self._enter_commissioned(transition_from_commissionable=True)
         self._op_listener_ready.set()
         # The commissioning handler will close its writer on its own as
         # soon as it observes ``_op_listener_ready`` set.
-        await self._exit_commissioning_mode()
+        await self._exit_commissioning_for_epoch(captured_epoch)
 
     async def _handle_commissioning_client(
         self,
@@ -746,8 +778,24 @@ class _DeviceLifecycle:
         srv = self._comm_server
         self._comm_server = None
         srv.close()
+        # Bounded drain. ``asyncio.Server.wait_closed()`` waits for every
+        # active connection to fully close, including TLS shutdown
+        # (close_notify round-trip). When the auto-close after a
+        # re-entry commission is scheduled from the connection's own
+        # handler — typical mid-suite flow — the writer is still in
+        # ``await writer.wait_closed()``, and ``srv.wait_closed()`` waits
+        # for the handler to return, while the handler waits for the
+        # peer's TLS shutdown. A slow peer pins this for seconds, and
+        # because we hold ``_comm_lock`` here, the harness's next
+        # ``TriggerResetTestState`` (sent over the operational channel
+        # with a 5 s deadline) blocks behind us and times out — leaving
+        # the comm port closed for the rest of the run. ``srv.close()``
+        # alone is enough to stop accepting new connections; in-flight
+        # ones drain on their own. We bound the wait at 0.5 s so it can
+        # complete on the happy path but never starve a concurrent
+        # trigger.
         with contextlib.suppress(Exception):
-            await srv.wait_closed()
+            await asyncio.wait_for(srv.wait_closed(), timeout=0.5)
         if self._advertiser is not None:
             with contextlib.suppress(Exception):
                 await self._advertiser.unpublish_commissionable()
@@ -762,10 +810,18 @@ class _DeviceLifecycle:
         Idempotent: a second call while the listener is already up is a
         no-op. Mirrors mash-go's ``DeviceService.EnterCommissioningMode``
         in the two-port deployment shape (DEC-082).
+
+        The comm-epoch is bumped on every call, including the no-op path
+        — see :attr:`_comm_epoch` for the rationale.
         """
         async with self._comm_lock:
+            self._comm_epoch += 1
             if self._comm_server is not None:
-                _log.debug("enter_commissioning_mode: listener already up")
+                _log.debug(
+                    "enter_commissioning_mode: listener already up "
+                    "(epoch=%d)",
+                    self._comm_epoch,
+                )
                 return
             ssl_ctx = make_commissioning_context(
                 self._comm_cert, self._comm_key
@@ -780,11 +836,12 @@ class _DeviceLifecycle:
             )
             actual_port = _resolve_first_port(self._comm_server)
             _log.info(
-                "re-opened commissioning listener on :%d (window=%ss)",
+                "re-opened commissioning listener on :%d (window=%ss epoch=%d)",
                 actual_port,
                 self._comm_window_duration_s
                 if self._comm_window_duration_s is not None
                 else "default",
+                self._comm_epoch,
             )
             assert self._advertiser is not None
             await self._advertiser.publish_commissionable(
@@ -810,6 +867,28 @@ class _DeviceLifecycle:
         controllers in the existing zone keep their connections.
         """
         async with self._comm_lock:
+            await self._stop_commissioning_listener()
+
+    async def _exit_commissioning_for_epoch(self, captured_epoch: int) -> None:
+        """Close the listener only if no Enter has overtaken ``captured_epoch``.
+
+        Mirrors ``mash-go``'s ``exitCommissioningForEpoch``. The
+        post-initial-commission cleanup in :meth:`_enter_uncommissioned`
+        captures the epoch *before* its slow ``_enter_commissioned``
+        step; if a TestControl trigger has re-armed the window in the
+        meantime, the captured epoch is stale and we skip the close —
+        the harness expects the listener open and the freshly-bound one
+        is the right thing to keep.
+        """
+        async with self._comm_lock:
+            if self._comm_epoch != captured_epoch:
+                _log.debug(
+                    "exit_commissioning_for_epoch: skipped "
+                    "(captured=%d, current=%d — re-entry overtook close)",
+                    captured_epoch,
+                    self._comm_epoch,
+                )
+                return
             await self._stop_commissioning_listener()
 
     def _build_test_control(self) -> TestControlFeature:
