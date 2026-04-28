@@ -1357,30 +1357,51 @@ mash-go fixes landed in the same workstream: `pkg/wire/message.go::ExtractReadAt
 
 ### Phase 18 — mDNS Advertiser
 
-**Status.** Pending.
+**Status.** Done (2026-04-28). Spec divergence resolved by DEC-088; advertiser landed; all five discovery interop tests green (Python↔Go both directions, including commissioning→operational transition and multi-zone).
 
 **Goal.** Python device advertises commissioning + operational mDNS records correctly.
 
 **Depends on.** Phase 6 (browser uses same primitives).
+
+**Spec divergence (surfaced 2026-04-28, resolved by DEC-088).**
+
+Porting Phase 18 surfaced three internal contradictions in the operational mDNS schema:
+
+1. **Operational TXT `ZI` field.** `docs/discovery.md` §2.3 omits `ZI` and gives instance name `<device-id>._mash._tcp.local`; `docs/testing/behavior/discovery.md` §3.3 makes `ZI` required and uses instance `<zone-id>-<device-id>`; mash-go follows the behavior doc. The high-level §2.3 phrasing is structurally incompatible with multi-zone (DEC-082) — a single-instance name has no room for per-(device, zone) advertising.
+2. **Operational TXT `FM` field.** Both discovery docs still list `FM` (hex feature map); DEC-074 explicitly removed it ("MUST NOT advertise"). mash-go is DEC-074-compliant via `TestOperationalTXT_OmitsFeatureMap`.
+3. **Commissionable instance-name padding.** Spec is silent; mash-go zero-pads to 4 digits (`MASH-NNNN`). Cosmetic but worth normative-izing for golden-test fixtures.
+
+**Resolution.** Treat DEC-074 + the behavior doc as canonical; rewrite the high-level prose to match. New decision-log entry **DEC-088** "Operational mDNS TXT canonicalization" makes this normative.
 
 **Files created.**
 
 - `mash_py/discovery/advertiser.py`
 - `tests/interop/discovery/test_advertise.py`
 
+**Files modified (spec alignment, must land before / with implementation).**
+
+- `docs/decision-log.md` — add DEC-088 (operational TXT keys + instance-name format normative; supersedes stale §2.3 prose).
+- `docs/discovery.md` — rewrite §2.3 operational TXT (add `ZI` required, drop `FM` per DEC-074, change instance name to `<zone-id>-<device-id>`); add §2.2 padding rule (`MASH-NNNN`, 4-digit zero-padded).
+- `docs/testing/behavior/discovery.md` — drop the `FM` row from §3.3 and the `FM` row from §3.5 (point at DEC-074).
+- mash-go: no code changes required (DEC-074 already enforced; instance name + ZI already canonical). Verified via `go test ./pkg/discovery/ -run TestOperationalTXT`.
+
 **Test layers.**
 
 | Layer | What |
 |---|---|
-| Unit | Advertiser publishes a record; loopback browser finds it; TXT records parse correctly. |
+| Unit | Advertiser publishes a record; loopback browser finds it; TXT records parse correctly; commissioning → operational transition publishes the new instance and goodbyes the old. |
 | Vector | N/A. |
 | Interop | Python device advertises commissioning record; Go controller browses and finds it. After commissioning, Python device transitions to operational record; Go controller finds the new record. |
 
-**Acceptance.** Both directions of mDNS interop work (Python device discovered by Go controller, Go device discovered by Python controller).
+**Acceptance.** All of:
+1. DEC-088 landed; `docs/discovery.md` §2.2/§2.3 + `docs/testing/behavior/discovery.md` §3.3/§3.5 reconciled.
+2. mash-go discovery tests still green (no Go changes expected; verify).
+3. Python advertiser publishes commissioning record discoverable by mash-go controller within ~2 s; transition to operational record discoverable likewise.
+4. Bidirectional interop: Python controller (Phase 6 browser) finds Go device's commissioning + operational records.
 
 **Interop verification.** Standard.
 
-**Refinement contingency.** mDNS instance-name format is `MASH-<discriminator>` (commissioning) or `<DI>-<ZI>` (operational). If mDNS browse finds the record but the harness can't parse the instance name, check the format.
+**Refinement contingency.** Per DEC-088 (post-resolution): commissioning instance is `MASH-NNNN` (4-digit zero-pad); operational instance is `<zone-id>-<device-id>` (16+1+16=33 chars). If mDNS browse finds the record but the harness can't parse the instance name, the canonical format moved during this phase — re-read DEC-088.
 
 ---
 
