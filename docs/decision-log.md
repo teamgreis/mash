@@ -70,6 +70,7 @@ When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick 
 - [DEC-077: Shorten Renewal Window to 7 Days](#dec-077-shorten-renewal-window-to-7-days)
 - [DEC-078: Commissionable mDNS TXT Schema (canonical)](#dec-078-commissionable-mdns-txt-schema-canonical)
 - [DEC-082: Two-Port Deployment as Conformant Alternative to Single-Port ALPN Routing](#dec-082-two-port-deployment-as-conformant-alternative-to-single-port-alpn-routing)
+- [DEC-088: Operational mDNS TXT Canonicalization](#dec-088-operational-mdns-txt-canonicalization)
 
 ### Multi-zone
 - [DEC-016: Multi-Zone Support](#dec-016-multi-zone-support)
@@ -4860,6 +4861,60 @@ mash-py Phase 17 (`mash-py-tdd-plan.md`) surfaced all three while implementing `
 
 ---
 
+### DEC-088: Operational mDNS TXT Canonicalization
+
+**Date:** 2026-04-28
+**Status:** Accepted
+
+**Problem.**
+Porting Phase 18 of `mash-py-tdd-plan.md` (mDNS advertiser) surfaced three internal contradictions across the discovery spec for the operational service `_mash._tcp`:
+
+1. **`docs/discovery.md` §2.3** states the service instance name is `<device-id>._mash._tcp.local` and lists TXT keys `DI`, `VP`, `FW`, `EP`, `FM` — with no `ZI` field.
+2. **`docs/testing/behavior/discovery.md` §3.3** lists TXT keys `ZI` (required), `DI` (required), `VP`, `FW`, `EP`, `FM` and uses instance name `<zone-id>-<device-id>`.
+3. **DEC-074** (2026) explicitly removed the `FM` (feature map) TXT key — "Operational mDNS TXT MUST NOT advertise a `featureMap` / FM key" — but neither §2.3 nor §3.3 was updated to reflect that.
+
+The high-level §2.3 prose is also structurally incompatible with multi-zone (DEC-082): a single instance name `<device-id>._mash._tcp.local` cannot represent a device that participates in two zones simultaneously, because a multi-zone device needs one instance per (device, zone) pair.
+
+mash-go already follows the behavior-doc + DEC-074 reconciliation (`pkg/discovery/types.go`, `pkg/discovery/txtrecord.go`, `pkg/discovery/mdns.go`); the `TestOperationalTXT_OmitsFeatureMap` regression-guards FM omission. The contradictions are pure docs drift.
+
+**Decision.**
+Normatively define the operational mDNS schema as follows.
+
+1. **Service type.** `_mash._tcp.local` (unchanged, DEC-067 / DEC-082).
+2. **Service instance name.** `<zone-id>-<device-id>` where:
+   - `zone-id` = first 16 hex chars (64 bits) of `SHA-256(Zone CA cert DER)`.
+   - `device-id` = first 16 hex chars (64 bits) of `SHA-256(operational cert public key DER)`.
+   - The 33-character form (`16 + "-" + 16`) fits comfortably under the 63-char DNS-label limit. A device participating in two zones advertises two instances (one per zone-id, with potentially different device-ids).
+3. **TXT keys.** Required: `ZI` (16 hex chars), `DI` (16 hex chars). Optional: `VP` (vendor:product, debug only), `FW` (firmware semver), `EP` (endpoint count). **`FM` is forbidden** (per DEC-074).
+4. **Authoritative SRV port.** Per DEC-082, the SRV port is authoritative; default 8443 for operational. Browsers MUST NOT assume a default if SRV says otherwise.
+5. **Commissioning instance-name padding.** Commissioning service `_mash-comm._tcp` instance name is `MASH-NNNN` where `NNNN` is the discriminator zero-padded to four decimal digits. (Pre-existing convention in mash-go; codified here so golden-test fixtures and second-implementation parity are unambiguous.)
+
+This DEC supersedes the contradicting prose in `docs/discovery.md` §2.3 and the stale `FM` row in `docs/testing/behavior/discovery.md` §3.3 / §3.5. Both files are updated in the same change set.
+
+**Why the reconciled position (and not the high-level §2.3 prose).**
+
+- **Multi-zone correctness.** §2.3's `<device-id>` instance name was written before DEC-082 formalized two-port deployment and the multi-zone TXT-per-pair model. Without `<zi>-<di>` instance names, a device in two zones produces two SRV records under one name — undefined behavior in mDNS responders.
+- **`ZI` is needed at browse-time.** A controller that already trusts a specific zone CA needs to filter advertised devices by `ZI` *before* dialing TLS — without `ZI` in TXT, the controller would have to dial every operational record, complete TLS, and read the certificate fingerprint to discover which ones belong to its zone. That defeats the point of advertising.
+- **DEC-074 is the most recent normative source on `FM`.** Both pre-DEC-074 docs are out of date; aligning §2.3 / §3.3 with DEC-074 is bookkeeping, not a design change.
+- **mash-go already conforms** to the reconciled position. Adopting it as canonical introduces no implementation churn for the reference implementation; it only fixes the documentation.
+
+**Threat-model / interop note.** A spec-strict-to-§2.3 implementation (no `ZI`, has `FM`, instance `<device-id>`) would be invisible to a mash-go controller because `pkg/discovery/txtrecord.go:DecodeOperationalTXT` rejects records missing `ZI` and `mdns.go:entryToOperational` silently drops records that fail decode. Two such implementations could not interop — exactly the situation Phase 18 surfaced.
+
+**Implementation impact.**
+- **mash-go (reference, canonical).** No code changes. DEC-074 already enforced; instance name `<ZoneID>-<DeviceID>` already canonical (`mdns.go:151`); `MASH-%04d` padding already canonical (`mdns.go:81`). Existing tests `TestOperationalTXTRoundtrip`, `TestOperationalTXT_OmitsFeatureMap` continue to regression-guard.
+- **mash-py.** Phase 18 advertiser implements this DEC verbatim (no spec-issue raised, because the spec is the resolution).
+- **Docs.** `docs/discovery.md` §2.2 (commissioning padding rule) and §2.3 (operational TXT table + instance name) rewritten in the same change. `docs/testing/behavior/discovery.md` §3.3 (drop FM row) and §3.5 (drop FM character-encoding row) updated likewise.
+
+**Acceptance.** All of:
+1. `docs/discovery.md` §2.2/§2.3 reconciled with this DEC.
+2. `docs/testing/behavior/discovery.md` §3.3/§3.5 reconciled.
+3. mash-go discovery tests still green (no changes expected).
+4. mash-py advertiser publishes records discoverable by mash-go controller and vice versa (Phase 18 interop test).
+
+**Related:** DEC-067 (single-port deployment — unchanged), DEC-074 (`FM` removal from operational TXT — superseding prose finally lands), DEC-078 (commissionable TXT schema — adjacent canonical schema), DEC-082 (two-port deployment + per-zone instances — gives the structural reason `<zi>-<di>` is required).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -5004,3 +5059,4 @@ Key learnings:
 | 2026-04-26 | Added DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2). Surfaced during mash-py Phase 7 — the `commissioning-pase.md §2` SPAKE2+ section was unimplementable as written (`K_shared` undefined, `M = G·H(label)` type-mismatched, PASE_X `bytes[32]` impossible) and the Go reference had exploitable security gaps (no MHF before HKDF — verifier theft brute-forces the 8-digit code in seconds; transcript not length-prefixed; identity element not rejected). DEC-084 adopts RFC 9383 + Matter conventions wholesale: fixed RFC 9383 P-256 M/N constants, PBKDF2-HMAC-SHA256 with 100,000 iterations, derived salt (`SHA-256("MASH PBKDF2 salt v1" \|\| discriminator \|\| setup_code)[:16]`), length-prefixed RFC 9383 §3.3 transcript, KcA/KcB confirmation MAC keys per RFC 9383 §3.4, mandatory identity-element rejection. Preserves the original spec's K_main / K_confirm / K_encrypt three-key chain (clearer than RFC 9383's split). Wire-breaking: `pA`/`pB` are now 65 bytes uncompressed (was incorrectly typed `bytes[32]`). Lands in lockstep across mash-go (Phase 7C) and mash-py (Phase 7D); resolves spec-issues Issue #5. |
 | 2026-04-26 | Added DEC-085: Commissioning cert install uses dedicated MsgTypes 10–13/20, not the renewal envelope. Surfaced during mash-py Phase 9 — three downstream specs (`security.md §4.3/4.5`, `stack-architecture.md §8.4`, `commissioning-pase.md §4.3`) and `mash-go` had drifted from `message-types.md` (canonical) and were driving the renewal envelope (MsgTypes 30–33) on the commissioning ALPN. Decision: `message-types.md` wins. Cert install on `mash-comm/1` uses `CSRRequest (10)`, `CSRResponse (11)`, `CertInstall (12)`, `CertInstallResponse (13)`, `CommissioningComplete (20)`. Renewal stays on `mash/1` with 30–33. Disjoint integer ranges + ALPN routing preserve the namespace-separation invariant single-port (DEC-067) and two-port (DEC-082) deployments depend on. Lands in lockstep across mash-go (Issue #7 fix), mash-py (Phase 9 implementation), and three spec-doc patches; resolves spec-issues Issue #7. |
 | 2026-04-27 | Added DEC-086: Subscription defaults, validation, and priming uniqueness. Surfaced during mash-py Phase 16 — `interaction-model.md §6` was example-only on default intervals (1000 ms / 60000 ms), silent on `maxInterval=0` rejection, silent on bounce-back suppression, ambiguous on heartbeat content (Go has both Empty and Full modes), and silent on the priming wire-frame (Go's `subscription.Manager` would emit a separate priming `Notification` in addition to the values in the Subscribe Response). Spec lifted to RECOMMENDED defaults; `maxInterval=0` and `subscriptionId=0` rejected; bounce-back made mandatory; heartbeat MUST be full; priming MUST live only in the Subscribe Response (key 2 always present). mash-go drops `HeartbeatEmpty` and the duplicate priming-notification path; mash-py implements the full set as the Phase 16 acceptance gate. |
+| 2026-04-28 | Added DEC-088: Operational mDNS TXT canonicalization. Surfaced during mash-py Phase 18 — `docs/discovery.md §2.3` (no `ZI`, instance `<device-id>`), `docs/testing/behavior/discovery.md §3.3` (`ZI` required, instance `<zone-id>-<device-id>`), and DEC-074 (`FM` removed) had drifted apart. The §2.3 prose was structurally incompatible with multi-zone (DEC-082) — a single `<device-id>` instance name has no room for per-(device, zone) records. DEC-088 normatively defines: instance name `<zone-id>-<device-id>`; required TXT `ZI` + `DI`; optional `VP`/`FW`/`EP`; `FM` forbidden; commissionable instance name `MASH-NNNN` (4-digit zero-pad). mash-go already conformant (no code changes, regression-guarded by `TestOperationalTXT_OmitsFeatureMap` and `TestOperationalTXTRoundtrip`); `docs/discovery.md` §2.2/§2.3 + `docs/testing/behavior/discovery.md` §3.3/§3.5 updated in lockstep; mash-py Phase 18 advertiser implements DEC-088 verbatim. |

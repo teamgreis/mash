@@ -297,10 +297,12 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
 | MASH.S.DISC.POST_COMM | Post-commissioning mDNS | 1 | M |
+| MASH.S.DISC.TXT_ZI | Zone ID TXT record | 1 | M |
 | MASH.S.DISC.TXT_DI | Device ID TXT record | 1 | M |
-| MASH.S.DISC.TXT_FW | Firmware version TXT record | 1 | M |
-| MASH.S.DISC.TXT_EP | Endpoint count TXT record | 1 | M |
-| MASH.S.DISC.TXT_FM | Feature map TXT record | 1 | M |
+| MASH.S.DISC.TXT_FW | Firmware version TXT record | 0, 1 | O |
+| MASH.S.DISC.TXT_EP | Endpoint count TXT record | 0, 1 | O |
+<!-- DEC-074 / DEC-088: FM (feature map) is forbidden in operational TXT. -->
+| MASH.S.DISC.TXT_VP | Vendor:Product TXT record | 0, 1 | O |
 
 ### 10.4 QR Code
 

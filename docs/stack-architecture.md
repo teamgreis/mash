@@ -648,7 +648,6 @@ classDiagram
 | DI | Operational | Device ID (16 hex chars) |
 | VP | Operational, Commissioner | Vendor:Product ID |
 | FW | Operational | Firmware version |
-| FM | Operational | Feature map hex |
 | EP | Operational | Endpoint count |
 | ZN | Commissioner | Zone name |
 | DC | Commissioner | Device count |

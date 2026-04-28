@@ -54,8 +54,10 @@ When a device has an open commissioning window:
 
 **Service Instance Name:**
 ```
-MASH-<discriminator>._mash-comm._tcp.local
+MASH-NNNN._mash-comm._tcp.local
 ```
+
+Where `NNNN` is the discriminator formatted as a 4-digit decimal with leading zeros (range 0000–4095). Example: discriminator 42 → `MASH-0042`. (Per DEC-088; the 4-digit zero-pad rule was previously implicit in the reference implementation and is now normative for golden-test fixtures.)
 
 **TXT Records (canonical per DEC-078):**
 
@@ -100,28 +102,42 @@ MASH-5678._mash-comm._tcp.local
 
 ### 2.3 Operational Device (`_mash._tcp`)
 
-After commissioning, device updates mDNS:
+After commissioning, the device updates mDNS. A device that participates in multiple zones (DEC-082 — up to one GRID zone + one LOCAL zone, optionally one TEST zone) advertises **one service instance per (device, zone) pair**, each with its own zone-specific operational certificate, device-id, and ZI/DI TXT pair.
 
-**Service Instance Name:**
+**Service Instance Name (DEC-088, canonical):**
 ```
-<device-id>._mash._tcp.local
+<zone-id>-<device-id>._mash._tcp.local
 ```
 
-**TXT Records:**
+Where:
+- `zone-id` = first 16 hex chars (64 bits) of `SHA-256(Zone CA cert DER)`.
+- `device-id` = first 16 hex chars (64 bits) of `SHA-256(operational cert public key DER)`.
 
-| Key | Description | Example |
-|-----|-------------|---------|
-| `DI` | Device ID | `PEN12345.EVSE001` |
-| `VP` | Vendor:Product ID | `1234:5678` |
-| `FW` | Firmware version | `1.2.3` |
-| `EP` | Endpoint count | `2` |
-| `FM` | Feature map (hex) | `0x001B` |
+The 33-character `<zone-id>-<device-id>` form fits comfortably under the 63-char DNS-label limit. Both halves are zone-specific: the same physical device in two zones has two distinct device-ids (one per operational cert), so its two `_mash._tcp` instance names never collide.
 
-**Example:**
+**TXT Records (DEC-088, canonical):**
+
+| Key | Type | Required | Max Len | Description |
+|-----|------|----------|---------|-------------|
+| `ZI` | string | Yes | 16 | Zone ID (hex of `SHA-256(Zone CA cert DER)[0:8]`) |
+| `DI` | string | Yes | 16 | Device ID (hex of `SHA-256(operational cert public key DER)[0:8]`) |
+| `VP` | string | No | 11 | Vendor:Product ID (debug/diagnostics; not required) |
+| `FW` | string | No | 20 | Firmware version (semver) |
+| `EP` | uint8 | No | 3 | Endpoint count (informational) |
+
+**`FM` is forbidden** in operational TXT records (DEC-074): capability discovery is a wire read of `featureMap` (attribute `0xFFFC`) per feature, not an mDNS lookup. Browsers MUST ignore any legacy `FM` key.
+
+**Why both ZI and DI in TXT?** A controller that already trusts a specific Zone CA needs to filter operational records by `ZI` *before* dialing TLS — otherwise it would have to dial every record in range, complete TLS, and read the cert fingerprint just to learn which zone the device belongs to. `ZI` makes browse-time filtering possible; `DI` distinguishes multiple devices within one zone.
+
+**Example (device in two zones):**
 ```
-PEN12345-EVSE001._mash._tcp.local
+A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local
   SRV 0 0 8443 evse-001.local
-  TXT DI=PEN12345.EVSE001 VP=1234:5678 FW=1.2.3 EP=2 FM=0x001B
+  TXT ZI=A1B2C3D4E5F6A7B8 DI=F9E8D7C6B5A49382 VP=1234:5678 FW=1.2.3 EP=2
+
+1234567890ABCDEF-FEDCBA0987654321._mash._tcp.local
+  SRV 0 0 8443 evse-001.local
+  TXT ZI=1234567890ABCDEF DI=FEDCBA0987654321 FW=1.2.3 EP=2
 ```
 
 ### 2.4 Pairing Request (`_mashp._udp`)

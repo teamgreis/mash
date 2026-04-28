@@ -187,14 +187,17 @@ model=Home Hub
 
 ### 3.3 Operational TXT Records (`_mash._tcp`)
 
+Per DEC-088 (canonical schema):
+
 | Key | Type | Required | Max Len | Description |
 |-----|------|----------|---------|-------------|
 | `ZI` | string | Yes | 16 | Zone ID (first 64 bits of SHA-256(Zone CA cert DER)) |
 | `DI` | string | Yes | 16 | Device ID (first 64 bits of SHA-256(device op cert pubkey DER)) |
-| `VP` | string | No | 11 | Vendor:Product ID (optional, for debugging) |
+| `VP` | string | No | 11 | Vendor:Product ID (debug/diagnostics) |
 | `FW` | string | No | 20 | Firmware version (semver) |
 | `EP` | uint8 | No | 3 | Endpoint count |
-| `FM` | string | No | 10 | Feature map (hex, e.g., "0x001B") |
+
+**`FM` is forbidden** in operational TXT records (DEC-074): capability discovery requires a wire read of `featureMap` (attribute `0xFFFC`) per feature, not an mDNS lookup. Encoders MUST NOT emit `FM`; decoders MUST ignore any legacy `FM` key.
 
 **Example:**
 ```
@@ -203,7 +206,7 @@ DI=F9E8D7C6B5A49382
 FW=1.2.3
 ```
 
-**Total size:** ~70 bytes typical, 120 bytes maximum
+**Total size:** ~70 bytes typical, 110 bytes maximum
 
 **Note:** Both ZI and DI are fingerprint-derived. VP is optional (useful for debugging but not required for open source implementations).
 
@@ -240,7 +243,6 @@ FW=1.2.3
 | Brand/Model/Device name | UTF-8 | Any Unicode (avoid control chars) |
 | Zone name (ZN) | UTF-8 | Any Unicode (avoid control chars) |
 | Firmware (FW) | ASCII | 0-9, period, hyphen |
-| Feature Map (FM) | Hex | 0-9, a-f, A-F, x |
 
 ---
 
@@ -652,7 +654,8 @@ MASH.S.DISC.OPER_TXT_ZI=1               # Zone ID in TXT
 MASH.S.DISC.OPER_TXT_DI=1               # Device ID in TXT
 MASH.S.DISC.OPER_TXT_VP=1               # Vendor:Product in TXT
 MASH.S.DISC.OPER_TXT_FW=1               # Firmware version in TXT (optional)
-MASH.S.DISC.OPER_TXT_FM=1               # Feature map in TXT (optional)
+MASH.S.DISC.OPER_TXT_EP=1               # Endpoint count in TXT (optional)
+# DEC-074: FM (feature map) is forbidden in operational TXT.
 
 # QR code
 MASH.S.DISC.QR_VERSION=1                # QR code version
