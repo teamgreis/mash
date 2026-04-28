@@ -145,30 +145,39 @@ async def test_find_commissionable_timeout(advertiser):
 
 
 async def test_find_operational_by_device_id(advertiser):
+    """DEC-088 operational record: ZI + DI required, instance is <ZI>-<DI>.
+
+    A legacy ``FM`` key is in the TXT record on purpose — DEC-074 forbids
+    encoding it but DEC-088 says decoders MUST silently ignore any legacy
+    ``FM`` key. We verify the parser doesn't raise on this and doesn't
+    surface the value anywhere.
+    """
+    zi = "A1B2C3D4E5F6A7B8"
+    di = "F9E8D7C6B5A49382"
     await _register(
         advertiser,
         SERVICE_TYPE_OPERATIONAL,
-        "PEN12345-EVSE001",
+        f"{zi}-{di}",
         port=8443,
         properties={
-            "DI": "PEN12345.EVSE001",
+            "ZI": zi,
+            "DI": di,
             "VP": "1234:5678",
             "FW": "1.2.3",
             "EP": "2",
-            "FM": "0x001B",
+            "FM": "0x001B",  # legacy — must be ignored, not an error
         },
     )
 
     async with Browser() as browser:
-        svc = await browser.find_operational_by_device_id(
-            "PEN12345.EVSE001", timeout=5.0
-        )
+        svc = await browser.find_operational_by_device_id(di, timeout=5.0)
 
-    assert svc.device_id == "PEN12345.EVSE001"
+    assert svc.zone_id == zi
+    assert svc.device_id == di
     assert svc.vendor_product == "1234:5678"
     assert svc.firmware == "1.2.3"
     assert svc.endpoint_count == 2
-    assert svc.feature_map == 0x1B
+    assert not hasattr(svc, "feature_map")  # DEC-074 / DEC-088
 
 
 # ---------------------------------------------------------------------------
