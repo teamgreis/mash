@@ -44,6 +44,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Self
@@ -67,7 +68,11 @@ from mash_py.transport.connection import (
 from mash_py.transport.connection import (
     accept as accept_connection,
 )
-from mash_py.transport.tls import make_operational_context
+from mash_py.transport.tls import (
+    ZoneCertEntry,
+    make_multi_zone_operational_context,
+    make_operational_context,
+)
 from mash_py.wire import (
     DEFAULT_MAX_MESSAGE_SIZE,
     MessageType,
@@ -166,6 +171,7 @@ class DeviceService:
         operational_cert: x509.Certificate,
         operational_key: EllipticCurvePrivateKey,
         config: DeviceServiceConfig | None = None,
+        zone_entries: list[ZoneCertEntry] | None = None,
     ) -> None:
         self._device = device
         self._zone_ca = zone_ca
@@ -173,6 +179,19 @@ class DeviceService:
         self._op_key = operational_key
         self._config = config if config is not None else DeviceServiceConfig()
         self._server = OperationalServer(device)
+        # Multi-zone (Phase 20): if ``zone_entries`` is provided, the
+        # operational listener is built with
+        # ``make_multi_zone_operational_context`` so per-zone SNI cert
+        # selection works (controllers from each zone present their own
+        # zone-CA-signed cert, mTLS verifies against the union pool of
+        # every zone's CA, the SNI callback swaps the server cert to the
+        # one matching the controller's intended device-id). When None,
+        # the single-zone path runs unchanged for backward compat with
+        # callers still passing ``zone_ca`` / ``operational_cert`` /
+        # ``operational_key`` only.
+        self._zone_entries: list[ZoneCertEntry] | None = (
+            list(zone_entries) if zone_entries else None
+        )
 
         self._listener: asyncio.Server | None = None
         self._port: int | None = None
@@ -219,11 +238,11 @@ class DeviceService:
         if self._listener is not None:
             raise RuntimeError("DeviceService already running")
 
-        ssl_ctx = make_operational_context(
-            zone_ca=self._zone_ca,
-            operational_cert=self._op_cert,
-            operational_key=self._op_key,
-        )
+        # Remember the bind args so ``rebind_with_zone_entries`` can
+        # restart on the same address later.
+        self._bind_host = host
+        self._bind_port = port
+        ssl_ctx = self._build_ssl_context()
 
         self._listener = await asyncio.start_server(
             self._handle_client,
@@ -274,6 +293,83 @@ class DeviceService:
         # only thing we'd be waiting on is courtesy cleanup.
         with contextlib.suppress(Exception):
             await asyncio.wait_for(listener.wait_closed(), timeout=0.5)
+
+    def _build_ssl_context(self) -> ssl.SSLContext:
+        """Pick the right TLS context for the current zone configuration.
+
+        Multi-zone if ``zone_entries`` was passed; otherwise single-zone
+        from ``zone_ca`` / ``operational_cert`` / ``operational_key``.
+        """
+        if self._zone_entries:
+            # Default cert presented when SNI is missing or doesn't
+            # match — pick the entry whose device-id matches our
+            # primary operational cert so single-zone callers keep
+            # the same on-the-wire behaviour.
+            primary_cn = self._op_cert.subject.rfc4514_string() if self._op_cert else None
+            default_entry = self._zone_entries[0]
+            for entry in self._zone_entries:
+                if (
+                    primary_cn
+                    and entry.operational_cert.subject.rfc4514_string() == primary_cn
+                ):
+                    default_entry = entry
+                    break
+            return make_multi_zone_operational_context(
+                self._zone_entries, default_entry=default_entry
+            )
+        return make_operational_context(
+            zone_ca=self._zone_ca,
+            operational_cert=self._op_cert,
+            operational_key=self._op_key,
+        )
+
+    async def rebind_with_zone_entries(
+        self, zone_entries: list[ZoneCertEntry]
+    ) -> None:
+        """Swap the listener's TLS context to a multi-zone build of
+        ``zone_entries``, while preserving in-flight connections.
+
+        Used by the device CLI when a re-entry commission adds a new
+        zone — controllers in the new zone present a cert signed by
+        the new zone's CA, which the existing listener (single-zone or
+        multi-zone with a stale entry list) wouldn't pass through mTLS.
+        New connections use the new context; previously-handshaked
+        connections keep running on their own (asyncio.Server's
+        ``close()`` only stops accepting; existing per-client tasks are
+        unaffected). We deliberately do NOT call :meth:`stop` here —
+        that signals ``_stop_event``, which every per-client task
+        watches and uses to drive its own close, and would kill the
+        harness's suite-zone control channel mid-test.
+        """
+        self._zone_entries = list(zone_entries)
+        if self._listener is None:
+            return  # not running; next start() will pick up the entries
+        old_listener = self._listener
+        host = getattr(self, "_bind_host", "::")
+        port = self._port if self._port is not None else 0
+        # Stop accepting on the old listener (existing conns survive),
+        # then immediately bind a new listener on the same port. We
+        # rely on SO_REUSEADDR (default for asyncio.start_server on
+        # Unix) to allow the immediate rebind. Don't await
+        # ``wait_closed()`` — that blocks on existing conns draining,
+        # which is exactly what we want NOT to happen.
+        old_listener.close()
+        ssl_ctx = self._build_ssl_context()
+        self._listener = await asyncio.start_server(
+            self._handle_client,
+            host=host,
+            port=port,
+            ssl=ssl_ctx,
+            ssl_handshake_timeout=self._config.ssl_handshake_timeout,
+            start_serving=True,
+        )
+        self._port = _resolve_port(self._listener)
+        _log.debug(
+            "rebound operational listener on :%d with %d zone entr%s",
+            self._port,
+            len(self._zone_entries),
+            "y" if len(self._zone_entries) == 1 else "ies",
+        )
 
     async def __aenter__(self) -> Self:
         return self

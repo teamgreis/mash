@@ -36,6 +36,7 @@ import os
 import secrets
 import signal
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,9 +72,11 @@ from mash_py.features.test_control import (
     TRIGGER_RESET_TEST_STATE,
     TestControlFeature,
 )
+from mash_py.commissioning.cert_store import ZoneType
 from mash_py.model import Device, Endpoint, EndpointType
 from mash_py.service import DeviceService
-from mash_py.transport.tls import make_commissioning_context
+from mash_py.transport.tls import ZoneCertEntry, make_commissioning_context
+from mash_py.zone import ZoneExistsError, ZonePool, ZoneTypeExistsError
 
 _log = logging.getLogger("mash_py.cli.device")
 
@@ -382,6 +385,7 @@ def _build_device(
     *,
     device_id: str,
     test_control: TestControlFeature | None = None,
+    remove_zone_callback: Callable[[str], bool] | None = None,
 ) -> Device:
     """Build the Device tree.
 
@@ -393,6 +397,15 @@ def _build_device(
     (re-open commissioning window, reset state) work — mirroring
     ``mash-go/cmd/mash-device/main.go``'s pattern of always-compiled-in
     TestControl with enable-key gating.
+
+    ``remove_zone_callback`` is invoked with the requested zone-id on each
+    inbound RemoveZone command; it returns ``True`` if the zone was
+    actually dropped (in-memory state + pool + mDNS), ``False`` otherwise.
+    The lifecycle owns this callback so the wire response (the
+    ``removed`` boolean) accurately reflects the device's post-call
+    state — without it, multi-zone tests that fill capacity, send
+    RemoveZone for cleanup, then re-commission a same-type zone hit
+    ``ZoneTypeExistsError`` because the pool still holds the stale entry.
     """
     device = Device(device_id)
 
@@ -405,11 +418,9 @@ def _build_device(
 
     def remove_zone(params: dict[int, object]) -> dict[int, object]:
         zone_id = params.get(REMOVE_ZONE_PARAM_ZONE_ID, "")
-        # We only run one zone in the Phase 22 fixture; surface success
-        # for that zone, false otherwise. The conformance harness only
-        # checks the wire envelope, not the boolean — but a deterministic
-        # answer makes failures easier to triage.
-        return {REMOVE_ZONE_RESP_REMOVED: bool(zone_id)}
+        if remove_zone_callback is None or not isinstance(zone_id, str):
+            return {REMOVE_ZONE_RESP_REMOVED: bool(zone_id)}
+        return {REMOVE_ZONE_RESP_REMOVED: remove_zone_callback(zone_id)}
 
     di.set_command_handler(DEVICE_INFO_CMD_REMOVE_ZONE, remove_zone)
 
@@ -490,10 +501,25 @@ class _DeviceLifecycle:
         # ``_state`` flips from None (uncommissioned) to populated after
         # cert install completes. The operational task watches this flag
         # and brings up the operational listener once it transitions.
+        # ``_state`` always refers to the *primary* zone — the first one
+        # commissioned, which the harness uses as the suite control
+        # channel. Additional zones live in ``_zones`` and are tracked
+        # in ``_zone_pool`` (DEC-043 / DEC-060: max 1 per type, 3
+        # total). DeviceService keeps serving the primary zone's TLS
+        # context — multi-zone TLS (per-zone SNI cert selection) is
+        # available in :func:`mash_py.transport.tls.make_multi_zone_operational_context`
+        # but we don't swap it on the live listener here because the
+        # conformance corpus doesn't drive operational connections to
+        # secondary zones; the multi-zone wire shape is exercised at
+        # the cert-install layer + mDNS layer, both of which work
+        # without rebinding.
         self._state: CommissionedState | None = None
+        self._zones: dict[str, CommissionedState] = {}
+        self._zone_pool = ZonePool()
         if args.state_dir is not None and not args.reset:
             self._state = _load_commissioned_state(args.state_dir)
             if self._state is not None:
+                self._zones[self._state.zone_id] = self._state
                 _log.info(
                     "loaded commissioned state from %s (zone_type=%d, device_id=%s)",
                     args.state_dir,
@@ -721,6 +747,17 @@ class _DeviceLifecycle:
 
             if is_initial:
                 self._state = new_state
+                self._zones[new_state.zone_id] = new_state
+                # Register the primary zone in the pool so re-entry
+                # commissions can be type-checked + capacity-checked
+                # against it (DEC-043 / DEC-060). Suppress error here;
+                # an empty pool has no conflicts on first add, but we
+                # don't want any pool exception to derail the initial
+                # commission.
+                with contextlib.suppress(Exception):
+                    await self._zone_pool.add_zone(
+                        new_state.zone_id, ZoneType(new_state.zone_type)
+                    )
                 self._commission_done.set()
                 # DEC-082 ordering: park the connection until the main
                 # loop has the operational listener up. Closing earlier
@@ -738,32 +775,87 @@ class _DeviceLifecycle:
             else:
                 # Re-entry path: a TestControl trigger reopened the
                 # window and a new peer completed PASE+CertInstall.
-                # mash-py is single-zone (DEC-043 multi-zone is Phase 20+
-                # for mash-py, not Phase 22), so we do NOT replace
-                # ``self._state`` — that would orphan the suite zone
-                # connection the harness uses as the control channel
-                # and tank every subsequent test in the run. Instead
-                # the new install is observed-but-discarded: the wire
-                # exchange completes successfully (so tests verifying
-                # PASE / cert envelopes pass), but the operational
-                # service keeps serving the original zone. mash-go's
-                # multi-zone implementation would register the second
-                # zone alongside the first — that's a future mash-py
-                # phase, not a Phase 22 deliverable.
+                # Track the new zone alongside the primary (suite)
+                # zone — DEC-043 / DEC-060 max 1 zone per type, 3
+                # total, enforced by ZonePool. mash-go's multi-zone
+                # implementation registers each zone in its
+                # ``zones`` map; we mirror that by keying every zone
+                # on its ``zone_id`` (SHA-256(Zone CA DER)[:16]) and
+                # leaving ``self._state`` pinned to the primary so
+                # the harness's suite control channel — the
+                # operational TLS conn for the first-commissioned
+                # (TEST) zone — keeps working.
                 #
-                # Also close the comm listener so the harness's
-                # post-commission "verify_mdns_not_advertising" step
-                # (TC-COMM-WINDOW-005) sees the gate closed. Schedule
-                # the close OUTSIDE this handler; awaiting our own
-                # server's wait_closed from inside the handler would
-                # deadlock because wait_closed waits for this very
-                # task to return.
-                _log.info(
-                    "re-entry commission accepted (zone_type=%d) — "
-                    "discarded under single-zone simplification",
-                    new_state.zone_type,
-                )
-                asyncio.create_task(self._exit_commissioning_mode())
+                # We deliberately do NOT close the comm listener
+                # here. Multi-zone tests like TC-COMM-004 commission
+                # multiple zones back-to-back without an intervening
+                # ``enter_commissioning_mode`` step — the second
+                # ``commission`` action immediately dials the comm
+                # port and gets ECONNREFUSED if the first commission
+                # auto-closed it. The harness drives explicit
+                # close via ``TRIGGER_EXIT_COMMISSIONING_MODE`` or
+                # cycles via ``TRIGGER_RESET_TEST_STATE`` between
+                # tests; respect that. Tests that explicitly check
+                # "window closed after commission" (TC-COMM-WINDOW-005)
+                # always run from a factory-reset state, which goes
+                # through the ``is_initial=True`` path that DOES
+                # close via ``_exit_commissioning_for_epoch``.
+                new_zone_id = new_state.zone_id
+                try:
+                    await self._zone_pool.add_zone(
+                        new_zone_id, ZoneType(new_state.zone_type)
+                    )
+                except (ZoneExistsError, ZoneTypeExistsError) as exc:
+                    _log.warning(
+                        "re-entry commission rejected by zone pool: %r",
+                        exc,
+                    )
+                else:
+                    self._zones[new_zone_id] = new_state
+                    _log.info(
+                        "re-entry commission accepted: zone_type=%d "
+                        "zone_id=%s device_id=%s (zones=%d)",
+                        new_state.zone_type,
+                        new_zone_id,
+                        new_state.device_id,
+                        len(self._zones),
+                    )
+                    # Multi-zone TLS swap (Phase 20): rebuild the
+                    # operational listener's TLS context so controllers
+                    # in the new zone can mTLS-authenticate. Without
+                    # this, only suite-zone controllers pass mTLS and
+                    # tests like TC-COMM-004 that
+                    # ``extract_cert_device_id`` for non-suite zones
+                    # find no connection. Best-effort: a rebind failure
+                    # doesn't tank the commissioning exchange (it
+                    # already succeeded on the wire); the new zone's
+                    # operational reachability is the only thing
+                    # affected.
+                    if self._device_service is not None:
+                        entries = self._build_zone_cert_entries()
+                        with contextlib.suppress(Exception):
+                            await self._device_service.rebind_with_zone_entries(entries)
+                    # Per-zone operational mDNS instance per DEC-088 /
+                    # Phase 18 (the advertiser supports holding multiple
+                    # _mash._tcp instances simultaneously). Best-effort:
+                    # advertise failure shouldn't fail the commissioning
+                    # exchange, which already completed on the wire.
+                    if self._advertiser is not None:
+                        with contextlib.suppress(Exception):
+                            await self._advertiser.publish_operational(
+                                OperationalAdvertisement(
+                                    zone_id=new_zone_id,
+                                    device_id=new_state.device_id,
+                                    port=self._args.operational_port
+                                    if self._device_service is None
+                                    else self._device_service.port,
+                                    vendor_product=(
+                                        f"{self._args.brand}:{self._args.model}"
+                                    ),
+                                    firmware="mash-py-1.0",
+                                    endpoint_count=1,
+                                )
+                            )
         except BaseException as exc:
             self._last_commission_error = exc
             _log.warning("commissioning attempt failed: %r", exc)
@@ -869,6 +961,207 @@ class _DeviceLifecycle:
         async with self._comm_lock:
             await self._stop_commissioning_listener()
 
+    def _remove_zone_sync(self, zone_id: str) -> bool:
+        """Sync entry point for the DeviceInfo.removeZone command handler.
+
+        The wire-protocol command response must be synchronous — the
+        Invoke handler returns a dict that's encoded directly. We
+        validate the zone exists synchronously (the truthy "removed"
+        boolean is what controllers care about), then schedule the
+        actual teardown (mDNS goodbye, pool drop, multi-zone TLS
+        rebind) on the event loop. Without scheduling async, the
+        command would block on slow operations like mDNS unpublish.
+
+        Refusing to drop the suite (primary) zone matches mash-go's
+        behaviour: a controller cannot RemoveZone the zone whose
+        connection it's using (it would saw off the branch it's
+        sitting on); the harness's per-test cleanup specifically
+        targets non-suite zones.
+        """
+        if zone_id not in self._zones:
+            return False
+        if self._state is not None and zone_id == self._state.zone_id:
+            _log.warning(
+                "remove_zone refused: %s is the primary (suite) zone",
+                zone_id,
+            )
+            return False
+        # Schedule the async teardown. The command response races the
+        # task slightly — the wire ack returns ``removed=true`` while
+        # the mDNS goodbye + pool drop run in parallel. That's fine:
+        # the harness's next test cycle waits for mDNS state to
+        # stabilise before proceeding.
+        asyncio.create_task(self._remove_zone_async(zone_id))
+        return True
+
+    async def _remove_zone_async(self, zone_id: str) -> None:
+        """Asynchronous companion to :meth:`_remove_zone_sync`.
+
+        Drops the zone from in-memory state, withdraws its operational
+        mDNS record, removes it from :class:`ZonePool`, and rebinds
+        the operational listener with the remaining zone-cert entries
+        so subsequent re-commissions of the same zone-type can
+        succeed."""
+        zstate = self._zones.pop(zone_id, None)
+        if zstate is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._zone_pool.remove_zone(zone_id)
+        if self._advertiser is not None:
+            with contextlib.suppress(Exception):
+                await self._advertiser.unpublish_operational(
+                    zone_id, zstate.device_id
+                )
+        if self._device_service is not None and self._zones:
+            entries = self._build_zone_cert_entries()
+            with contextlib.suppress(Exception):
+                await self._device_service.rebind_with_zone_entries(entries)
+        _log.info(
+            "removed zone %s (zone_type=%d, %d zone(s) remain)",
+            zone_id,
+            zstate.zone_type,
+            len(self._zones),
+        )
+
+    def _build_zone_cert_entries(self) -> list[ZoneCertEntry]:
+        """Snapshot ``self._zones`` as a list of ``ZoneCertEntry``
+        ready for ``make_multi_zone_operational_context`` /
+        ``DeviceService.rebind_with_zone_entries``.
+
+        Order matters for the multi-zone context: the first entry is
+        the SNI fallback. Pin the primary (suite) zone first so a
+        controller that connects without SNI hits the suite cert —
+        same fallback behaviour as mash-go.
+        """
+        entries: list[ZoneCertEntry] = []
+        if self._state is not None and self._state.zone_id in self._zones:
+            entries.append(
+                ZoneCertEntry(
+                    device_id=self._state.device_id,
+                    operational_cert=self._state.operational_cert,
+                    operational_key=self._state.operational_key,
+                    zone_ca=self._state.zone_ca_cert,
+                )
+            )
+        primary_zone_id = self._state.zone_id if self._state else None
+        for zid, zstate in self._zones.items():
+            if zid == primary_zone_id:
+                continue
+            entries.append(
+                ZoneCertEntry(
+                    device_id=zstate.device_id,
+                    operational_cert=zstate.operational_cert,
+                    operational_key=zstate.operational_key,
+                    zone_ca=zstate.zone_ca_cert,
+                )
+            )
+        return entries
+
+    async def _factory_reset(self) -> None:
+        """Wipe every commissioned zone, drop the operational service,
+        and re-enter the uncommissioned phase.
+
+        Mirrors mash-go's ``TriggerFactoryReset`` semantics: the device
+        sheds its zone memberships, withdraws operational mDNS, and
+        re-advertises ``_mash-comm._tcp`` as if it were freshly
+        provisioned. The persisted state directory is wiped so a
+        process restart sees an uncommissioned device.
+
+        Out-of-band: any in-flight operational TLS sessions get torn
+        down by ``device_service.stop()``. Trigger callers (the harness)
+        therefore should not try to reuse the suite zone connection
+        after this — they need to re-discover and re-commission.
+        """
+        # Snapshot the zone records we need for mDNS goodbyes BEFORE
+        # we mutate state — `unpublish_operational` keys on
+        # (zone_id, device_id) and we want to send a goodbye for every
+        # one we've published.
+        zones_snapshot = list(self._zones.values())
+
+        # Stop the operational listener first so no new connections
+        # arrive while we're tearing down. The bounded
+        # ``listener.wait_closed`` (Phase 22 fix) caps this at 0.5s.
+        if self._device_service is not None:
+            with contextlib.suppress(Exception):
+                await self._device_service.stop()
+            self._device_service = None
+
+        # Withdraw every per-zone operational mDNS record.
+        if self._advertiser is not None:
+            for z in zones_snapshot:
+                with contextlib.suppress(Exception):
+                    await self._advertiser.unpublish_operational(
+                        z.zone_id, z.device_id
+                    )
+
+        # Drop in-memory zone state.
+        self._zones.clear()
+        for z in zones_snapshot:
+            with contextlib.suppress(Exception):
+                await self._zone_pool.remove_zone(z.zone_id)
+        self._state = None
+
+        # Wipe persisted artifacts so a restart is clean. Best-effort:
+        # missing files are normal (state_dir may be None for ad-hoc
+        # runs).
+        if self._args.state_dir is not None:
+            with contextlib.suppress(Exception):
+                _wipe_state(self._args.state_dir)
+
+        # Re-arm the commission_done event so the next initial
+        # commission can fire it. ``_op_listener_ready`` is consumed
+        # once-per-uncommissioned phase too.
+        self._commission_done = asyncio.Event()
+        self._op_listener_ready = asyncio.Event()
+        # Bring the comm listener up (uncommissioned-phase advertise +
+        # listen). ``_enter_commissioning_mode`` is idempotent under the
+        # comm lock and bumps the epoch — if the listener is already
+        # up (common: factory_reset right after a successful
+        # commission), this is just a re-advertise; otherwise it
+        # rebinds.
+        await self._enter_commissioning_mode()
+        # Spawn a fresh background task that watches for the next
+        # initial commission and brings the operational service back
+        # up — same path the original ``_enter_uncommissioned`` runs.
+        # Without this, a factory_reset → commission round-trip would
+        # leave the device in commissionable mode forever.
+        asyncio.create_task(self._await_recommission_after_reset())
+
+    async def _await_recommission_after_reset(self) -> None:
+        """After ``_factory_reset``, wait for ``_commission_done`` and
+        bring the operational service back up.
+
+        Mirrors :meth:`_enter_uncommissioned`'s tail (post-wait), minus
+        the first listener bind which ``_factory_reset`` already did.
+        """
+        assert self._stop_event is not None
+        commission_task = asyncio.create_task(self._commission_done.wait())
+        stop_task = asyncio.create_task(self._stop_event.wait())
+        try:
+            await asyncio.wait(
+                {commission_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for t in (commission_task, stop_task):
+                if not t.done():
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await t
+        if self._stop_event.is_set() and not self._commission_done.is_set():
+            return
+        if self._state is None:
+            _log.warning(
+                "post-factory-reset: commission_done set without state"
+            )
+            return
+        if self._args.state_dir is not None:
+            _persist_commissioned_state(self._args.state_dir, self._state)
+        captured_epoch = self._comm_epoch
+        await self._enter_commissioned(transition_from_commissionable=True)
+        self._op_listener_ready.set()
+        await self._exit_commissioning_for_epoch(captured_epoch)
+
     async def _exit_commissioning_for_epoch(self, captured_epoch: int) -> None:
         """Close the listener only if no Enter has overtaken ``captured_epoch``.
 
@@ -937,29 +1230,44 @@ class _DeviceLifecycle:
             _log.info("trigger: exiting commissioning mode")
             await self._exit_commissioning_mode()
         elif opcode == TRIGGER_FACTORY_RESET:
-            # Single-zone simplification: there's no multi-zone state to
-            # tear down. Logging only. A future phase that supports
-            # multi-zone re-commissioning will need to recycle the
-            # operational service here.
-            _log.info("trigger: factory reset (no-op in single-zone fixture)")
+            _log.info("trigger: factory reset")
+            await self._factory_reset()
         elif opcode == TRIGGER_RESET_TEST_STATE:
-            # The Phase 22 fixture only carries DeviceInfo + TestControl
-            # on the root endpoint and an empty EV_CHARGER endpoint —
-            # so there's no Status / Measurement / EnergyControl state
-            # to reset to defaults (mash-go's full handler does this for
-            # populated fixtures; mash-py mirrors the LISTENER reset
-            # behavior, which is the part the conformance harness
-            # depends on for hygienic test boundaries).
+            # Two effects on each reset:
             #
-            # The critical effect: cycle the commissioning window. Tests
-            # with ``device_in_commissioning_mode`` precondition rely on
-            # the window being open when their ``commission`` action
-            # dials the comm port. mash-go does this in its
-            # TRIGGER_RESET_TEST_STATE handler (exit → enter); without
-            # the matching exit/enter here, the comm listener stays
-            # closed after the initial commissioning and every
-            # commission-precondition test fails with PASE EOF.
-            _log.debug("trigger: reset test state (cycle comm window)")
+            # 1. **Drop leaked non-suite, non-TEST zones.** mash-go's
+            #    handler does the same thing
+            #    (``test_event_handler.go``: "Remove leaked/partial
+            #    non-TEST zones") so the next test starts with the
+            #    suite control channel as the only live zone. Without
+            #    this, a test that fills capacity (e.g.
+            #    TC-SEC-CONN-002 commissions GRID + LOCAL) leaves
+            #    those zones in the pool, and a follow-up test that
+            #    tries to commission the same zone-type hits
+            #    ZoneTypeExistsError. The Phase 22 fixture only
+            #    carries DeviceInfo + TestControl on the root endpoint,
+            #    so there's no Status / Measurement / EnergyControl
+            #    attributes to reset to defaults the way mash-go does.
+            #
+            # 2. **Cycle the commissioning window.** Tests with
+            #    ``device_in_commissioning_mode`` precondition rely on
+            #    the window being open when their ``commission`` action
+            #    dials the comm port — without an exit→enter cycle
+            #    here, a closed window from a prior test leaks through
+            #    and every commission-precondition test fails at
+            #    PASE-read.
+            _log.debug("trigger: reset test state")
+            primary_zone_id = (
+                self._state.zone_id if self._state is not None else None
+            )
+            stale_zone_ids = [
+                zid
+                for zid, zstate in self._zones.items()
+                if zid != primary_zone_id
+                and zstate.zone_type != int(ZoneType.TEST)
+            ]
+            for zid in stale_zone_ids:
+                await self._remove_zone_async(zid)
             await self._exit_commissioning_mode()
             await self._enter_commissioning_mode()
         else:
@@ -993,6 +1301,7 @@ class _DeviceLifecycle:
             self._args,
             device_id=self._state.device_id,
             test_control=test_control,
+            remove_zone_callback=self._remove_zone_sync,
         )
 
         self._device_service = DeviceService(
