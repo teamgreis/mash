@@ -209,28 +209,60 @@ If device is commanded to shut down during FAILSAFE:
 
 ### 5.1 Per-Zone Connection Tracking
 
-Each zone's connection is tracked independently:
+Each zone's connection is tracked independently. The state machine in
+§2 is **applied per zone slot** — each zone has its own connection-loss
+detection, its own FAILSAFE entry, its own `failsafeDuration` countdown
+to AUTONOMOUS, and its own failsafe limits.
+
+**Commanded limits and setpoints persist across a zone's connection
+loss** — see [Multi-Zone Resolution §6.2](multi-zone-resolution.md#62-zone-disconnects).
+A grid operator's regulatory limit must remain in force even if its
+controller's TCP connection drops momentarily, otherwise a controller
+flap could lift the constraint. Persistence does **not** mean the
+disconnected zone's commanded limit continues to dominate resolution
+once the slot enters FAILSAFE: from that point the slot's contribution
+is its failsafe limit (§2.2).
 
 ```
 Device with Zone 1 (GRID) and Zone 2 (LOCAL):
 
-T+0s:    Zone 2 connection lost
-         → Zone 2 limits cleared (treated as if ClearLimit)
-         → effectiveLimit = Zone 1 limit (remaining zone)
-         → controlState remains CONTROLLED (Zone 1 still connected)
+T+0s:    Zone 2 connection lost (e.g. TCP RST)
+         → Zone 2 connection-loss detected per §1
+         → Zone 2 slot enters FAILSAFE per §2.1 (immediately)
+         → Zone 2's contribution to resolution = its failsafe limit
+         → Zone 2's failsafeDuration countdown to AUTONOMOUS starts
+         → Zone 1 unaffected (still CONTROLLED)
+         → Device-wide controlState aggregates: FAILSAFE
+           (per the unified-controlState rule:
+            FAILSAFE > OVERRIDE > LIMITED > CONTROLLED > AUTONOMOUS)
 
-T+3600s: Zone 1 connection lost
-         → controlState = FAILSAFE
-         → failsafeConsumptionLimit applied
-         → failsafeDuration timer starts
+T+later: Zone 2 reconnects before its failsafeDuration expires
+         → Zone 2 slot exits FAILSAFE, returns to CONTROLLED
+         → Zone 2's commanded limit (which persisted) is again
+           Zone 2's contribution to resolution
+         → Device-wide controlState aggregates back to CONTROLLED
 ```
 
-### 5.2 All Zones Lost
+The "limits persist" rule is about the **commanded limit attribute**:
+the controller does not have to re-issue `SetLimit` after a flap. While
+the slot is in FAILSAFE the commanded limit is dormant; the failsafe
+limit takes over for resolution purposes.
 
-FAILSAFE state is entered only when ALL zone connections are lost:
+### 5.2 Per-Zone vs. Device-Wide FAILSAFE
 
-- **Partial loss**: Device continues with remaining zones
-- **Complete loss**: FAILSAFE with failsafe limits
+FAILSAFE is a **per-zone-slot** state. The device's unified `controlState`
+attribute is the aggregation across all zone slots — the most-concerning
+state wins (`FAILSAFE > OVERRIDE > LIMITED > CONTROLLED > AUTONOMOUS`,
+see [energy-control.md "Unified Control State"](../../features/energy-control.md#unified-control-state)).
+
+- **Partial loss**: each lost zone's slot enters FAILSAFE immediately on
+  detection (§2.1, applied per-slot); remaining connected zones continue
+  to set commanded limits/setpoints. Device-wide `controlState` reflects
+  the most-concerning slot — so a single lost zone takes the device into
+  FAILSAFE.
+- **Complete loss**: every slot is in FAILSAFE; device-wide `controlState`
+  is FAILSAFE. Each slot independently runs its `failsafeDuration` timer
+  to AUTONOMOUS (§2.3 / §3).
 
 ### 5.3 Failsafe Configuration Source
 
@@ -373,36 +405,68 @@ MASH.S.CTRL.B_GRACE_DURATION = 300 (5 minutes, if supported)
 - Device remains in FAILSAFE after restart
 - AUTONOMOUS transition at original T+4h (accounting for downtime)
 
-### TC-FAIL-007: Per-Zone Connection Loss
+### TC-FAIL-007: Per-Zone Connection Loss (Failsafe Limit Replaces Commanded)
 
 **Preconditions:**
-- Zone 1 and Zone 2 connected
-- Zone 1 limit = 5000000 mW
-- Zone 2 limit = 7000000 mW
-- effectiveLimit = 5000000 mW
+- Zone 1 (GRID) and Zone 2 (LOCAL) connected
+- Zone 1 commanded limit = 5000000 mW
+- Zone 2 commanded limit = 7000000 mW
+- Zone 2 failsafeConsumptionLimit = 3000000 mW
+- effectiveLimit = `min(5000000, 7000000)` = 5000000 mW
 
 **Test Steps:**
-1. Disconnect Zone 2 only
-2. Read effectiveConsumptionLimit
+1. Disconnect Zone 2 (clean disconnect → detection within 1 s per §1.3)
+2. Read controlState
+3. Read effectiveConsumptionLimit
 
 **Expected:**
-- controlState remains CONTROLLED (Zone 1 still connected)
-- effectiveLimit = 5000000 mW (Zone 1 limit only)
+- Zone 2 slot enters FAILSAFE on detection (per §2.1, applied per-slot)
+- Zone 2's commanded limit persists (multi-zone-resolution.md §6.2) but
+  is dormant while the slot is in FAILSAFE
+- Zone 2's contribution to resolution is now its failsafe limit
+  (3000000 mW), not its commanded value
+- effectiveLimit = `min(5000000, 3000000)` = 3000000 mW
+- Device-wide controlState = FAILSAFE (any slot in FAILSAFE wins per
+  the unified-controlState rule)
 
-### TC-FAIL-008: All Zones Lost
+### TC-FAIL-007b: Reconnection Restores Commanded Limit
+
+**Preconditions:**
+- Continuing from TC-FAIL-007 (Zone 2 in FAILSAFE)
+- Zone 2's failsafeDuration has not elapsed
+
+**Test Steps:**
+1. Reconnect Zone 2 (TLS handshake + operational session)
+2. Read effectiveConsumptionLimit
+3. Read controlState
+
+**Expected:**
+- Zone 2 slot exits FAILSAFE → CONTROLLED
+- Zone 2's persisted commanded limit (7000000 mW) is again its
+  contribution
+- effectiveLimit = `min(5000000, 7000000)` = 5000000 mW
+- Device-wide controlState aggregates back to CONTROLLED
+
+### TC-FAIL-008: All Zones Lost — Device-Wide FAILSAFE Persists
 
 **Preconditions:**
 - Zone 1 and Zone 2 connected
+- Each zone's failsafeDuration is configured (e.g. 60 s test value)
 
 **Test Steps:**
 1. Disconnect Zone 1
-2. Verify still CONTROLLED
+2. Verify controlState = FAILSAFE (Zone 1 slot in FAILSAFE)
 3. Disconnect Zone 2
-4. Read controlState
+4. Verify controlState = FAILSAFE (both slots in FAILSAFE)
+5. Wait until both slots' failsafeDuration elapses without any reconnect
+6. Read controlState
 
 **Expected:**
-- After Zone 2 disconnect: controlState = FAILSAFE
-- failsafeConsumptionLimit applied
+- Step 2: controlState = FAILSAFE — Zone 1 slot in FAILSAFE, Zone 2 still
+  CONTROLLED, aggregate is FAILSAFE
+- Step 4: controlState = FAILSAFE — both slots in FAILSAFE
+- Step 6: each slot has independently transitioned FAILSAFE → AUTONOMOUS
+  (§2.3); device-wide controlState aggregates to AUTONOMOUS
 
 ### TC-FAIL-009: Timer Accuracy
 
