@@ -473,11 +473,35 @@ func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
 	return err
 }
 
-// ensureConnected checks if already connected; if not, establishes a commissioning TLS connection.
+// ensureConnected checks if already on a commissioning TLS connection; if
+// not, establishes one.
+//
+// This is the level-2 (`tls_connection_established`) precondition path. The
+// "right" connection is specifically a commissioning TLS conn —
+// `ConnTLSConnected`. An *operational* pool.Main (e.g. the suite-zone
+// control channel left attached after a level-3 → level-2 downgrade, or
+// after a teardown that borrowed it for triggers) IS `isConnected()` but
+// is the wrong shape: tests that follow this precondition expect to drive
+// PASE / `CommissioningError` envelopes over the `mash-comm/1` ALPN.
+// Sending those over `mash/1` is a category mismatch — the device's
+// operational read loop rejects the bytes as malformed CBOR and stays in
+// the operational session, so subsequent `verify_commissioning_state`
+// checks see `ConnOperational` and report COMMISSIONED instead of the
+// ADVERTISING the failure path implies. (Surfaced live by TC-PASE-003
+// when it runs after TC-PASE-002.)
+//
+// Callers that legitimately want to reuse an operational pool.Main (the
+// already-commissioned short-circuit in `ensureCommissioned`) must
+// handle that case BEFORE delegating here — this function will detach
+// it.
 func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionState) error {
-	if r.pool.Main() != nil && r.pool.Main().isConnected() {
+	if r.pool.Main() != nil && r.pool.Main().state == ConnTLSConnected {
 		r.pool.Main().hadConnection = true
 		return nil
+	}
+	if r.pool.Main() != nil && r.pool.Main().state == ConnOperational {
+		r.debugf("ensureConnected: pool.Main is operational; detaching for fresh commissioning conn")
+		detachMainControlChannel(r.pool, state)
 	}
 
 	maxAttempts := 1

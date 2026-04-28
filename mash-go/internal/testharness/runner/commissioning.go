@@ -41,6 +41,38 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 		}
 	}
 
+	// Already-commissioned short-circuit. If pool.Main is *operational* and
+	// PASE has completed, the test is asking for "commissioned" — that's
+	// already true. Returning early here also lets ensureConnected (which
+	// runs below for any other shape) reject operational pool.Main without
+	// regressing the level-3 path. Without this short-circuit, ensureConnected's
+	// "operational pool.Main → reconnect on commissioning ALPN" rule (added
+	// for TC-PASE-003) would tear down the live commissioned session every
+	// time a level-3 precondition runs.
+	if wasConnected &&
+		r.pool.Main().state == ConnOperational &&
+		r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed {
+		r.debugf("ensureCommissioned: pool.Main already operational + PASE complete; reusing session")
+		state.Set(KeySessionEstablished, true)
+		state.Set(KeyConnectionEstablished, true)
+		if r.connMgr.PASEState().sessionKey != nil {
+			state.Set(StateSessionKey, r.connMgr.PASEState().sessionKey)
+			state.Set(StateSessionKeyLen, len(r.connMgr.PASEState().sessionKey))
+		}
+		// Restore suite zone crypto so subsequent steps see the right pool.
+		suiteZoneID := r.suite.ZoneID()
+		if suiteZoneID != "" && r.connMgr.LoadZoneCrypto(suiteZoneID) {
+			r.debugf("ensureCommissioned: restored suite zone crypto from zone map")
+		} else {
+			crypto := r.suite.Crypto()
+			if crypto.ZoneCAPool != nil {
+				r.connMgr.SetWorkingCrypto(crypto)
+				r.debugf("ensureCommissioned: restored suite zone crypto from suite snapshot")
+			}
+		}
+		return nil
+	}
+
 	// First ensure we're connected.
 	if err := r.ensureConnected(ctx, state); err != nil {
 		r.debugf("ensureCommissioned: ensureConnected failed: %v", err)

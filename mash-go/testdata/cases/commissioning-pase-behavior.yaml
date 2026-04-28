@@ -46,12 +46,20 @@ tags:
   - success
 
 ---
-# TC-PASE-002: Wrong Setup Code Fails Verification
+# TC-PASE-002: Wrong Setup Code Fails Authentication
 id: TC-PASE-002
-name: Wrong Setup Code Causes VERIFICATION_FAILED
+name: Wrong Setup Code Causes AUTHENTICATION_FAILED
 description: |
   Verifies that an incorrect setup code causes PASE to fail with
-  a verification error. The device returns to ADVERTISING state.
+  an authentication error. The device returns to ADVERTISING state.
+
+  DEC-047 consolidates every SPAKE2+ failure mode (wrong identity,
+  invalid pA, MAC mismatch from a wrong setup code) onto the single
+  ErrCodeAuthFailed (1) wire code, so peers cannot distinguish which
+  check tripped. The legacy ErrCodeConfirmFailed (2) → VERIFICATION_FAILED
+  classifier path is retained in the runner for backward-compat parsing
+  of pre-DEC-047 devices but is no longer the conformant emit shape.
+  See mash-py-spec-issues.md Issue #6 for the full lineage.
 
 pics_requirements:
   - D.COMM.PASE
@@ -67,7 +75,7 @@ steps:
       setup_code: "00000000"       # Wrong code
     expect:
       session_established: false
-      error: VERIFICATION_FAILED
+      error: AUTHENTICATION_FAILED
 
   - name: Verify device returned to ADVERTISING
     action: verify_commissioning_state

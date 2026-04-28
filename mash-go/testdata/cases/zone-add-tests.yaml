@@ -112,7 +112,7 @@ steps:
       setup_code: "00000000"
     expect:
       commission_success: false
-      error: VERIFICATION_FAILED
+      error: AUTHENTICATION_FAILED  # DEC-047: every SPAKE2+ failure → code 1; see mash-py-spec-issues.md Issue #6
       device_in_zone: false
 
 postconditions:

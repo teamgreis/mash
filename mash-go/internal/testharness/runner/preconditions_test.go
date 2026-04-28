@@ -167,14 +167,48 @@ func TestEnsureDisconnected_AlreadyDisconnected(t *testing.T) {
 	}
 }
 
-func TestEnsureConnected_AlreadyConnected(t *testing.T) {
+func TestEnsureConnected_AlreadyOnCommissioningALPN(t *testing.T) {
+	// `ensureConnected` is the level-2 (`tls_connection_established`)
+	// path: it should only short-circuit when pool.Main is *already* a
+	// commissioning TLS conn. The level-3 reuse case is
+	// `ensureCommissioned`'s job (see counterpart test below).
 	r := newTestRunner()
-	r.pool.Main().state = ConnOperational
+	r.pool.Main().state = ConnTLSConnected
 	state := engine.NewExecutionState(context.Background())
 
 	err := r.ensureConnected(context.Background(), state)
 	if err != nil {
-		t.Fatalf("unexpected error when already connected: %v", err)
+		t.Fatalf("unexpected error when already on commissioning TLS: %v", err)
+	}
+	if !r.pool.Main().hadConnection {
+		t.Error("expected hadConnection=true after early-return")
+	}
+}
+
+// TestEnsureConnected_OperationalPoolMainTriggersReconnect locks in the
+// TC-PASE-003 fix: a stale operational pool.Main (e.g. the suite control
+// channel left attached after a level-3 → level-2 downgrade) must NOT be
+// reused for level-2 preconditions. ensureConnected detaches it and
+// dials a fresh commissioning TLS conn — sending PASE /
+// CommissioningError envelopes over the operational `mash/1` ALPN is a
+// category mismatch.
+//
+// We use the simulated-port-closed state to short-circuit the actual
+// dial (CI-stable: no real network) and assert the error path proves
+// the reconnect was attempted, not that the operational conn was reused
+// as a no-op.
+func TestEnsureConnected_OperationalPoolMainTriggersReconnect(t *testing.T) {
+	r := newTestRunner()
+	r.pool.Main().state = ConnOperational
+	state := engine.NewExecutionState(context.Background())
+	state.Set(PrecondDevicePortClosed, true)
+
+	err := r.ensureConnected(context.Background(), state)
+	if err == nil {
+		t.Fatal("expected reconnect attempt to error against simulated closed port")
+	}
+	if r.pool.Main() != nil && r.pool.Main().state == ConnOperational {
+		t.Error("expected operational pool.Main to be detached before reconnect")
 	}
 }
 
