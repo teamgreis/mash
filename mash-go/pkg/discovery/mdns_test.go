@@ -18,6 +18,17 @@ func TestMDNSAdvertiserCreate(t *testing.T) {
 	defer adv.StopAll()
 }
 
+// TestDefaultAdvertiserConfig_TTLIs120Seconds is a regression guard for
+// DEC-089: uniform 120 s TTL across all mDNS records advertised by MASH.
+// Bumping the default would silently take the reference implementation
+// out of spec conformance.
+func TestDefaultAdvertiserConfig_TTLIs120Seconds(t *testing.T) {
+	cfg := discovery.DefaultAdvertiserConfig()
+	if cfg.TTL != 120*time.Second {
+		t.Errorf("DEC-089: default TTL must be 120 s, got %v", cfg.TTL)
+	}
+}
+
 // TestMDNSAdvertiserCommissionable verifies advertising a commissionable device.
 func TestMDNSAdvertiserCommissionable(t *testing.T) {
 	config := testAdvertiserConfig(t)

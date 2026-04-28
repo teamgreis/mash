@@ -71,6 +71,7 @@ When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick 
 - [DEC-078: Commissionable mDNS TXT Schema (canonical)](#dec-078-commissionable-mdns-txt-schema-canonical)
 - [DEC-082: Two-Port Deployment as Conformant Alternative to Single-Port ALPN Routing](#dec-082-two-port-deployment-as-conformant-alternative-to-single-port-alpn-routing)
 - [DEC-088: Operational mDNS TXT Canonicalization](#dec-088-operational-mdns-txt-canonicalization)
+- [DEC-089: Uniform 120 s mDNS TTL and MUST-Level Cache Invalidation](#dec-089-uniform-120-s-mdns-ttl-and-must-level-cache-invalidation)
 
 ### Multi-zone
 - [DEC-016: Multi-Zone Support](#dec-016-multi-zone-support)
@@ -4915,6 +4916,81 @@ This DEC supersedes the contradicting prose in `docs/discovery.md` §2.3 and the
 
 ---
 
+### DEC-089: Uniform 120 s mDNS TTL and MUST-Level Cache Invalidation
+
+**Date:** 2026-04-28
+**Status:** Accepted
+
+**Problem.**
+`docs/testing/behavior/connection-establishment.md §2.5` prescribes per-record-type TTLs inherited from generic DNS-SD guidance:
+
+| Record | Spec TTL | Rationale given |
+|---|---|---|
+| PTR | 4500 s | "Standard DNS-SD" |
+| SRV | 120 s | "Port changes rare but possible" |
+| AAAA | 120 s | "Address may change" |
+| TXT | 4500 s | "Metadata changes infrequently" |
+
+Two independent problems with this table:
+
+1. **Neither reference implementation conforms.** mash-go sets `TTL: 120 * time.Second` uniformly (`pkg/discovery/advertiser.go:77`) and passes it through to its zeroconf wrapper, which applies it to PTR/SRV/TXT alike. mash-py uses python-zeroconf's defaults (`other_ttl=120 s`, `host_ttl=4500 s`), giving PTR/SRV/TXT all 120 s. Both ship the same on-wire behavior; both diverge from the §2.5 table on PTR (and on TXT in mash-py's case, AAAA in mash-go's). The spec is aspirational vs. shipped reality.
+
+2. **The "TXT changes infrequently" premise is false for MASH.** DEC-088's TXT keys include `EP` (endpoint count, changes when features add/remove), `FW` (firmware semver, changes on update), `VP` (vendor:product, changes on rebrand). With a 4500 s (75 min) TTL, peers cache stale capability data for over an hour after a firmware update. The DNS-SD assumption ("TXT is metadata-only and stable") doesn't apply.
+
+A separate operational concern surfaced during mash-py Phase 22 conformance work: when a device exits ungracefully (crash, SIGKILL, power loss) it cannot send mDNS goodbye packets, and stale records persist for the full TTL across the LAN. Multiple test runs polluted dns-sd's cache for tens of minutes, causing test harnesses to dial defunct ports. The §"Cache invalidation triggers" list in `connection-establishment.md` already names "TCP connection-refused" and "TLS certificate mismatch" as triggers, but the language is descriptive — clients are not normatively required to invalidate.
+
+**Decision.**
+
+1. **Uniform 120 s TTL for PTR, SRV, AAAA, and TXT records** advertised by both `_mash._tcp` and `_mash-comm._tcp` services. Implementations MAY use longer TTLs only with explicit per-deployment justification (e.g., a battery-constrained device that has measured the multicast traffic cost); the conformant default is 120 s.
+
+2. **Clients MUST invalidate any cached mDNS entry on:**
+   - TCP `connection-refused` to the SRV-advertised address:port,
+   - TLS certificate mismatch (cert not signed by the expected Zone CA, or CommonName mismatch),
+   - Receipt of an mDNS "goodbye" (TTL=0) for the entry.
+
+   "Invalidate" means: drop the cached SRV/A/AAAA/TXT entry for the failing instance and re-issue a fresh PTR query before the next dial. Clients MUST NOT retry the same cached SRV target after one of these triggers.
+
+3. **Goodbye-on-shutdown remains the primary mechanism.** Devices SHOULD send `unregister_all_services`-equivalent goodbye bursts (3 packets, 125 ms apart per RFC 6762 §10.1) before terminating. The 120 s TTL is the recovery floor when goodbyes cannot be sent.
+
+**Why uniform 120 s and not the §2.5 table.**
+
+- **MASH TXT is dynamic, not stable.** `EP`/`FW`/`VP` change in normal operation. The DNS-SD convention's "TXT 4500 s" assumption is wrong for this protocol.
+- **Reference impls already converged on 120 s.** A spec that doesn't match either implementation is debt; either the spec moves to match shipped behavior or every implementation has to add per-record-type TTL plumbing. The former is one DEC; the latter is multi-language library surgery for no protocol benefit.
+- **IoT churn doesn't reward long PTR TTLs.** EVSEs, batteries, inverters get unplugged, re-zoned, factory-reset, and moved between zones routinely. A 75-minute zombie-record window after ungraceful exit is an operational footgun.
+- **Crash recovery floor.** With uniform 120 s, the worst-case stale-record duration is bounded at 2 minutes — annoying but tractable. The §2.5 table's 4500 s makes the same scenario "broken until the next dev session."
+- **Multicast traffic is not a concern at MASH scale.** RFC 6762 §10's "short TTLs cause query storms" warning applies to networks with hundreds of stable services (printers, AppleTVs, etc.). A typical home-energy LAN has single-digit MASH devices and a handful of clients; the additional re-query traffic at 120 s is single-digit kbps per device, well under the noise floor.
+
+**Why the cache-invalidation MUST.**
+
+- The 120 s TTL is the slow path. Cache invalidation on connection-refused / TLS-mismatch is the fast path — peers detect failure within the first failed dial (sub-second) instead of waiting up to 120 s for the cache to age out.
+- mash-go's runner already partially does this (`pkg/transport/dialer.go` clears the cache entry on dial failure); making it MUST aligns the spec with the more correct of the two reference behaviors and removes a class of "harness picks stale SRV record" bugs (Phase 22 hit this).
+- "Goodbye received" is added to the trigger list explicitly because some mDNS responder caches (notably macOS's mDNSResponder) display goodbye'd records to local browsers for additional seconds; clients MUST not paper over that by silently retrying.
+
+**Implementation impact.**
+
+- **mash-go.** No code change required. `pkg/discovery/advertiser.go:77` already sets uniform 120 s. Cache invalidation on connection-refused / TLS-mismatch is partially implemented in `pkg/transport/dialer.go`; a follow-up patch (out of scope for this DEC's acceptance) tightens the implementation to MUST level by also invalidating on TLS-cert-mismatch (currently only invalidates on connection-refused).
+- **mash-py.** `mash_py/discovery/advertiser.py` overrides python-zeroconf's `other_ttl` and `host_ttl` to 120 s on every `register_service` call (one-line change per registration site). Clients in the test harness (`tools/run_conformance.sh` discovery path, mash-py operational client) invalidate their browser cache on connection-refused. Mostly already correct; this DEC normatively records the contract.
+- **Docs.** `docs/testing/behavior/connection-establishment.md §2.5` table replaced with a single-row "all records: 120 s" entry. §"Cache invalidation triggers" promoted from descriptive list to MUST-level requirements. `docs/discovery.md` updated if it carries TTL prose (currently it does not).
+
+**Acceptance.** All of:
+1. `docs/testing/behavior/connection-establishment.md §2.5` updated to the uniform-120 s table and the MUST-level cache-invalidation list.
+2. mash-py's advertiser explicitly overrides python-zeroconf's `host_ttl` to 120 s (the `other_ttl` default is already 120 s but is set explicitly for clarity).
+3. mash-go's existing `TTL: 120 * time.Second` is regression-guarded (no change; existing test `TestMDNSAdvertiserDefaults` continues to pass).
+4. A unit test in mash-py asserts the registered service's `host_ttl` is 120 s.
+
+**Declined alternatives.**
+
+- **"Make the implementations conform to the §2.5 table."** Rejected. python-zeroconf and most mDNS libraries (Avahi, Bonjour) take per-record-class TTL parameters keyed by `host_ttl` / `other_ttl`, not per-record-type (`PTR_ttl` / `SRV_ttl` / `TXT_ttl`). Implementing the §2.5 table would require lower-level surgery in every implementation for behavior that, when measured, doesn't matter.
+- **"Even shorter TTL (e.g. 30 s)."** Rejected. 30 s starts to produce noticeable multicast traffic at LAN scale and offers diminishing returns once the cache-invalidation MUST is in place — the fast path covers the common case.
+- **"Document § 2.5 as SHOULD, accept either uniform-120 s or the table."** Rejected. SHOULD-level TTL guidance plus a non-conformant reference produces ambiguity for third-party implementers ("which one is the spec?") without resolving the underlying problem (the table doesn't match real behavior).
+
+**Threat-model / interop note.**
+A spec-strict-to-§2.5 implementation (4500 s PTR/TXT) would still interop with both reference implementations on the wire — TTLs are advisory to receivers — but its records would persist for 75 min after ungraceful exit, causing the operational pain this DEC eliminates. Adopting uniform 120 s is therefore a strict improvement for interop hygiene; the only "loss" is alignment with generic DNS-SD convention, which doesn't fit MASH's churn profile anyway.
+
+**Related:** DEC-067 (single-port deployment — TTL applies to its mDNS records), DEC-078 (commissionable TXT schema — TTL applies to those records), DEC-082 (two-port deployment — both listeners' SRV records use the same uniform TTL), DEC-088 (operational TXT schema — `EP`/`FW`/`VP` are the dynamic fields the longer TTL was wrong for).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -5060,3 +5136,4 @@ Key learnings:
 | 2026-04-26 | Added DEC-085: Commissioning cert install uses dedicated MsgTypes 10–13/20, not the renewal envelope. Surfaced during mash-py Phase 9 — three downstream specs (`security.md §4.3/4.5`, `stack-architecture.md §8.4`, `commissioning-pase.md §4.3`) and `mash-go` had drifted from `message-types.md` (canonical) and were driving the renewal envelope (MsgTypes 30–33) on the commissioning ALPN. Decision: `message-types.md` wins. Cert install on `mash-comm/1` uses `CSRRequest (10)`, `CSRResponse (11)`, `CertInstall (12)`, `CertInstallResponse (13)`, `CommissioningComplete (20)`. Renewal stays on `mash/1` with 30–33. Disjoint integer ranges + ALPN routing preserve the namespace-separation invariant single-port (DEC-067) and two-port (DEC-082) deployments depend on. Lands in lockstep across mash-go (Issue #7 fix), mash-py (Phase 9 implementation), and three spec-doc patches; resolves spec-issues Issue #7. |
 | 2026-04-27 | Added DEC-086: Subscription defaults, validation, and priming uniqueness. Surfaced during mash-py Phase 16 — `interaction-model.md §6` was example-only on default intervals (1000 ms / 60000 ms), silent on `maxInterval=0` rejection, silent on bounce-back suppression, ambiguous on heartbeat content (Go has both Empty and Full modes), and silent on the priming wire-frame (Go's `subscription.Manager` would emit a separate priming `Notification` in addition to the values in the Subscribe Response). Spec lifted to RECOMMENDED defaults; `maxInterval=0` and `subscriptionId=0` rejected; bounce-back made mandatory; heartbeat MUST be full; priming MUST live only in the Subscribe Response (key 2 always present). mash-go drops `HeartbeatEmpty` and the duplicate priming-notification path; mash-py implements the full set as the Phase 16 acceptance gate. |
 | 2026-04-28 | Added DEC-088: Operational mDNS TXT canonicalization. Surfaced during mash-py Phase 18 — `docs/discovery.md §2.3` (no `ZI`, instance `<device-id>`), `docs/testing/behavior/discovery.md §3.3` (`ZI` required, instance `<zone-id>-<device-id>`), and DEC-074 (`FM` removed) had drifted apart. The §2.3 prose was structurally incompatible with multi-zone (DEC-082) — a single `<device-id>` instance name has no room for per-(device, zone) records. DEC-088 normatively defines: instance name `<zone-id>-<device-id>`; required TXT `ZI` + `DI`; optional `VP`/`FW`/`EP`; `FM` forbidden; commissionable instance name `MASH-NNNN` (4-digit zero-pad). mash-go already conformant (no code changes, regression-guarded by `TestOperationalTXT_OmitsFeatureMap` and `TestOperationalTXTRoundtrip`); `docs/discovery.md` §2.2/§2.3 + `docs/testing/behavior/discovery.md` §3.3/§3.5 updated in lockstep; mash-py Phase 18 advertiser implements DEC-088 verbatim. |
+| 2026-04-28 | Added DEC-089: Uniform 120 s mDNS TTL and MUST-level cache invalidation. Surfaced during mash-py Phase 22 — `connection-establishment.md §2.5` prescribed per-record TTLs (PTR 4500 s, SRV 120 s, AAAA 120 s, TXT 4500 s) inherited from generic DNS-SD, but neither reference implementation conforms (mash-go: uniform 120 s; mash-py: python-zeroconf's mixed 120 s / 4500 s defaults). The 4500 s TXT TTL was wrong for MASH because DEC-088's `EP`/`FW`/`VP` change in normal operation. Stale records after ungraceful exits also blocked Phase 22 conformance runs for tens of minutes. Decision: uniform 120 s for PTR/SRV/AAAA/TXT, plus promote "cache invalidation on TCP-refused / TLS-mismatch / goodbye" from descriptive to MUST. mash-go already conformant (regression test `TestDefaultAdvertiserConfig_TTLIs120Seconds` added); mash-py advertiser pinned `host_ttl=other_ttl=120` explicitly + parallel regression test; spec table rewritten in `connection-establishment.md §2.5`. Also fixed an mash-py advertiser bug surfaced in lockstep: `unpublish_*` returned the goodbye-broadcast future without awaiting it, so `asyncio.run` shutdown cancelled the broadcast before any goodbye reached the wire — root cause of the stale-record observation that motivated the DEC. |

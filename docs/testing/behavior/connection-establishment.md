@@ -112,12 +112,18 @@ When multiple AAAA records exist, controller selects:
 
 ### 2.5 Record TTL (Time-To-Live)
 
+Uniform 120 s for all record types (DEC-089):
+
 | Record | TTL | Rationale |
 |--------|-----|-----------|
-| PTR | 4500s (75 min) | Standard DNS-SD |
-| SRV | 120s (2 min) | Port changes rare but possible |
-| AAAA | 120s (2 min) | Address may change |
-| TXT | 4500s (75 min) | Metadata changes infrequently |
+| PTR | 120 s (2 min) | IoT churn (zone changes, factory resets); bounded zombie window |
+| SRV | 120 s (2 min) | Port changes rare but possible |
+| AAAA | 120 s (2 min) | Address may change |
+| TXT | 120 s (2 min) | `EP`/`FW`/`VP` (DEC-088) change in normal operation |
+
+Implementations MAY use longer TTLs only with explicit per-deployment justification; the conformant default is 120 s.
+
+The 120 s TTL is the **slow-path** stale-record recovery floor (used when a device cannot send a goodbye). The **fast path** is mandatory client cache invalidation on dial failure — see "Cache invalidation triggers" later in this document.
 
 ### 2.6 Record Updates
 
@@ -868,13 +874,17 @@ def get_device_address(device_id: str, context: str) -> list[Address]:
 | TLS handshake failure | Invalidate cache, fresh resolution |
 | After device reboot | Fresh resolution (address may have changed) |
 
-**Cache invalidation triggers:**
+**Cache invalidation triggers (MUST, per DEC-089).**
 
-1. **TCP connection refused** - Device may have moved
-2. **TLS certificate mismatch** - Wrong device at that address
-3. **mDNS goodbye received** - Device announcing departure
-4. **Cache age > 2 minutes** - Standard TTL expiry
-5. **Explicit invalidation** - After device removal or factory reset
+Clients MUST invalidate any cached mDNS entry on each of the following triggers. "Invalidate" means: drop the cached SRV/A/AAAA/TXT entry for the failing instance and re-issue a fresh PTR query before the next dial. Clients MUST NOT retry the same cached SRV target after one of these triggers without first re-resolving.
+
+1. **TCP `connection-refused`** to the SRV-advertised address:port — device has moved or shut down.
+2. **TLS certificate mismatch** — the cert is not signed by the expected Zone CA, or the CommonName does not match the expected device-id. Indicates wrong device at that address.
+3. **mDNS goodbye received** (TTL=0) — device announcing departure.
+4. **Cache age > 120 s** — standard TTL expiry (DEC-089).
+5. **Explicit invalidation** — after device removal or factory reset.
+
+The MUST-level requirement is the fast-path complement to the 120 s TTL (§2.5). Together they bound the worst-case stale-record window to a single failed dial in the common case, and to 120 s in the degenerate case (device crash without goodbye, no client tries to dial in the interim).
 
 **mDNS resolution timeout:**
 
