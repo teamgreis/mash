@@ -1461,41 +1461,61 @@ Auditing spec vs mash-go before porting surfaced three small drifts. Decisions t
 
 ### Phase 20 — Failsafe & Multi-Zone Resolution
 
-**Status.** Pending.
+**Status.** Done (2026-04-28).
 
-**Goal.** Python device supports multiple zones (max 1 GRID + 1 LOCAL + 1 TEST per DEC-043), with limit/setpoint resolution, failsafe gating, and **per-zone TLS server cert selection**.
+**Goal.** Python device supports multiple zones (max 1 GRID + 1 LOCAL + 1 TEST per DEC-043 + DEC-060), with limit/setpoint resolution, per-zone failsafe state machine, and **per-zone TLS server cert selection**.
 
 **Depends on.** Phase 15, Phase 4 (two-port listeners).
 
 **Background.**
-- Zone resolution rules: `mash-go/pkg/zone/zone.go:135–232`.
+- Zone resolution rules: `mash-go/pkg/zone/zone.go:135–198` (post the negative-value cleanup that landed alongside this phase).
+- Failsafe state machine: `mash-go/pkg/failsafe/timer.go`.
 - Failsafe gate: DEC-073.
-- **Per-zone server cert selection.** A device commissioned to multiple zones holds one operational cert per Zone CA. When a controller from Zone A reconnects, the device must present Zone A's cert. Go uses `tls.Config.GetCertificate` driven by SNI (`mash-go/pkg/service/device_service_lifecycle.go:242–255`); controllers send the device ID as SNI; the device looks up the cert by SNI match. Post-handshake, the device identifies the zone cryptographically by matching the peer cert's `AuthorityKeyId` against each Zone CA's `SubjectKeyId` (`device_service_zone.go:34–52`).
+- **Per-zone server cert selection.** A device commissioned to multiple zones holds one operational cert per Zone CA. When a controller from Zone A reconnects, the device must present Zone A's cert. Go uses `tls.Config.GetCertificate` driven by SNI (`mash-go/pkg/service/device_service_lifecycle.go:240–253`); controllers send the device ID as SNI; the device looks up the cert by SNI match. Post-handshake, the device identifies the zone cryptographically by matching the peer cert's `AuthorityKeyId` against each Zone CA's `SubjectKeyId` (`device_service_zone.go:34–52`).
 
 **Python equivalent.** `SSLContext.sni_callback(ssl_socket, server_name, ssl_context)` fires after SNI is parsed; we swap `ssl_socket.context` to a per-zone `SSLContext` whose cert chain matches the requested device ID. This is stdlib-supported; no BIO trickery needed.
 
+**Pre-implementation cross-repo alignment (audit findings).**
+
+The audit surfaced three drifts between spec and Go before porting. Decisions taken (entry into Phase 20):
+
+1. **Failsafe scope — `multi-zone.md §7` vs `failsafe-timing.md §5.2`.** Spec was internally inconsistent: §7 said per-zone FAILSAFE; §5.2 said FAILSAFE only when ALL zones lost. Go does per-zone (`map[zoneID]*failsafe.Timer`, per-zone `FailsafeActive` flag in `connectedZones`) and aggregates into the unified `controlState`. **Decision: per-zone wins; spec docs aligned to it.** Patched: `failsafe-timing.md §5.2` rewritten to make per-zone vs device-wide explicit; the unified-controlState rule documented as the aggregator; TC-FAIL-008 updated to drop the "all zones lost" precondition for FAILSAFE entry.
+
+2. **Lost-zone limits — `multi-zone-resolution.md §6.2` vs `failsafe-timing.md §5.1`.** Spec was internally inconsistent: §6.2 says limits *persist* across disconnect (regulatory requirement); §5.1 said limits *cleared* on disconnect. Go persists. **Decision: persist wins; spec docs aligned to it.** Patched: `failsafe-timing.md §5.1` rewritten to say commanded limits persist while the slot is in FAILSAFE but are dormant for resolution (the slot's failsafe limit replaces them); TC-FAIL-007 / TC-FAIL-007b updated to reflect that the failsafe limit is the contributor while in FAILSAFE.
+
+3. **Negative limit values in `pkg/zone/zone.go`.** Spec mandates limits >= 0 (`docs/features/energy-control.md` Validation Rules + `multi-zone-resolution.md §6.3`); Go's `ResolveLimits` had ~28 lines of dead branches handling negatives "for production" — legacy from before the spec settled on positive-only. **Decision: spec is right; Python implements positive-only directly; Go's dead branches removed in lockstep.** Patched: `mash-go/pkg/zone/zone.go` `ResolveLimits` collapsed to a 4-line "smallest non-negative wins" loop; `zone_test.go::ProductionLimits` rewritten to use positive values; full Go suite green (`go test ./...`).
+
 **Files created.**
 
-- `mash_py/zone/zone.py` — `MultiZoneValue`, `ResolveLimits`, `ResolveSetpoints`
-- `mash_py/zone/pool.py` — zone state container
-- `mash_py/service/failsafe.py` — failsafe timer per zone
-- `mash_py/transport/tls.py` — extend `make_operational_context` to accept a per-zone cert dict and register an `sni_callback` for per-zone cert selection (controller sends device ID as SNI; device looks up the matching zone's operational cert)
-- `mash_py/service/device.py` — extend dispatch path to identify zone by `AuthorityKeyId` post-handshake (mirrors `device_service_zone.go:34–52`)
-- `tests/interop/test_multi_zone.py`
+- `mash_py/zone/__init__.py`
+- `mash_py/zone/zone.py` — `ZoneValue`, `MultiZoneValue`, `resolve_limits` (most-restrictive, smallest non-negative wins), `resolve_setpoints` (highest-priority + most-recent tiebreak), `zone_priority`. TEST zones excluded from both resolvers per DEC-060.
+- `mash_py/zone/pool.py` — `ZonePool` (async-safe zone-membership state); enforces DEC-043/-060 (max 1 per type, 3 total, type check before capacity); registerable callbacks fire after lock release.
+- `mash_py/zone/peer_match.py` — `match_zone_by_peer_cert`, `peer_authority_key_id`, `zone_ca_subject_key_id`. Mirrors `matchZoneByPeerCert` in Go.
+- `mash_py/service/failsafe.py` — `FailsafeTimer` per-zone state machine (NORMAL → TIMER_RUNNING → FAILSAFE → GRACE_PERIOD), async-friendly via `loop.call_later`; sync or async callbacks supported.
+- `mash_py/transport/tls.py` — added `ZoneCertEntry` dataclass + `make_multi_zone_operational_context(entries, default_entry=None)` that pre-builds one `SSLContext` per zone and installs an `sni_callback` swapping the socket's context based on `server_name == device_id` (case-insensitive); falls back to `default_entry` (or `entries[0]`) on missing/unknown SNI; union trust pool of all Zone CAs so any zone's controller passes mTLS verification.
+
+**Files modified (cross-repo alignment).**
+
+- `docs/testing/behavior/failsafe-timing.md §5` — patched per-zone semantics, persist semantics, TC-FAIL-007, TC-FAIL-007b (new), TC-FAIL-008.
+- `mash-go/pkg/zone/zone.go` — removed negative-value branches in `ResolveLimits`.
+- `mash-go/pkg/zone/zone_test.go` — `ProductionLimits` test rewritten with positive values.
 
 **Test layers.**
 
 | Layer | What |
 |---|---|
-| Unit | Most-restrictive limit resolution: GRID limit 1000W, LOCAL limit 500W → effective 500W. Highest-priority setpoint: GRID setpoint 0W, LOCAL 1000W → effective 0W. TEST zone observer-only. |
-| Vector | N/A. |
-| Interop | Commission Python device with two Go controllers (GRID and LOCAL). Both write limits. Python device's effective limit matches resolution rules. |
+| Unit | `tests/unit/zone/test_zone.py` (limit + setpoint resolution, TEST exclusion, expiry, parametric matrix), `tests/unit/zone/test_pool.py` (DEC-043/-060 enforcement, connection state, priority helpers, callbacks), `tests/unit/zone/test_peer_match.py` (post-handshake AKI/SKI matching), `tests/unit/service/test_failsafe.py` (state machine, callbacks, accuracy helper), `tests/unit/transport/test_multi_zone_tls.py` (SNI-driven cert selection on a real loopback handshake; case-insensitive lookup; explicit-default override; empty-entries rejection). |
+| Vector | N/A — resolution is in-process, no wire encoding. |
+| Interop | Single-controller mTLS interop is already covered by Phase 4/10/14. **Two-controller interop deferred:** would require new test scaffolding to run two `mash-controller` binaries in parallel against an in-process Python device; the spec-equivalence on resolution is established by the resolver's algorithmic identity to Go (verified by mirrored unit tests on both sides) and by the SNI/AKI plumbing being verified end-to-end via the loopback test. |
 
-**Acceptance.** Resolution matches Go behavior.
+**Acceptance.** Resolution matches Go behavior; per-zone SNI cert selection works across a real TLS handshake; failsafe state transitions match the spec timing; full Go and Python test suites green after the cross-repo alignment.
 
-**Interop verification.** Requires running two Go controllers; coordinate via different setup-code/discriminator pairs.
+**Interop verification.** Single-controller interop covered by prior phases. Two-controller interop deferred (see Test layers).
 
-**Refinement contingency.** Sign convention is the trap (consumption +, production -). Watch limit signs.
+**Refinement contingency.**
+- Sign convention: per spec, both consumption and production limits are positive; direction is implicit in the attribute name. Negative values are rejected at the Write boundary (Phase 21+ wires that up explicitly via `StatusInvalidValue`).
+- `failsafeDuration` validation: production constructor rejects values outside [7200, 86400] seconds; tests use `validate_duration=False` to drive sub-second timers (mirrors Go's `NewTestTimer`).
+- SNI fallback: an unknown SNI is NOT a handshake-abort condition — the server presents the default cert and the post-handshake AKI/SKI match still identifies the zone. This matches Go's `GetCertificate` first-cert fallback.
 
 ---
 
