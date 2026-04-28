@@ -30,6 +30,11 @@ func requireTestZone(ctx context.Context) error {
 // TestControl feature to the device service's trigger dispatch. This must be
 // called while the *TestControl wrapper is still available (before the inner
 // Feature is added to the endpoint) and only when TestMode is enabled.
+//
+// Per DEC-087, both the TEST-zone gate (delegated to requireTestZone) and the
+// enable-key check surface StatusNotAuthorized. Using the same status for
+// both authentication-style failures is intentional: distinct codes would
+// leak information to a network observer about which check failed.
 func (s *DeviceService) RegisterTestEventHandler(tc *features.TestControl) {
 	tc.OnTriggerTestEvent(func(ctx context.Context, req features.TriggerTestEventRequest) error {
 		if err := requireTestZone(ctx); err != nil {
@@ -38,7 +43,10 @@ func (s *DeviceService) RegisterTestEventHandler(tc *features.TestControl) {
 		// Validate enable key.
 		if req.EnableKey != s.config.TestEnableKey {
 			s.debugLog("triggerTestEvent: enable key mismatch")
-			return fmt.Errorf("invalid enable key")
+			return &wire.CommandError{
+				Status:  wire.StatusNotAuthorized,
+				Message: "triggerTestEvent: enable-key mismatch",
+			}
 		}
 
 		return s.dispatchTrigger(ctx, req.EventTrigger)
@@ -53,10 +61,13 @@ func (s *DeviceService) RegisterSetCommissioningWindowDurationHandler(tc *featur
 		if err := requireTestZone(ctx); err != nil {
 			return err
 		}
-		// Validate enable key.
+		// Validate enable key (DEC-087: NOT_AUTHORIZED on mismatch).
 		if req.EnableKey != s.config.TestEnableKey {
 			s.debugLog("setCommissioningWindowDuration: enable key mismatch")
-			return fmt.Errorf("invalid enable key")
+			return &wire.CommandError{
+				Status:  wire.StatusNotAuthorized,
+				Message: "setCommissioningWindowDuration: enable-key mismatch",
+			}
 		}
 
 		// Clamp to [3s, 10800s].
@@ -103,7 +114,10 @@ func (s *DeviceService) RegisterGetTestStateHandler(tc *features.TestControl) {
 		}
 		enableKey, _ := params[1].(string)
 		if enableKey != s.config.TestEnableKey {
-			return nil, fmt.Errorf("invalid enable key")
+			return nil, &wire.CommandError{
+				Status:  wire.StatusNotAuthorized,
+				Message: "getTestState: enable-key mismatch",
+			}
 		}
 		// Wrap the diagnostic snapshot under response field id 1 — the
 		// snapshot itself is a freeform string-keyed map of internal
@@ -204,6 +218,14 @@ func (s *DeviceService) collectTestState() map[string]any {
 }
 
 // dispatchTrigger routes a trigger opcode to the appropriate domain handler.
+//
+// DEC-087 maps dispatcher failures to wire Status:
+//   - unknown domain (this opcode is not in the registry on this device)
+//     → StatusUnsupported
+//   - known domain, but the named feature is absent on every endpoint
+//     → StatusConstraintError (handled in the per-domain helpers)
+//   - unknown opcode within a known domain → StatusConstraintError
+//     (the device understands the feature but not this specific trigger)
 func (s *DeviceService) dispatchTrigger(ctx context.Context, trigger uint64) error {
 	domain := features.TriggerDomain(trigger)
 
@@ -219,7 +241,10 @@ func (s *DeviceService) dispatchTrigger(ctx context.Context, trigger uint64) err
 	case uint16(model.FeatureEnergyControl):
 		return s.handleEnergyControlTrigger(ctx, trigger)
 	default:
-		return fmt.Errorf("unknown trigger domain: 0x%04x", domain)
+		return &wire.CommandError{
+			Status:  wire.StatusUnsupported,
+			Message: fmt.Sprintf("unknown trigger domain: 0x%04x", domain),
+		}
 	}
 }
 
@@ -361,7 +386,10 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 			s.debugLog("trigger: clock offset adjusted", "offsetSeconds", offsetSeconds)
 			return nil
 		}
-		return fmt.Errorf("unknown commissioning trigger: 0x%016x", trigger)
+		return &wire.CommandError{
+			Status:  wire.StatusConstraintError,
+			Message: fmt.Sprintf("unknown commissioning trigger: 0x%016x", trigger),
+		}
 	}
 }
 
@@ -393,10 +421,16 @@ func (s *DeviceService) handleStatusTrigger(_ context.Context, trigger uint64) e
 			s.debugLog("trigger: setting running", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateRunning))
 		default:
-			return fmt.Errorf("unknown status trigger: 0x%016x", trigger)
+			return &wire.CommandError{
+				Status:  wire.StatusConstraintError,
+				Message: fmt.Sprintf("unknown status trigger: 0x%016x", trigger),
+			}
 		}
 	}
-	return fmt.Errorf("no Status feature found on any endpoint")
+	return &wire.CommandError{
+		Status:  wire.StatusConstraintError,
+		Message: "no Status feature found on any endpoint",
+	}
 }
 
 // handleMeasurementTrigger handles Measurement-domain triggers.
@@ -429,10 +463,16 @@ func (s *DeviceService) handleMeasurementTrigger(_ context.Context, trigger uint
 			s.debugLog("trigger: setting power to custom value", "milliwatts", mw, "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, mw)
 		default:
-			return fmt.Errorf("unknown measurement trigger: 0x%016x", trigger)
+			return &wire.CommandError{
+				Status:  wire.StatusConstraintError,
+				Message: fmt.Sprintf("unknown measurement trigger: 0x%016x", trigger),
+			}
 		}
 	}
-	return fmt.Errorf("no Measurement feature found on any endpoint")
+	return &wire.CommandError{
+		Status:  wire.StatusConstraintError,
+		Message: "no Measurement feature found on any endpoint",
+	}
 }
 
 // handleChargingSessionTrigger handles ChargingSession-domain triggers.
@@ -461,10 +501,16 @@ func (s *DeviceService) handleChargingSessionTrigger(_ context.Context, trigger 
 			return feat.SetAttributeInternal(features.ChargingSessionAttrState,
 				uint8(features.ChargingStatePluggedInDemand))
 		default:
-			return fmt.Errorf("unknown charging session trigger: 0x%016x", trigger)
+			return &wire.CommandError{
+				Status:  wire.StatusConstraintError,
+				Message: fmt.Sprintf("unknown charging session trigger: 0x%016x", trigger),
+			}
 		}
 	}
-	return fmt.Errorf("no ChargingSession feature found on any endpoint")
+	return &wire.CommandError{
+		Status:  wire.StatusConstraintError,
+		Message: "no ChargingSession feature found on any endpoint",
+	}
 }
 
 // handleEnergyControlTrigger handles EnergyControl-domain triggers.
@@ -528,8 +574,14 @@ func (s *DeviceService) handleEnergyControlTrigger(_ context.Context, trigger ui
 			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
 				uint8(features.ProcessStateAborted))
 		default:
-			return fmt.Errorf("unknown energy control trigger: 0x%016x", trigger)
+			return &wire.CommandError{
+				Status:  wire.StatusConstraintError,
+				Message: fmt.Sprintf("unknown energy control trigger: 0x%016x", trigger),
+			}
 		}
 	}
-	return fmt.Errorf("no EnergyControl feature found on any endpoint")
+	return &wire.CommandError{
+		Status:  wire.StatusConstraintError,
+		Message: "no EnergyControl feature found on any endpoint",
+	}
 }
