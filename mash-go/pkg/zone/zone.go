@@ -132,10 +132,16 @@ func (m *MultiZoneValue) RemoveExpired() {
 	}
 }
 
-// ResolveLimits resolves multiple limit values using "most restrictive wins".
-// For consumption limits (positive), this means the smallest value.
-// For production limits (negative), this means the value closest to zero.
-// Returns nil if no values are set.
+// ResolveLimits resolves multiple limit values using "most restrictive wins":
+// the smallest value across all non-TEST zones. Returns nil if no values are
+// set.
+//
+// Per docs/features/energy-control.md "Validation Rules" and
+// docs/testing/behavior/multi-zone-resolution.md §6.3, both consumption and
+// production limits are non-negative; direction is implicit in the attribute
+// name (myConsumptionLimit vs myProductionLimit). Negative values are
+// rejected at the Write boundary (StatusInvalidValue) and never reach this
+// resolver.
 func (m *MultiZoneValue) ResolveLimits() (*int64, string) {
 	m.RemoveExpired()
 
@@ -153,42 +159,10 @@ func (m *MultiZoneValue) ResolveLimits() (*int64, string) {
 		if v.ZoneType == cert.ZoneTypeTest {
 			continue
 		}
-		if effectiveValue == nil {
+		if effectiveValue == nil || v.Value < *effectiveValue {
 			val := v.Value
 			effectiveValue = &val
 			winningZoneID = zoneID
-			continue
-		}
-
-		// Most restrictive wins:
-		// - For positive values (consumption): smaller is more restrictive
-		// - For negative values (production): closer to zero is more restrictive
-		// - Mixed: the one that restricts more overall
-
-		// Simple approach: for limits, smaller absolute restriction wins
-		// Consumption limit of 3000W is more restrictive than 5000W
-		// Production limit of -3000W is more restrictive than -5000W
-		if v.Value >= 0 && *effectiveValue >= 0 {
-			// Both consumption limits: smaller wins
-			if v.Value < *effectiveValue {
-				val := v.Value
-				effectiveValue = &val
-				winningZoneID = zoneID
-			}
-		} else if v.Value < 0 && *effectiveValue < 0 {
-			// Both production limits: closer to zero wins (less negative)
-			if v.Value > *effectiveValue {
-				val := v.Value
-				effectiveValue = &val
-				winningZoneID = zoneID
-			}
-		} else {
-			// Mixed: consumption limit (positive) takes precedence for safety
-			if v.Value >= 0 && *effectiveValue < 0 {
-				val := v.Value
-				effectiveValue = &val
-				winningZoneID = zoneID
-			}
 		}
 	}
 

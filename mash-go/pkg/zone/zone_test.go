@@ -47,14 +47,17 @@ func TestMultiZoneValueLimits(t *testing.T) {
 	})
 
 	t.Run("ProductionLimits", func(t *testing.T) {
+		// Per docs/features/energy-control.md, both consumption and production
+		// limits are non-negative; direction is implicit in the attribute
+		// name. Most-restrictive resolution is the same as for consumption:
+		// the smallest value wins.
 		mzv := NewMultiZoneValue()
-		mzv.Set("zone-grid", cert.ZoneTypeGrid, -3000, 0)  // Less restrictive (more export)
-		mzv.Set("zone-home", cert.ZoneTypeLocal, -2000, 0)   // More restrictive (less export)
+		mzv.Set("zone-grid", cert.ZoneTypeGrid, 3000, 0) // Less restrictive (more export allowed)
+		mzv.Set("zone-home", cert.ZoneTypeLocal, 2000, 0) // More restrictive (less export)
 
 		val, zoneID := mzv.ResolveLimits()
-		// -2000 is more restrictive (closer to zero)
-		if val == nil || *val != -2000 {
-			t.Errorf("ResolveLimits() = %v, want -2000 (more restrictive)", val)
+		if val == nil || *val != 2000 {
+			t.Errorf("ResolveLimits() = %v, want 2000 (most restrictive)", val)
 		}
 		if zoneID != "zone-home" {
 			t.Errorf("zoneID = %q, want %q", zoneID, "zone-home")
