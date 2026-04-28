@@ -1407,7 +1407,7 @@ Porting Phase 18 surfaced three internal contradictions in the operational mDNS 
 
 ### Phase 19 — Certificate Renewal (MsgTypes 30–33)
 
-**Status.** Pending.
+**Status.** Done (2026-04-28).
 
 **Goal.** Both directions of in-session cert renewal work.
 
@@ -1418,25 +1418,44 @@ Porting Phase 18 surfaced three internal contradictions in the operational mDNS 
 - Nonce binding (DEC-047): device returns SHA256(nonce)[0:16] in the CSR message.
 - 7-day renewal window (DEC-077).
 
+**Pre-implementation cross-repo alignment (audit findings).**
+
+Auditing spec vs mash-go before porting surfaced three small drifts. Decisions taken (entry into Phase 19):
+
+1. `CertRenewalRequest.ZoneCA` field — present in `mash-go/pkg/commissioning/renewal_messages.go` as `omitempty`, **NOT** in any spec doc. Pre-DEC-085 leftover (renewal envelope was once reused for commissioning cert install). **Decision: spec is correct — drop from Go and stay out of Python.** Patch landed: `mash-go/pkg/commissioning/renewal_messages.go` field removed; no consumer assigned to it.
+2. `CertRenewalCSR.NonceHash` — spec (`security.md §11.3`) declares it required and exactly 16 bytes; Go used `cbor:"3,keyasint,omitempty"`, so the wire shape allowed omission even though the device-side handler always populated it. **Decision: spec is correct — required on encode and on decode in both impls.** Patch landed: removed `omitempty`, decoder now rejects missing/wrong-length NonceHash, two new Go regression tests (`TestDecodeRenewalMessage > CertRenewalCSR_RejectsMissingNonceHash`, `…_RejectsWrongLengthNonceHash`).
+3. `CertRenewalAck.status` codes 1–3 (`CSRFailed`, `InstallFailed`, `InvalidCert`) — present in Go since DEC-047, undocumented in `security.md §11.3` (only code 4 was listed). **Decision: Go's set is operationally useful, spec is missing the rows.** Patch landed: `security.md §11.3` table now lists 0–4 with descriptions; both impls keep the same numeric values.
+
 **Files created.**
 
 - `mash_py/commissioning/renewal_messages.py`
 - `mash_py/commissioning/renewal.py` — controller-side and device-side state machines
+- `tests/unit/commissioning/test_renewal_messages.py`
+- `tests/unit/commissioning/test_renewal.py`
 - `tests/interop/commissioning/test_cert_renewal.py`
+
+**Files modified (cross-repo alignment).**
+
+- `docs/security.md §11.3` — declared NonceHash required + 16 bytes; documented status codes 0–4; spelled out CertRenewalRequest envelope (no ZoneCA).
+- `mash-go/pkg/commissioning/renewal_messages.go` — removed ZoneCA field; required NonceHash on decode.
+- `mash-go/pkg/commissioning/renewal_messages_test.go` — updated round-trip tests, added two reject-cases for NonceHash.
 
 **Test layers.**
 
 | Layer | What |
 |---|---|
-| Unit | Round-trip every MsgType. Nonce hash validation. Sequence number monotonicity. |
+| Unit | Round-trip every MsgType. Nonce hash validation (incl. constant-time compare via `hmac.compare_digest`). Decoder rejects CSR without NonceHash and with wrong-length NonceHash. Sequence number monotonicity. |
 | Vector | N/A — vectors generated in Phase 6. |
 | Interop | Commission Python↔Go in either direction; controller initiates renewal; device returns CSR with nonce hash; controller signs and installs; device acks. After renewal, operational connection survives (no TLS reconnection per DEC-076). |
 
-**Acceptance.** Renewal completes both directions.
+**Acceptance.** Renewal completes both directions; mash-go full test suite green after the renewal_messages cleanup.
 
 **Interop verification.** Standard.
 
-**Refinement contingency.** Watch the nonce hash format: SHA256 of nonce, *truncated to 16 bytes*, not full 32. Ref: `mash-go/pkg/commissioning/renewal_messages.go:14–36`.
+**Refinement contingency.**
+
+- Nonce hash format: SHA256 of nonce, *truncated to 16 bytes*, not full 32. Ref: `mash-go/pkg/commissioning/renewal_messages.go:14–36`.
+- Renewal-vs-data-plane disambiguation on `mash/1`: renewal frames are flat CBOR maps with key 1 = `uint8` ∈ {30..33} and never carry key 4. Python reuses the same heuristic Go uses (`pkg/service/zone_session.go::isRenewalMessage`).
 
 ---
 
