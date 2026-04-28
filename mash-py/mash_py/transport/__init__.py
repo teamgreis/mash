@@ -30,8 +30,10 @@ from mash_py.transport.connection import (
     connect,
 )
 from mash_py.transport.tls import (
+    ZoneCertEntry,
     make_commissioning_client_context,
     make_commissioning_context,
+    make_multi_zone_operational_context,
     make_operational_client_context,
     make_operational_context,
     verify_alpn,
@@ -49,10 +51,12 @@ __all__ = [
     "ConnectionHandler",
     "ConnectionState",
     "ConnectionVerificationError",
+    "ZoneCertEntry",
     "accept",
     "connect",
     "make_commissioning_client_context",
     "make_commissioning_context",
+    "make_multi_zone_operational_context",
     "make_operational_client_context",
     "make_operational_context",
     "verify_alpn",

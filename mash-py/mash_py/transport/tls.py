@@ -29,6 +29,8 @@ import contextlib
 import os
 import ssl
 import tempfile
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -124,6 +126,146 @@ def make_operational_context(
     _load_cert_and_key(ctx, operational_cert, operational_key)
     _load_ca_pool(ctx, zone_ca)
     return ctx
+
+
+# ---------------------------------------------------------------------------
+# Multi-zone operational context (Phase 20)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ZoneCertEntry:
+    """One zone's operational cert + key + Zone CA, keyed by the
+    device-id that controllers send as SNI when reconnecting.
+
+    Mirrors the per-zone state that mash-go's
+    ``deviceCertByID`` map carries in
+    ``pkg/service/device_service_lifecycle.go::buildOperationalTLSConfig``.
+    The device-id is the operational cert's CommonName; controllers
+    learn it from the device's mDNS DI TXT record + the cert they
+    received during commissioning.
+    """
+
+    device_id: str
+    operational_cert: x509.Certificate
+    operational_key: EllipticCurvePrivateKey
+    zone_ca: x509.Certificate
+
+
+def make_multi_zone_operational_context(
+    entries: Sequence[ZoneCertEntry],
+    *,
+    default_entry: ZoneCertEntry | None = None,
+) -> ssl.SSLContext:
+    """Build a server SSLContext that selects per-zone operational
+    cert via SNI.
+
+    The returned (primary) SSLContext:
+
+    - Loads the cert chain for ``default_entry`` (defaults to
+      ``entries[0]``). This is what the server presents if SNI is
+      missing or doesn't match any known device-id — same fallback
+      behaviour as mash-go's ``GetCertificate`` callback.
+    - Carries a verify pool containing **every** zone's CA, so any
+      controller from any commissioned zone passes mTLS verification.
+      The application layer then matches the peer cert's
+      ``AuthorityKeyId`` against each Zone CA's ``SubjectKeyId`` to
+      determine which zone the connection belongs to (mirrors
+      ``device_service_zone.go::matchZoneByPeerCert``).
+    - Installs an ``sni_callback`` that, on inbound SNI matching a
+      known device-id, swaps the socket's SSLContext to the per-zone
+      one whose cert chain matches that device-id. Lookup is
+      case-insensitive — Go normalises both sides.
+
+    Per-zone SSLContexts are pre-built once during this call and
+    cached as a closure on the returned context. Adding/removing
+    zones at runtime requires rebuilding the context (and restarting
+    the listener if the listener is already bound).
+
+    Raises :class:`TLSConfigError` if ``entries`` is empty.
+
+    Spec / interop notes:
+
+    - The spec (``security.md §5.1``) only mandates post-handshake
+      zone identification by issuer matching; SNI is not required by
+      the spec but is the mash-go convention and what conformance
+      controllers send. Without SNI a controller falls back to the
+      default cert and identifies itself purely via the post-handshake
+      AuthorityKeyId match — still functional, but with one extra
+      handshake round-trip if the controller asks for a non-default
+      cert in a future TLS session.
+    """
+    if not entries:
+        raise TLSConfigError("multi-zone context requires at least one entry")
+
+    default = default_entry if default_entry is not None else entries[0]
+
+    # Primary context: presents the default zone's cert; carries the
+    # union trust pool.
+    ctx = _build_one_operational_context(default)
+    for entry in entries:
+        if entry is default:
+            continue
+        _add_to_ca_pool(ctx, entry.zone_ca)
+
+    # Build per-zone contexts. The trust pool on each must also be the
+    # union, because once sni_callback swaps the socket's context the
+    # client cert is verified against the new context's pool.
+    by_device_id: dict[str, ssl.SSLContext] = {}
+    for entry in entries:
+        zone_ctx = _build_one_operational_context(entry)
+        for other in entries:
+            if other is entry:
+                continue
+            _add_to_ca_pool(zone_ctx, other.zone_ca)
+        by_device_id[entry.device_id.lower()] = zone_ctx
+
+    def _sni_callback(
+        ssl_socket: ssl.SSLObject,
+        server_name: str | None,
+        _ssl_context: ssl.SSLContext,
+    ) -> None:
+        """Swap the socket's SSLContext to the per-zone one matching
+        ``server_name``. Returning ``None`` (the default) lets the
+        handshake continue with whichever context is now attached.
+
+        Returning a non-None ``ssl.AlertDescription`` would abort the
+        handshake — we deliberately do not, even on unknown SNI: the
+        peer might have a valid client cert from a known zone but is
+        just connecting without SNI (or with a stale device-id). The
+        post-handshake AuthorityKeyId match handles disambiguation.
+        """
+        if server_name is None:
+            return  # client did not send SNI; default cert applies
+        zone_ctx = by_device_id.get(server_name.lower())
+        if zone_ctx is not None:
+            ssl_socket.context = zone_ctx
+
+    ctx.sni_callback = _sni_callback
+    return ctx
+
+
+def _build_one_operational_context(entry: ZoneCertEntry) -> ssl.SSLContext:
+    """Build a server SSLContext seeded with one zone's cert + that
+    zone's CA in the verify pool. The caller is expected to add other
+    zones' CAs afterwards."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    _pin_to_tls13(ctx)
+    ctx.set_alpn_protocols([ALPN_OPERATIONAL])
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = False
+    ctx.options |= ssl.OP_NO_TICKET
+    _load_cert_and_key(ctx, entry.operational_cert, entry.operational_key)
+    _load_ca_pool(ctx, entry.zone_ca)
+    return ctx
+
+
+def _add_to_ca_pool(ctx: ssl.SSLContext, ca: x509.Certificate) -> None:
+    """Append a Zone CA to ``ctx``'s existing verify pool. Calls
+    :meth:`ssl.SSLContext.load_verify_locations` with ``cadata``;
+    Python merges into the existing pool rather than replacing it."""
+    ca_pem = ca.public_bytes(serialization.Encoding.PEM).decode("ascii")
+    ctx.load_verify_locations(cadata=ca_pem)
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +405,10 @@ def _load_ca_pool(ctx: ssl.SSLContext, ca: x509.Certificate) -> None:
 
 __all__ = [
     "TLSConfigError",
+    "ZoneCertEntry",
     "make_commissioning_client_context",
     "make_commissioning_context",
+    "make_multi_zone_operational_context",
     "make_operational_client_context",
     "make_operational_context",
     "verify_alpn",
