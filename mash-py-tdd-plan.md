@@ -1652,10 +1652,56 @@ The "fix at the layer that owns the gap" rule remained primary: the broader subs
 - **macOS `mDNSResponder` cache hides records longer than the on-wire TTL.** Even after a goodbye is honored, `dns-sd -B` may show the entry from its local cache for ~2 min. Avahi / browsers from peer hosts see them gone immediately — diagnose stale-record reports against a non-Mac peer when possible.
 - **Plan text drifted from the corpus.** Three of the plan's four target-subset bullets didn't match any actual test case (`base-protocol-*.yaml` / `interaction-*.yaml` are tag values, not file prefixes; `mvp` tag isn't used). Resolution: file-glob default + `--phase22-files` override, no spec change.
 
+**Phase 22 follow-up (2026-04-28): TestControl CLI wiring.**
+
+The largest acceptance-coverage gap noted at Phase 22's initial
+landing — TestControl not wired into the CLI — has been closed in a
+focused follow-up commit. `_DeviceLifecycle` gained re-entry methods
+(`_enter_commissioning_mode` / `_exit_commissioning_mode`) gated by
+an asyncio.Lock; the TestControl feature is constructed once per
+operational session with effect callbacks that route opcodes to
+those methods (enter / exit / factory_reset / reset_test_state).
+`reset_test_state` cycles the window (exit → enter) to match
+`mash-go/pkg/service/test_event_handler.go::TriggerResetTestState`
+— without that cycle every `device_in_commissioning_mode`
+precondition fails with PASE EOF. Re-entry PASE+CertExchange
+completes on the wire but the new state is observed-and-discarded
+rather than replacing the suite zone (multi-zone is its own phase).
+`Advertiser.publish_commissionable` retries with
+`cooperating_responders=True` on `NonUniqueNameException` so rapid
+enter→exit→enter cycles don't trip zeroconf's own responder-cache
+probe (the goodbye burst already shipped; the local cache hasn't
+yet caught up).
+
+Conformance pass rate on the broader Phase 22 default file set
+lifts from 9/19 commissioning-* (47%) without TestControl to 21/55
+(38% on the wider corpus the harness now includes once TestControl
+is in PICS). Twelve additional tests pass.
+
 **Still-open spec-vs-Go drift (deferred to user decision):**
-- **TestControl wiring in `mash-py-device`** is the largest remaining acceptance-coverage gap. Without it the harness can't re-open the commissioning window between cases, so commissioning tests beyond TC-COMM-001 fail at the precondition-setup step. Phase 17 already implements TestControl in mash-py; the gap is just CLI wiring.
-- **Multi-zone** (Phase 20 already implemented in `mash-py`) likewise is not wired through the CLI; affects the multi-zone-tagged cases (excluded from default Phase 22 subset by `env:multi-device` filter, so non-blocking for the gate).
-- **Per-record TTL implementation cost.** DEC-089 makes uniform 120 s the spec; if the spec ever moves back to per-record-type TTLs, both reference impls would need lower-level mDNS-library plumbing.
+- **Cross-test PASE EOFs in suite mode.** A handful of TC-PASE-* /
+  TC-COMM-* tests pass in isolation but time out at PASE-read in
+  full-suite runs (~14 s = test-timeout). Investigation suggests
+  state accumulation but the responsible state surface hasn't been
+  isolated yet. Same tests pass against mash-go in suite mode, so
+  this is a mash-py-side gap, not a harness limitation.
+- **"No suite zone connection available for trigger"** failures
+  (TC-SEC-BACKOFF-001/002, TC-SEC-ERR-002, TC-COMM-WINDOW-005,
+  TC-CONN-BUSY-001/002) reproduce against the mash-go reference
+  device too — confirmed by running mash-test against
+  `mash-go/cmd/mash-device` directly. The harness's
+  setupPreconditions backward-transitions close the suite TCP
+  ("free cap slot") without auto-reconnect at the trigger-send
+  site; `sendTriggerViaZone` only reconnects on isIOError, not on
+  pre-disconnected state. Harness gap, not a wire-protocol gap.
+- **Multi-zone** (Phase 20 already implemented in `mash-py`)
+  likewise is not wired through the CLI; affects the multi-zone-
+  tagged cases (excluded from default Phase 22 subset by
+  `env:multi-device` filter, so non-blocking for the gate).
+- **Per-record TTL implementation cost.** DEC-089 makes uniform
+  120 s the spec; if the spec ever moves back to per-record-type
+  TTLs, both reference impls would need lower-level mDNS-library
+  plumbing.
 
 ---
 
