@@ -271,8 +271,14 @@ async def test_device_service_surfaces_unknown_feature_as_status_error(
 
 
 @pytest.mark.asyncio
-async def test_device_service_subscribe_returns_unsupported(
+async def test_device_service_subscribe_returns_priming_report(
 ) -> None:
+    """Phase 16: a Subscribe to DeviceInfo on endpoint 0 succeeds and the
+    response carries the priming-report values per ``§6.2``.
+
+    Phase 15 surfaced ``UNSUPPORTED`` for every Subscribe; with Phase 16
+    the per-connection :class:`SubscriptionManager` is wired up by
+    :class:`DeviceService`, so the operation succeeds end-to-end."""
     fixture = await _build_service_fixture()
     try:
         client, _conn = await _connect_client(fixture)
@@ -280,12 +286,18 @@ async def test_device_service_subscribe_returns_unsupported(
             async def _noop(_n: object) -> None:
                 pass
 
-            with pytest.raises(StatusError) as excinfo:
-                await asyncio.wait_for(
-                    client.subscribe(0, FEATURE_DEVICE_INFO, _noop),
-                    timeout=5.0,
-                )
-            assert excinfo.value.status == Status.UNSUPPORTED
+            sub = await asyncio.wait_for(
+                client.subscribe(0, FEATURE_DEVICE_INFO, _noop),
+                timeout=5.0,
+            )
+            assert sub.subscription_id != 0, (
+                "Subscribe must return a non-zero subscriptionId per §6.2 "
+                "(0 is reserved for the Notification messageId sentinel)"
+            )
+            assert isinstance(sub.initial_values, dict) and sub.initial_values, (
+                "Priming report must include every readable attribute per §6.2"
+            )
+            await asyncio.wait_for(client.unsubscribe(sub), timeout=5.0)
         finally:
             await asyncio.wait_for(client.close(), timeout=5.0)
     finally:

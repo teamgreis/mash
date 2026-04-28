@@ -14,7 +14,10 @@ Phase 15 scope (per ``mash-py-tdd-plan.md``):
 - No commissioning listener — that's Phase 14 / 14b territory and runs
   on a separate ALPN. The device service is purely operational.
 - No mDNS advertisement — Phase 18.
-- No subscriptions (yet) — Phase 16.
+- Subscriptions: per-connection :class:`SubscriptionManager` +
+  :class:`NotificationDispatcher` (Phase 16) — DEC-071 write-then-notify
+  ordering enforced; heartbeats fire from a background polling task
+  (default 100 ms cadence).
 
 What this gives us today:
 
@@ -48,7 +51,12 @@ from typing import Self
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 
-from mash_py.interaction.server import OperationalServer
+from mash_py.interaction.server import OperationalServer, SessionContext
+from mash_py.interaction.subscription import (
+    DEFAULT_PROCESSING_INTERVAL_MS,
+    NotificationDispatcher,
+    SubscriptionManager,
+)
 from mash_py.model import Device
 from mash_py.transport.connection import (
     Connection,
@@ -63,9 +71,11 @@ from mash_py.transport.tls import make_operational_context
 from mash_py.wire import (
     DEFAULT_MAX_MESSAGE_SIZE,
     MessageType,
+    Notification,
     Request,
     Response,
     decode_request,
+    encode_notification,
     encode_response,
     peek_message_type,
 )
@@ -117,6 +127,11 @@ class DeviceServiceConfig:
     connection_config: ConnectionConfig | None = field(default=None)
     """Optional :class:`ConnectionConfig` overrides for keep-alive /
     close-timeout. Default lets :class:`Connection` pick its own."""
+
+    notification_processing_interval_ms: int = DEFAULT_PROCESSING_INTERVAL_MS
+    """Per Phase 16 / DEC-071: cadence (ms) of the polling task that
+    flushes coalescing-window expiries and heartbeats. Default 100 ms
+    matches mash-go. Tests that need fast heartbeats can lower this."""
 
 
 # ---------------------------------------------------------------------------
@@ -291,8 +306,16 @@ class DeviceService:
                     with contextlib.suppress(Exception):
                         await self._config.on_connection_accepted(conn)
 
-                handler = _RequestHandler(self._server, conn)
+                handler = _RequestHandler(
+                    self._server,
+                    conn,
+                    self._device,
+                    processing_interval_ms=(
+                        self._config.notification_processing_interval_ms
+                    ),
+                )
                 conn.start(handler)
+                handler.start_subscription_loop()
 
                 # Wait for either the connection to close on its own
                 # (peer drove it) OR the service to be stopping. In
@@ -354,16 +377,55 @@ class _RequestHandler(ConnectionHandler):
     not expected on a *device-side* connection (the device is the
     server, the controller is the client) — we log and drop them.
 
-    Per DEC-071 (write-then-notify ordering) the eventual Phase 16
-    integration will need to dispatch any subscriptions touched by a
-    Write *before* sending the Write Response. Since Phase 15 has no
-    subscriptions, the simple synchronous flow is enough for now.
+    Per DEC-071 (write-then-notify ordering) the per-connection
+    :class:`SubscriptionManager` and :class:`NotificationDispatcher`
+    are constructed here; the dispatcher's polling task is started in
+    :meth:`start_subscription_loop` after the connection is open and
+    stopped on :meth:`on_close`.
     """
 
-    def __init__(self, server: OperationalServer, connection: Connection) -> None:
+    def __init__(
+        self,
+        server: OperationalServer,
+        connection: Connection,
+        device: Device,
+        *,
+        processing_interval_ms: int = DEFAULT_PROCESSING_INTERVAL_MS,
+    ) -> None:
         self._server = server
         self._conn = connection
         self._closed = asyncio.Event()
+
+        # Per-connection subscription state. The model is shared
+        # (read-only access from the priming snapshot) so we capture
+        # the device here and feed close-typed read closures to the
+        # manager so it stays free of model imports.
+        self._device = device
+        manager = SubscriptionManager(
+            read_attribute=self._read_attribute,
+            read_all_attributes=self._read_all_attributes,
+        )
+        self._dispatcher = NotificationDispatcher(
+            manager,
+            self._send_notification,
+            processing_interval_ms=processing_interval_ms,
+        )
+        self._session = SessionContext(
+            subscription_manager=manager,
+            dispatcher=self._dispatcher,
+        )
+
+    @property
+    def session(self) -> SessionContext:
+        return self._session
+
+    def start_subscription_loop(self) -> None:
+        """Start the heartbeat / coalescing-flush polling task.
+
+        Called after :meth:`Connection.start` so the loop runs inside
+        the same asyncio task tree as the connection's read loop.
+        """
+        self._dispatcher.start()
 
     async def wait_closed(self) -> None:
         await self._closed.wait()
@@ -382,7 +444,7 @@ class _RequestHandler(ConnectionHandler):
         if msg_type is not MessageType.REQUEST:
             # Devices are servers; they receive Requests, not Responses or
             # Notifications. A peer sending us one of those is a bug or a
-            # Phase 16+ bidirectional extension we don't yet handle.
+            # bidirectional extension we don't yet handle on this side.
             _log.debug(
                 "operational: ignoring frame of type %s on device-side connection",
                 msg_type.name,
@@ -395,7 +457,9 @@ class _RequestHandler(ConnectionHandler):
             _log.warning("operational: malformed Request: %r", exc)
             return
 
-        response: Response = await self._server.handle_request(request)
+        response: Response = await self._server.handle_request(
+            request, session=self._session
+        )
 
         try:
             await self._conn.send(encode_response(response))
@@ -409,7 +473,49 @@ class _RequestHandler(ConnectionHandler):
     async def on_close(self, exc: BaseException | None) -> None:
         if exc is not None:
             _log.debug("operational connection closed with error: %r", exc)
+        # Stop the polling task before clearing subscriptions so any
+        # final-flush attempt has a real session to flush against.
+        with contextlib.suppress(Exception):
+            await self._dispatcher.stop()
+        self._session.subscription_manager.clear()
         self._closed.set()
+
+    # ------------------------------------------------------------------
+    # SubscriptionManager / NotificationDispatcher closures
+    # ------------------------------------------------------------------
+
+    def _read_attribute(
+        self, endpoint_id: int, feature_id: int, attr_id: int
+    ):
+        return self._device.get_endpoint(endpoint_id).read_attribute(
+            feature_id, attr_id
+        )
+
+    def _read_all_attributes(self, endpoint_id: int, feature_id: int):
+        feature = self._device.get_endpoint(endpoint_id).get_feature_by_id(
+            feature_id
+        )
+        return feature.read_all_attributes()
+
+    async def _send_notification(
+        self,
+        subscription_id: int,
+        endpoint_id: int,
+        feature_id: int,
+        changes,
+    ) -> None:
+        """Encode + send a Notification frame.
+
+        Raises on send failure so the dispatcher can log/swallow per
+        the §8.4 "MUST NOT block write response" rule.
+        """
+        notif = Notification(
+            subscription_id=subscription_id,
+            endpoint_id=endpoint_id,
+            feature_id=feature_id,
+            changes=dict(changes),
+        )
+        await self._conn.send(encode_notification(notif))
 
 
 # ---------------------------------------------------------------------------
