@@ -1,4 +1,4 @@
-"""MASH commissioning protocol -- Python port (Phases 7-9, 11).
+"""MASH commissioning protocol -- Python port (Phases 7-9, 11, 14, 14b, 19).
 
 Phase scope:
 - :mod:`mash_py.commissioning.mhf` — Memory-Hard KDF (PBKDF2 v1).
@@ -9,6 +9,8 @@ Phase scope:
 - :mod:`mash_py.commissioning.cert_store` — controller-side Zone CA + signing (Phase 9).
 - :mod:`mash_py.commissioning.cert_exchange` — controller-side cert install flow (Phase 9, DEC-085).
 - :mod:`mash_py.commissioning.cert_exchange_server` — device-side cert install flow (Phase 14b, DEC-085).
+- :mod:`mash_py.commissioning.renewal_messages` — in-session renewal envelope (Phase 19, MsgTypes 30–33).
+- :mod:`mash_py.commissioning.renewal` — controller + device renewal state machines (Phase 19).
 
 Future phases:
 - Phase 11: Pairing window helpers.
@@ -86,6 +88,40 @@ from mash_py.commissioning.pase_server import (
 from mash_py.commissioning.pase_server import (
     PASEProtocolError as PASEServerProtocolError,
 )
+from mash_py.commissioning.renewal import (
+    ControllerRenewalDriver,
+    DeviceRenewalHandler,
+    NonceBindingError,
+    RenewalError,
+    RenewalFailedError,
+    RenewalProtocolError,
+)
+from mash_py.commissioning.renewal_messages import (
+    MSG_CERT_RENEWAL_ACK,
+    MSG_CERT_RENEWAL_CSR,
+    MSG_CERT_RENEWAL_INSTALL,
+    MSG_CERT_RENEWAL_REQUEST,
+    NONCE_HASH_SIZE,
+    NONCE_SIZE,
+    RENEWAL_STATUS_CSR_FAILED,
+    RENEWAL_STATUS_INSTALL_FAILED,
+    RENEWAL_STATUS_INVALID_CERT,
+    RENEWAL_STATUS_INVALID_NONCE,
+    RENEWAL_STATUS_SUCCESS,
+    CertRenewalAck,
+    CertRenewalCSR,
+    CertRenewalInstall,
+    CertRenewalRequest,
+    InvalidRenewalMessageError,
+    RenewalMessage,
+    RenewalMessageError,
+    compute_nonce_hash,
+    peek_is_renewal_frame,
+    renewal_status_string,
+    validate_nonce_hash,
+)
+from mash_py.commissioning.renewal_messages import decode as decode_renewal_message
+from mash_py.commissioning.renewal_messages import encode as encode_renewal_message
 from mash_py.commissioning.spake2plus import (
     CONFIRM_KEY_SIZE,
     CONFIRM_MAC_SIZE,
@@ -145,6 +181,10 @@ __all__ = [
     "MHF_ITERATIONS",
     "MSG_CERT_INSTALL",
     "MSG_CERT_INSTALL_RESPONSE",
+    "MSG_CERT_RENEWAL_ACK",
+    "MSG_CERT_RENEWAL_CSR",
+    "MSG_CERT_RENEWAL_INSTALL",
+    "MSG_CERT_RENEWAL_REQUEST",
     "MSG_COMMISSIONING_COMPLETE",
     "MSG_COMMISSIONING_ERROR",
     "MSG_CSR_REQUEST",
@@ -153,7 +193,14 @@ __all__ = [
     "MSG_PASE_CONFIRM",
     "MSG_PASE_REQUEST",
     "MSG_PASE_RESPONSE",
+    "NONCE_HASH_SIZE",
+    "NONCE_SIZE",
     "POINT_SIZE",
+    "RENEWAL_STATUS_CSR_FAILED",
+    "RENEWAL_STATUS_INSTALL_FAILED",
+    "RENEWAL_STATUS_INVALID_CERT",
+    "RENEWAL_STATUS_INVALID_NONCE",
+    "RENEWAL_STATUS_SUCCESS",
     "SALT_LEN",
     "SALT_PREFIX",
     "SCALAR_SIZE",
@@ -168,13 +215,21 @@ __all__ = [
     "CertExchangeServerResult",
     "CertInstall",
     "CertInstallResponse",
+    "CertRenewalAck",
+    "CertRenewalCSR",
+    "CertRenewalInstall",
+    "CertRenewalRequest",
     "CommissioningComplete",
     "CommissioningError",
     "ConfirmationFailedError",
+    "ControllerRenewalDriver",
+    "DeviceRenewalHandler",
     "IdentityElementError",
     "InvalidMessageError",
     "InvalidPointError",
+    "InvalidRenewalMessageError",
     "MessageError",
+    "NonceBindingError",
     "PASEAuthFailedError",
     "PASEBusyError",
     "PASEClient",
@@ -190,6 +245,11 @@ __all__ = [
     "PASEServerAuthFailedError",
     "PASEServerError",
     "PASEServerProtocolError",
+    "RenewalError",
+    "RenewalFailedError",
+    "RenewalMessage",
+    "RenewalMessageError",
+    "RenewalProtocolError",
     "SPAKE2PlusClient",
     "SPAKE2PlusError",
     "SPAKE2PlusServer",
@@ -198,20 +258,26 @@ __all__ = [
     "client_public",
     "compose_transcript",
     "compute_L",
+    "compute_nonce_hash",
     "confirm_macs",
     "confirmation_keys",
     "decode_message",
+    "decode_renewal_message",
     "derive_salt",
     "derive_w0_w1",
     "encode_message",
+    "encode_renewal_message",
     "error_code_string",
     "generate_verifier",
     "k_shared",
     "key_chain",
     "pbkdf2_mhf",
+    "peek_is_renewal_frame",
     "peek_msg_type",
     "random_ephemeral",
+    "renewal_status_string",
     "scalar_to_bytes",
     "server_public",
+    "validate_nonce_hash",
     "validate_point",
 ]
