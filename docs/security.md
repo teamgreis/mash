@@ -561,15 +561,27 @@ Certificate renewal requests MUST be bound to prevent replay attacks:
 
 **Protocol Enhancement:**
 
-The CertRenewalCSR message MUST include a nonce acknowledgment:
+The CertRenewalCSR message MUST include a nonce acknowledgment. The `NonceHash`
+field is mandatory on encode and MUST be exactly 16 bytes; receivers MUST reject
+frames where field 3 is absent or has any other length.
 
 ```cbor
+CertRenewalRequest = {
+  1: 30,                    ; MsgType
+  2: <bytes[32]>            ; Nonce (anti-replay)
+}
+
 CertRenewalCSR = {
   1: 31,                    ; MsgType
   2: <bytes[]>,             ; CSR (PKCS#10 DER)
-  3: <bytes[16]>            ; NonceHash = SHA256(nonce)[0:16]
+  3: <bytes[16]>            ; NonceHash = SHA256(nonce)[0:16]   (REQUIRED)
 }
 ```
+
+The `CertRenewalRequest` envelope carries only the nonce — no Zone CA or other
+fields. Cert install during commissioning uses the disjoint MsgTypes 10/11/12/13/20
+on `mash-comm/1` (DEC-085); the renewal envelope is reserved for in-session
+operation on `mash/1` only.
 
 **Validation:**
 1. Controller sends CertRenewalRequest with 32-byte nonce
@@ -578,11 +590,17 @@ CertRenewalCSR = {
 4. Controller validates NonceHash matches sent nonce
 5. If mismatch, controller SHOULD abort renewal
 
-**New Error Code:**
+**Renewal Status Codes (CertRenewalAck.status):**
 
 | Code | Name | Description |
 |------|------|-------------|
-| 4 | RenewalStatusInvalidNonce | Nonce binding validation failed |
+| 0 | RenewalStatusSuccess | Certificate installed |
+| 1 | RenewalStatusCSRFailed | Device could not generate CSR (key generation or PKCS#10 build failed) |
+| 2 | RenewalStatusInstallFailed | Device could not commit the new certificate (no renewal in progress, persistence failed) |
+| 3 | RenewalStatusInvalidCert | Replacement cert failed structural validation (parse, public-key shape) |
+| 4 | RenewalStatusInvalidNonce | Cert was signed against a CSR whose public key does not match this session's pending key — implies nonce binding violated |
+
+Devices MUST emit one of the codes above. Controllers MUST treat any code other than `0` as failure and MAY retry renewal in a fresh session.
 
 ### 11.4 Generic Error Responses
 
