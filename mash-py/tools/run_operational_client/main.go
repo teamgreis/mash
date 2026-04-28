@@ -76,6 +76,10 @@ type output struct {
 	WriteLabel       writeResult    `json:"write_label"`
 	InvokeRemoveZone invokeResult   `json:"invoke_remove_zone"`
 	SubscribeStatus  uint8          `json:"subscribe_status"`
+	// Phase 16: when --observe-subscribe is set, the helper subscribes
+	// to DeviceInfo and reports the priming + first delta notification
+	// observed after the test triggers a Write.
+	Subscription *subscribeObservation `json:"subscription,omitempty"`
 }
 
 type writeResult struct {
@@ -88,6 +92,19 @@ type invokeResult struct {
 	Removed bool  `json:"removed"`
 }
 
+// subscribeObservation captures the Phase 16 acceptance evidence:
+// priming values from the Subscribe Response and the first non-priming
+// notification received after the helper's own Write triggers a delta.
+type subscribeObservation struct {
+	SubscriptionID  uint32         `json:"subscription_id"`
+	PrimingLabel    string         `json:"priming_label"`
+	PrimingVendor   string         `json:"priming_vendor"`
+	NotifLabel      string         `json:"notif_label"`
+	NotifKeys       []uint16       `json:"notif_keys"`
+	NotifReceived   bool           `json:"notif_received"`
+	UnsubscribeOK   bool           `json:"unsubscribe_ok"`
+}
+
 func main() {
 	target := flag.String("target", "", "host:port to dial (required)")
 	deviceID := flag.String("device-id", "", "expected device cert CN (server SNI; required)")
@@ -98,6 +115,15 @@ func main() {
 	zoneArg := flag.String("invoke-zone", "phase15-test", "zoneId arg for removeZone invoke")
 	timeoutS := flag.Float64("timeout", 30.0, "overall timeout in seconds")
 	dialRetryS := flag.Float64("dial-retry", 0.0, "retry connect for up to N seconds (>0 enables retry)")
+	// Phase 16 evidence flags
+	observeSubscribe := flag.Bool("observe-subscribe", false,
+		"Phase 16: subscribe to DeviceInfo, write the label, and wait for the resulting Notification on the same connection")
+	subscribeWait := flag.Float64("subscribe-wait", 5.0,
+		"Phase 16: max seconds to wait for the post-Write Notification frame")
+	subscribeMinIntervalMs := flag.Int("subscribe-min-interval-ms", 50,
+		"Phase 16: minInterval to send in the Subscribe payload (key 2)")
+	subscribeMaxIntervalMs := flag.Int("subscribe-max-interval-ms", 60000,
+		"Phase 16: maxInterval to send in the Subscribe payload (key 3)")
 	flag.Parse()
 
 	for _, p := range []struct {
@@ -198,16 +224,91 @@ func main() {
 		}
 	}
 
-	// 4. Subscribe — Phase 15 must report UNSUPPORTED (Phase 16 fixes this).
+	// 4. Subscribe — Phase 15 reported UNSUPPORTED; Phase 16 wires up real
+	//    subscriptions. With --observe-subscribe we additionally:
+	//      a) keep the subscription open
+	//      b) Write a fresh label
+	//      c) wait for the device's Notification frame on this same
+	//         connection (per DEC-071 it MUST arrive before the Write
+	//         Response, but we don't reliably observe ordering on the
+	//         same connection; same-conn delivery is the looser test
+	//         that still proves notifications fan out end-to-end)
 	var subStatus uint8
-	_, _, sErr := client.Subscribe(ctx, 0, featureDeviceInfo, nil)
-	if sErr != nil {
-		var se *interaction.StatusError
-		if errors.As(sErr, &se) {
-			subStatus = uint8(se.Status)
-		} else {
-			fail(fmt.Sprintf("Subscribe: %v", sErr))
+	var subObs *subscribeObservation
+	if !*observeSubscribe {
+		_, _, sErr := client.Subscribe(ctx, 0, featureDeviceInfo, nil)
+		if sErr != nil {
+			var se *interaction.StatusError
+			if errors.As(sErr, &se) {
+				subStatus = uint8(se.Status)
+			} else {
+				fail(fmt.Sprintf("Subscribe: %v", sErr))
+			}
 		}
+	} else {
+		notifCh := make(chan *wire.Notification, 4)
+		client.SetNotificationHandler(func(n *wire.Notification) {
+			select {
+			case notifCh <- n:
+			default:
+			}
+		})
+
+		subID, priming, sErr := client.Subscribe(ctx, 0, featureDeviceInfo, &interaction.SubscribeOptions{
+			AttributeIDs: []uint16{attrLabel, attrVendorName},
+			MinInterval:  time.Duration(*subscribeMinIntervalMs) * time.Millisecond,
+			MaxInterval:  time.Duration(*subscribeMaxIntervalMs) * time.Millisecond,
+		})
+		if sErr != nil {
+			fail(fmt.Sprintf("Phase16 Subscribe: %v", sErr))
+		}
+		obs := &subscribeObservation{SubscriptionID: subID}
+		if v, ok := priming[attrLabel].(string); ok {
+			obs.PrimingLabel = v
+		}
+		if v, ok := priming[attrVendorName].(string); ok {
+			obs.PrimingVendor = v
+		}
+
+		// Wait minInterval before triggering the Write so the change is
+		// not coalesced — the Python device measures minInterval since
+		// the last delivery (the priming we just consumed).
+		minIntervalGap := time.Duration(*subscribeMinIntervalMs+10) * time.Millisecond
+		select {
+		case <-time.After(minIntervalGap):
+		case <-ctx.Done():
+			fail(fmt.Sprintf("Phase16 wait for minInterval: %v", ctx.Err()))
+		}
+
+		newLabel := *labelWrite + "-after-sub"
+		if _, err := client.Write(ctx, 0, featureDeviceInfo, map[uint16]any{
+			attrLabel: newLabel,
+		}); err != nil {
+			fail(fmt.Sprintf("Phase16 Write-after-Subscribe: %v", err))
+		}
+
+		// Wait for the device's Notification.
+		waitTO := time.Duration(*subscribeWait * float64(time.Second))
+		waitCtx, waitCancel := context.WithTimeout(ctx, waitTO)
+		select {
+		case n := <-notifCh:
+			obs.NotifReceived = true
+			for k := range n.Changes {
+				obs.NotifKeys = append(obs.NotifKeys, k)
+			}
+			if v, ok := n.Changes[attrLabel].(string); ok {
+				obs.NotifLabel = v
+			}
+		case <-waitCtx.Done():
+			// Surface as evidence rather than failing — the test will
+			// inspect NotifReceived and decide.
+		}
+		waitCancel()
+
+		if err := client.Unsubscribe(ctx, subID); err == nil {
+			obs.UnsubscribeOK = true
+		}
+		subObs = obs
 	}
 
 	// Stringify the read map so the JSON is human-friendly.
@@ -236,6 +337,7 @@ func main() {
 			Removed: invRemoved,
 		},
 		SubscribeStatus: subStatus,
+		Subscription:    subObs,
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		fail(fmt.Sprintf("encode output: %v", err))

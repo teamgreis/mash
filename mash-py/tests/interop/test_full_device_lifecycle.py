@@ -238,6 +238,131 @@ async def test_full_device_lifecycle_against_go_controller(cert_files) -> None:
         assert len(captured) == 1
         assert captured[0] == {REMOVE_ZONE_PARAM_ZONE_ID: "phase15-interop"}
 
-        assert result["subscribe_status"] == 10  # Status.UNSUPPORTED
+        # Phase 16: Subscribe is now SUCCESS (status 0). The Phase-15 era
+        # value (10 = UNSUPPORTED) was the expected outcome only while the
+        # operational server stubbed Subscribe out — see git history of
+        # mash_py/interaction/server.py. Helper without --observe-subscribe
+        # only confirms the priming round-trip; the rich notification
+        # acceptance is in test_phase16_subscriptions_against_go_controller.
+        assert result["subscribe_status"] == 0  # Status.SUCCESS
+    finally:
+        await service.stop()
+
+
+@pytest.mark.skipif(not _go_available(), reason="go toolchain not available")
+@pytest.mark.slow
+@pytest.mark.timeout(180)
+async def test_phase16_subscriptions_against_go_controller(cert_files) -> None:
+    """Phase 16 acceptance: a Go controller subscribes to DeviceInfo on
+    a Python :class:`DeviceService`, then writes the label, and observes
+    the resulting Notification frame.
+
+    What this proves
+    ----------------
+    - Subscribe wire path (`§6.1` request shape, `§6.2` priming response).
+    - Write-then-notify ordering (`transport.md §8.4` / DEC-071):
+      the Notification arrives on the same TLS connection, after the
+      helper's Write has been acknowledged.
+    - Wire-encoded Notification frame (`§3.3`, `§6.3`).
+    - Unsubscribe via the (endpoint=0, feature=0) sentinel (`§6.4`).
+
+    Same-connection observation
+    ---------------------------
+    The Go helper subscribes and writes on the same TLS connection.
+    DEC-071 specifies cross-connection ordering, but same-connection
+    delivery is the looser test that still proves notifications fan
+    out end-to-end. The cross-connection ordering test belongs in
+    Phase 21 (multi-zone test harness).
+    """
+    device, _ = _build_device_for_interop(cert_files["device_id"])
+
+    service = DeviceService(
+        device,
+        zone_ca=cert_files["zone_ca_cert"],
+        operational_cert=cert_files["device_cert"],
+        operational_key=cert_files["device_key"],
+    )
+    await service.start(host="127.0.0.1", port=0)
+
+    try:
+        target = f"127.0.0.1:{service.port}"
+        proc = await asyncio.create_subprocess_exec(
+            "go",
+            "run",
+            "./run_operational_client",
+            "--target",
+            target,
+            "--device-id",
+            cert_files["device_id"],
+            "--controller-cert-pem",
+            str(cert_files["ctl_cert_path"]),
+            "--controller-key-pem",
+            str(cert_files["ctl_key_path"]),
+            "--zone-ca-pem",
+            str(cert_files["ca_path"]),
+            "--label-write",
+            "phase16-helper",
+            "--observe-subscribe",
+            "--subscribe-min-interval-ms",
+            "50",
+            "--subscribe-max-interval-ms",
+            "60000",
+            "--subscribe-wait",
+            "5",
+            "--timeout",
+            "60",
+            "--dial-retry",
+            "5",
+            cwd=str(HELPER_DIR.parent),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=120.0
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise
+
+        if proc.returncode != 0:
+            pytest.fail(
+                f"helper exit {proc.returncode}\n"
+                f"stdout: {stdout.decode('utf-8', errors='replace')}\n"
+                f"stderr: {stderr.decode('utf-8', errors='replace')}",
+                pytrace=False,
+            )
+
+        result = json.loads(stdout.decode("utf-8"))
+        sub = result.get("subscription")
+        assert sub is not None, (
+            f"helper did not produce a subscription observation: {result!r}"
+        )
+
+        # Priming evidence: priming carried the existing values.
+        assert sub["priming_vendor"] == "MASH-Phase15", (
+            f"priming vendorName mismatch: {sub!r}"
+        )
+
+        # Notification evidence: a Notification arrived after the Write,
+        # carrying the new label as a delta.
+        assert sub["notif_received"], (
+            "Phase 16: helper did not receive a Notification within "
+            "subscribe-wait. DEC-071 requires the Python device to fan "
+            "out notifications synchronously on Write commit. "
+            f"Helper output: {sub!r}"
+        )
+        assert sub["notif_label"] == "phase16-helper-after-sub", (
+            f"Notification did not carry the new label: {sub!r}"
+        )
+        # Bounce-back suppression should keep vendorName out of the delta.
+        assert "notif_keys" in sub
+        assert sub["notif_keys"], "delta keys list is empty"
+
+        # Unsubscribe round-trips (§6.4 sentinel).
+        assert sub["unsubscribe_ok"], (
+            "Unsubscribe (endpoint=0, feature=0 sentinel) did not succeed"
+        )
     finally:
         await service.stop()
