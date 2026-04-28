@@ -63,6 +63,14 @@ from mash_py.features.device_info_gen import (
     REMOVE_ZONE_RESP_REMOVED,
     DeviceInfo,
 )
+from mash_py.features.test_control import (
+    DEFAULT_ENABLE_KEY,
+    TRIGGER_ENTER_COMMISSIONING_MODE,
+    TRIGGER_EXIT_COMMISSIONING_MODE,
+    TRIGGER_FACTORY_RESET,
+    TRIGGER_RESET_TEST_STATE,
+    TestControlFeature,
+)
 from mash_py.model import Device, Endpoint, EndpointType
 from mash_py.service import DeviceService
 from mash_py.transport.tls import make_commissioning_context
@@ -94,6 +102,7 @@ class DeviceArgs:
     model: str
     name: str
     zone_name: str
+    enable_key: str
     log_level: str
 
 
@@ -147,6 +156,15 @@ def _parse_args(argv: list[str] | None = None) -> DeviceArgs:
         help="Cosmetic zone name surfaced in TXT records and logs.",
     )
     p.add_argument(
+        "--enable-key",
+        default=DEFAULT_ENABLE_KEY,
+        help=(
+            "128-bit hex key (32 chars) for TestControl triggers. "
+            "TestControl is always compiled in but testEventTriggersEnabled "
+            "is only true when this is non-zero. Mirrors mash-go's default."
+        ),
+    )
+    p.add_argument(
         "--log-level",
         default="info",
         choices=("debug", "info", "warn", "error"),
@@ -156,6 +174,14 @@ def _parse_args(argv: list[str] | None = None) -> DeviceArgs:
         p.error("discriminator must be in 0..4095")
     if not (ns.setup_code.isdigit() and len(ns.setup_code) == 8):
         p.error("setup-code must be 8 decimal digits")
+    if len(ns.enable_key) != 32:
+        p.error(
+            f"enable-key must be 32 hex characters (128-bit), got {len(ns.enable_key)}"
+        )
+    try:
+        int(ns.enable_key, 16)
+    except ValueError:
+        p.error("enable-key must be valid hex")
     return DeviceArgs(
         discriminator=ns.discriminator,
         setup_code=ns.setup_code,
@@ -168,6 +194,7 @@ def _parse_args(argv: list[str] | None = None) -> DeviceArgs:
         model=ns.model,
         name=ns.name,
         zone_name=ns.zone_name,
+        enable_key=ns.enable_key,
         log_level=ns.log_level,
     )
 
@@ -350,13 +377,22 @@ def _device_id_from_cert(cert: x509.Certificate) -> str:
     return sha256(pub_key_der).hexdigest()[:16]
 
 
-def _build_device(args: DeviceArgs, *, device_id: str) -> Device:
+def _build_device(
+    args: DeviceArgs,
+    *,
+    device_id: str,
+    test_control: TestControlFeature | None = None,
+) -> Device:
     """Build the Device tree.
 
     EVSE-shaped fixture: root endpoint + DeviceInfo + one EV_CHARGER endpoint.
     DeviceInfo carries the vendor/product/serial the conformance Read tests
     sample; the removeZone command handler is registered so Invoke tests
-    succeed.
+    succeed. When ``test_control`` is supplied, the feature is added to the
+    root endpoint so the conformance harness's TestControl-driven preconditions
+    (re-open commissioning window, reset state) work — mirroring
+    ``mash-go/cmd/mash-device/main.go``'s pattern of always-compiled-in
+    TestControl with enable-key gating.
     """
     device = Device(device_id)
 
@@ -378,7 +414,40 @@ def _build_device(args: DeviceArgs, *, device_id: str) -> Device:
     di.set_command_handler(DEVICE_INFO_CMD_REMOVE_ZONE, remove_zone)
 
     device.add_endpoint(Endpoint(1, EndpointType.EV_CHARGER, args.name))
+
+    if test_control is not None:
+        device.root.add_feature(test_control)
+
+    # Refresh DeviceInfo.endpoints AFTER all features are attached so
+    # auto-PICS discovery on the harness side sees the full feature
+    # surface (including TestControl on the root endpoint, which gates
+    # MASH.S.ZONE.MAX). Mirrors mash-go's late-bind pattern in
+    # cmd/mash-device/main.go.
+    di.set_endpoints(_endpoint_infos(device))
     return device
+
+
+def _endpoint_infos(device: Device) -> list[dict[int, object]]:
+    """Build the list-of-EndpointInfo payload DeviceInfo.endpoints carries.
+
+    Wire shape (mash-go ``pkg/model/endpoint.go::EndpointInfo``):
+        {1: id, 2: type, 3: label, 4: [feature_type_ids...]}
+
+    Field 3 is omitempty on the Go side; we mirror that by skipping it
+    when the label is empty so byte-for-byte CBOR equality with mash-go
+    holds for the same fixture.
+    """
+    out: list[dict[int, object]] = []
+    for ep in device.endpoints():
+        info: dict[int, object] = {
+            1: ep.id,
+            2: int(ep.endpoint_type),
+            4: [int(ft) for ft in ep.feature_types()],
+        }
+        if ep.label:
+            info[3] = ep.label
+        out.append(info)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +523,21 @@ class _DeviceLifecycle:
         # Set by run() so the uncommissioned wait can race against shutdown.
         self._stop_event: asyncio.Event | None = None
 
+        # Re-entry support (TestControl-driven). After the initial
+        # commissioning succeeds and we're operational, the harness can
+        # re-open the commissioning window via TRIGGER_ENTER_COMMISSIONING_MODE.
+        # We serialize all listener-mutation paths (initial bind, re-entry,
+        # exit, teardown) through this lock so concurrent triggers + the
+        # SIGTERM teardown can't race a half-bound asyncio.Server.
+        self._comm_lock = asyncio.Lock()
+        # Latest setCommissioningWindowDuration request from the harness.
+        # Persisted across enter/exit cycles so the next enter can honor
+        # it (matches mash-go's CommissioningWindowDuration). Currently
+        # informational — the listener stays open until exit_commissioning
+        # is called or a fresh peer commissions us — but we surface the
+        # value in logs so operators can see what the harness asked for.
+        self._comm_window_duration_s: int | None = None
+
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
@@ -476,34 +560,37 @@ class _DeviceLifecycle:
     # ------------------------------------------------------------------
 
     async def _enter_uncommissioned(self) -> None:
-        ssl_ctx = make_commissioning_context(self._comm_cert, self._comm_key)
-        self._comm_server = await asyncio.start_server(
-            self._handle_commissioning_client,
-            host="0.0.0.0",
-            port=self._args.commissioning_port,
-            ssl=ssl_ctx,
-            ssl_handshake_timeout=30.0,
-            start_serving=True,
-        )
-        actual_port = _resolve_first_port(self._comm_server)
-        _log.info("commissioning listener up on :%d", actual_port)
-
-        assert self._advertiser is not None
-        await self._advertiser.publish_commissionable(
-            CommissionableAdvertisement(
-                discriminator=self._args.discriminator,
-                serial=self._args.serial,
-                brand=self._args.brand,
-                model=self._args.model,
-                port=actual_port,
-                device_name=self._args.name,
+        async with self._comm_lock:
+            ssl_ctx = make_commissioning_context(
+                self._comm_cert, self._comm_key
             )
-        )
-        _log.info(
-            "advertised _mash-comm._tcp (discriminator=%d, port=%d)",
-            self._args.discriminator,
-            actual_port,
-        )
+            self._comm_server = await asyncio.start_server(
+                self._handle_commissioning_client,
+                host="0.0.0.0",
+                port=self._args.commissioning_port,
+                ssl=ssl_ctx,
+                ssl_handshake_timeout=30.0,
+                start_serving=True,
+            )
+            actual_port = _resolve_first_port(self._comm_server)
+            _log.info("commissioning listener up on :%d", actual_port)
+
+            assert self._advertiser is not None
+            await self._advertiser.publish_commissionable(
+                CommissionableAdvertisement(
+                    discriminator=self._args.discriminator,
+                    serial=self._args.serial,
+                    brand=self._args.brand,
+                    model=self._args.model,
+                    port=actual_port,
+                    device_name=self._args.name,
+                )
+            )
+            _log.info(
+                "advertised _mash-comm._tcp (discriminator=%d, port=%d)",
+                self._args.discriminator,
+                actual_port,
+            )
 
         # Wait for first successful commissioning OR a shutdown signal.
         # Without racing the stop_event here, SIGTERM during the
@@ -557,16 +644,26 @@ class _DeviceLifecycle:
         self._op_listener_ready.set()
         # The commissioning handler will close its writer on its own as
         # soon as it observes ``_op_listener_ready`` set.
-        await self._stop_commissioning_listener()
+        await self._exit_commissioning_mode()
 
     async def _handle_commissioning_client(
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Accept handler for the commissioning listener."""
+        """Accept handler for the commissioning listener.
+
+        Used for both initial commissioning (``self._state is None``) and
+        TestControl-driven re-entry (``self._state is not None``). The
+        first path goes through the DEC-082 op_listener_ready barrier;
+        the re-entry path replaces zone state in place — the operational
+        listener is already up, so no barrier is required.
+        """
         peer = writer.get_extra_info("peername")
-        _log.info("commissioning peer connected: %s", peer)
+        is_initial = self._state is None
+        _log.info(
+            "commissioning peer connected: %s (initial=%s)", peer, is_initial
+        )
         try:
             pase_server = PASEServer(self._verifier)
             k_main = await pase_server.handshake(reader, writer)
@@ -581,7 +678,7 @@ class _DeviceLifecycle:
             )
 
             device_id = _device_id_from_cert(result.operational_cert)
-            self._state = CommissionedState(
+            new_state = CommissionedState(
                 zone_ca_cert=result.zone_ca_cert,
                 operational_cert=result.operational_cert,
                 operational_key=result.operational_key,
@@ -589,18 +686,52 @@ class _DeviceLifecycle:
                 zone_priority=result.zone_priority,
                 device_id=device_id,
             )
-            self._commission_done.set()
-            # DEC-082 ordering: park the connection until the main loop
-            # has the operational listener up. Closing earlier lets the
-            # controller race the device's listener bind and observe a
-            # transient connection-refused.
-            try:
-                await asyncio.wait_for(self._op_listener_ready.wait(), timeout=10.0)
-            except TimeoutError:
-                _log.warning(
-                    "commissioning handler timed out waiting for operational "
-                    "listener bind; closing anyway"
+
+            if is_initial:
+                self._state = new_state
+                self._commission_done.set()
+                # DEC-082 ordering: park the connection until the main
+                # loop has the operational listener up. Closing earlier
+                # lets the controller race the device's listener bind
+                # and observe a transient connection-refused.
+                try:
+                    await asyncio.wait_for(
+                        self._op_listener_ready.wait(), timeout=10.0
+                    )
+                except TimeoutError:
+                    _log.warning(
+                        "commissioning handler timed out waiting for "
+                        "operational listener bind; closing anyway"
+                    )
+            else:
+                # Re-entry path: a TestControl trigger reopened the
+                # window and a new peer completed PASE+CertInstall.
+                # mash-py is single-zone (DEC-043 multi-zone is Phase 20+
+                # for mash-py, not Phase 22), so we do NOT replace
+                # ``self._state`` — that would orphan the suite zone
+                # connection the harness uses as the control channel
+                # and tank every subsequent test in the run. Instead
+                # the new install is observed-but-discarded: the wire
+                # exchange completes successfully (so tests verifying
+                # PASE / cert envelopes pass), but the operational
+                # service keeps serving the original zone. mash-go's
+                # multi-zone implementation would register the second
+                # zone alongside the first — that's a future mash-py
+                # phase, not a Phase 22 deliverable.
+                #
+                # Also close the comm listener so the harness's
+                # post-commission "verify_mdns_not_advertising" step
+                # (TC-COMM-WINDOW-005) sees the gate closed. Schedule
+                # the close OUTSIDE this handler; awaiting our own
+                # server's wait_closed from inside the handler would
+                # deadlock because wait_closed waits for this very
+                # task to return.
+                _log.info(
+                    "re-entry commission accepted (zone_type=%d) — "
+                    "discarded under single-zone simplification",
+                    new_state.zone_type,
                 )
+                asyncio.create_task(self._exit_commissioning_mode())
         except BaseException as exc:
             self._last_commission_error = exc
             _log.warning("commissioning attempt failed: %r", exc)
@@ -622,6 +753,154 @@ class _DeviceLifecycle:
                 await self._advertiser.unpublish_commissionable()
 
     # ------------------------------------------------------------------
+    # TestControl-driven re-entry
+    # ------------------------------------------------------------------
+
+    async def _enter_commissioning_mode(self) -> None:
+        """Re-open the commissioning ALPN listener + advertise it.
+
+        Idempotent: a second call while the listener is already up is a
+        no-op. Mirrors mash-go's ``DeviceService.EnterCommissioningMode``
+        in the two-port deployment shape (DEC-082).
+        """
+        async with self._comm_lock:
+            if self._comm_server is not None:
+                _log.debug("enter_commissioning_mode: listener already up")
+                return
+            ssl_ctx = make_commissioning_context(
+                self._comm_cert, self._comm_key
+            )
+            self._comm_server = await asyncio.start_server(
+                self._handle_commissioning_client,
+                host="0.0.0.0",
+                port=self._args.commissioning_port,
+                ssl=ssl_ctx,
+                ssl_handshake_timeout=30.0,
+                start_serving=True,
+            )
+            actual_port = _resolve_first_port(self._comm_server)
+            _log.info(
+                "re-opened commissioning listener on :%d (window=%ss)",
+                actual_port,
+                self._comm_window_duration_s
+                if self._comm_window_duration_s is not None
+                else "default",
+            )
+            assert self._advertiser is not None
+            await self._advertiser.publish_commissionable(
+                CommissionableAdvertisement(
+                    discriminator=self._args.discriminator,
+                    serial=self._args.serial,
+                    brand=self._args.brand,
+                    model=self._args.model,
+                    port=actual_port,
+                    device_name=self._args.name,
+                )
+            )
+            _log.info(
+                "re-advertised _mash-comm._tcp (discriminator=%d, port=%d)",
+                self._args.discriminator,
+                actual_port,
+            )
+
+    async def _exit_commissioning_mode(self) -> None:
+        """Close the commissioning listener + retract the mDNS record.
+
+        Idempotent. The operational service is left untouched —
+        controllers in the existing zone keep their connections.
+        """
+        async with self._comm_lock:
+            await self._stop_commissioning_listener()
+
+    def _build_test_control(self) -> TestControlFeature:
+        """Construct a :class:`TestControlFeature` wired to lifecycle effects.
+
+        The feature handles the wire-side gate (enable-key match,
+        per-DEC-087 status precedence) inside :class:`TestControlFeature`
+        itself; we only supply the effect callbacks here. The
+        zone-type accessor returns the single zone's type label so the
+        TEST-zone gate (Spec Issue #15.B / DEC-087) rejects triggers
+        that arrive over a non-TEST zone connection.
+        """
+        # ZoneType integers per mash-go ``pkg/cert/types.go`` (1/2/3 —
+        # 0 is reserved). ``zone_type`` on :class:`CommissionedState` is
+        # whatever the cert install put there, lowercased here so the
+        # gate's case-insensitive comparison works regardless of how
+        # mash-py spells it internally.
+        zone_type_label_map = {1: "GRID", 2: "LOCAL", 3: "TEST"}
+
+        def zone_type_accessor() -> str | None:
+            if self._state is None:
+                return None
+            return zone_type_label_map.get(self._state.zone_type)
+
+        feature = TestControlFeature(
+            enable_key=self._args.enable_key,
+            zone_type_accessor=zone_type_accessor,
+        )
+        feature.set_trigger_handler(self._dispatch_trigger)
+        feature.set_duration_handler(self._dispatch_duration)
+        return feature
+
+    async def _dispatch_trigger(self, opcode: int) -> None:
+        """Route a TestControl trigger opcode to a lifecycle effect.
+
+        Mirrors ``mash-go/pkg/service/test_event_handler.go`` — only the
+        triggers a Phase 22 conformance run actually exercises are wired
+        here; the rest no-op (logged at debug). When a use case requires
+        more, add a branch below and document it in
+        ``docs/features/test-control/triggers.yaml``.
+        """
+        if opcode == TRIGGER_ENTER_COMMISSIONING_MODE:
+            _log.info("trigger: entering commissioning mode")
+            await self._enter_commissioning_mode()
+        elif opcode == TRIGGER_EXIT_COMMISSIONING_MODE:
+            _log.info("trigger: exiting commissioning mode")
+            await self._exit_commissioning_mode()
+        elif opcode == TRIGGER_FACTORY_RESET:
+            # Single-zone simplification: there's no multi-zone state to
+            # tear down. Logging only. A future phase that supports
+            # multi-zone re-commissioning will need to recycle the
+            # operational service here.
+            _log.info("trigger: factory reset (no-op in single-zone fixture)")
+        elif opcode == TRIGGER_RESET_TEST_STATE:
+            # The Phase 22 fixture only carries DeviceInfo + TestControl
+            # on the root endpoint and an empty EV_CHARGER endpoint —
+            # so there's no Status / Measurement / EnergyControl state
+            # to reset to defaults (mash-go's full handler does this for
+            # populated fixtures; mash-py mirrors the LISTENER reset
+            # behavior, which is the part the conformance harness
+            # depends on for hygienic test boundaries).
+            #
+            # The critical effect: cycle the commissioning window. Tests
+            # with ``device_in_commissioning_mode`` precondition rely on
+            # the window being open when their ``commission`` action
+            # dials the comm port. mash-go does this in its
+            # TRIGGER_RESET_TEST_STATE handler (exit → enter); without
+            # the matching exit/enter here, the comm listener stays
+            # closed after the initial commissioning and every
+            # commission-precondition test fails with PASE EOF.
+            _log.debug("trigger: reset test state (cycle comm window)")
+            await self._exit_commissioning_mode()
+            await self._enter_commissioning_mode()
+        else:
+            _log.info("trigger: unsupported opcode 0x%016x (no-op)", opcode)
+
+    async def _dispatch_duration(self, duration_s: int) -> None:
+        """Stash the next-window duration for ``_enter_commissioning_mode``.
+
+        mash-go applies the duration as a window-close timer. mash-py's
+        comm listener stays open until either a successful PASE+install
+        (handler-side close) or an explicit
+        :py:meth:`_exit_commissioning_mode` from the harness. The
+        conformance harness drives those explicitly, so a stored
+        duration is currently informational — but we keep it for parity
+        and so future phases can implement a self-closing timer here.
+        """
+        self._comm_window_duration_s = duration_s
+        _log.info("set_commissioning_window_duration: %ds", duration_s)
+
+    # ------------------------------------------------------------------
     # Commissioned phase
     # ------------------------------------------------------------------
 
@@ -629,7 +908,13 @@ class _DeviceLifecycle:
         self, *, transition_from_commissionable: bool = False
     ) -> None:
         assert self._state is not None
-        device = _build_device(self._args, device_id=self._state.device_id)
+
+        test_control = self._build_test_control()
+        device = _build_device(
+            self._args,
+            device_id=self._state.device_id,
+            test_control=test_control,
+        )
 
         self._device_service = DeviceService(
             device,

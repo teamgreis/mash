@@ -156,7 +156,20 @@ class Advertiser:
         if self._commissionable is not None:
             await azc.async_unregister_service(self._commissionable)
             self._commissionable = None
-        await azc.async_register_service(info)
+        try:
+            await azc.async_register_service(info)
+        except Exception as exc:
+            # Re-publishing a name we previously owned (e.g. after a
+            # TestControl-driven enter→exit→enter cycle) can race
+            # zeroconf's own responder cache and surface as
+            # NonUniqueNameException even though our goodbye burst
+            # already shipped. Retry once with cooperating_responders
+            # which skips the probe — safe here because we know we
+            # legitimately own this MASH-NNNN name (we minted it from
+            # our own discriminator and just stopped advertising it).
+            if type(exc).__name__ != "NonUniqueNameException":
+                raise
+            await azc.async_register_service(info, cooperating_responders=True)
         self._commissionable = info
         return instance_name
 
