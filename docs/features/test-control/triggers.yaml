@@ -1,0 +1,117 @@
+# TestControl trigger opcode registry (DEC-087).
+#
+# Canonical source for `triggerTestEvent`'s `eventTrigger` parameter
+# (cmd 0x01 on TestControl, feature 0x0A). Each opcode is a 64-bit
+# value with the layout:
+#
+#   bits 63..48 — domain: feature-id of the affected feature
+#                 (matches FeatureType numeric ids in
+#                 docs/features/protocol-versions.yaml)
+#   bits 47..32 — sub-domain selector (only used by parameterised
+#                 triggers; zero for fixed opcodes)
+#   bits 31..0  — payload value or fixed selector
+#
+# Implementations MUST emit constants matching every entry below in
+# their TestControl module. New triggers MUST be added here first;
+# implementations follow.
+#
+# References:
+#   - docs/decision-log.md DEC-087 (this registry, normative status)
+#   - docs/testing/test-process.md §7 (consumer-facing summary)
+#   - docs/features/test-control/1.0.yaml (the feature itself)
+
+revision: 1
+description: "Trigger opcode registry for TestControl `triggerTestEvent` (DEC-087)."
+
+# Each domain group lists opcodes for a single feature-id. Triggers
+# whose effect requires the named feature to be present on at least
+# one endpoint MUST surface CONSTRAINT_ERROR if the feature is not
+# present (matches the per-domain dispatcher pattern in mash-go's
+# `pkg/service/test_event_handler.go` and mash-py's
+# `mash_py/features/test_control.py`).
+
+domains:
+
+  - id: 0x0001
+    name: DeviceInfo
+    triggers:
+      - { id: 0x0001_0000_0000_0001, name: EnterCommissioningMode,
+          effect: "Device opens its commissioning window (re-binds the `_mash-comm._tcp` mDNS service and accepts PASE on the commissioning ALPN)." }
+      - { id: 0x0001_0000_0000_0002, name: ExitCommissioningMode,
+          effect: "Device closes its commissioning window." }
+      - { id: 0x0001_0000_0000_0003, name: FactoryReset,
+          effect: "Device performs a full reset: removes every zone, clears persisted commissioning state, returns to first-time-startup." }
+      - { id: 0x0001_0000_0000_0004, name: ResetTestState,
+          effect: "Device resets test-modified state to defaults: feature attributes back to spec defaults, clock offset cleared, failsafe timers reset, transient counters zeroed. Persistent commissioning state (zones, certs) is preserved." }
+      - { id: 0x0001_0001_0000_0000, name: AdjustClockBase,
+          parameterised: true,
+          parameter: "low 32 bits encode a signed seconds offset (two's complement)",
+          effect: "Offsets the device's monotonic clock by the encoded number of seconds. Used to simulate long-running deadlines without waiting in real time." }
+
+  - id: 0x0002
+    name: Status
+    triggers:
+      - { id: 0x0002_0000_0000_0001, name: Fault,
+          effect: "Sets `Status.OperatingState = FAULT`, `faultCode = 1`, `faultMessage = \"Test trigger fault\"`. Used by tests that verify fault propagation and recovery." }
+      - { id: 0x0002_0000_0000_0002, name: ClearFault,
+          effect: "Sets `Status.OperatingState = RUNNING`, clears `faultCode` and `faultMessage`." }
+      - { id: 0x0002_0000_0000_0003, name: SetStandby,
+          effect: "Sets `Status.OperatingState = STANDBY`." }
+      - { id: 0x0002_0000_0000_0004, name: SetRunning,
+          effect: "Sets `Status.OperatingState = RUNNING`." }
+
+  - id: 0x0004
+    name: Measurement
+    triggers:
+      - { id: 0x0004_0000_0000_0001, name: SetPower100,
+          effect: "Sets `Measurement.acActivePower` to 100 W (100 000 mW)." }
+      - { id: 0x0004_0000_0000_0002, name: SetPower1000,
+          effect: "Sets `Measurement.acActivePower` to 1 kW (1 000 000 mW)." }
+      - { id: 0x0004_0000_0000_0003, name: SetPowerZero,
+          effect: "Sets `Measurement.acActivePower` to 0 W." }
+      - { id: 0x0004_0000_0000_0010, name: SetSoC50,
+          effect: "Sets `Measurement.stateOfCharge` to 50 %." }
+      - { id: 0x0004_0000_0000_0011, name: SetSoC100,
+          effect: "Sets `Measurement.stateOfCharge` to 100 %." }
+      - { id: 0x0004_0001_0000_0000, name: SetPowerCustomBase,
+          parameterised: true,
+          parameter: "low 32 bits encode signed milliwatts (two's complement)",
+          effect: "Sets `Measurement.acActivePower` to the encoded value in milliwatts." }
+
+  - id: 0x0005
+    name: EnergyControl
+    triggers:
+      - { id: 0x0005_0000_0000_0001, name: ControlStateAutonomous,
+          effect: "Sets `EnergyControl.controlState = AUTONOMOUS`." }
+      - { id: 0x0005_0000_0000_0002, name: ControlStateControlled,
+          effect: "Sets `EnergyControl.controlState = CONTROLLED`." }
+      - { id: 0x0005_0000_0000_0003, name: ControlStateLimited,
+          effect: "Sets `EnergyControl.controlState = LIMITED`." }
+      - { id: 0x0005_0000_0000_0004, name: ControlStateFailsafe,
+          effect: "Sets `EnergyControl.controlState = FAILSAFE`." }
+      - { id: 0x0005_0000_0000_0005, name: ControlStateOverride,
+          effect: "Sets `EnergyControl.controlState = OVERRIDE`." }
+      - { id: 0x0005_0000_0000_0010, name: ProcessStateNone,
+          effect: "Sets `EnergyControl.processState = NONE`." }
+      - { id: 0x0005_0000_0000_0011, name: ProcessStateAvailable,
+          effect: "Sets `EnergyControl.processState = AVAILABLE`." }
+      - { id: 0x0005_0000_0000_0012, name: ProcessStateScheduled,
+          effect: "Sets `EnergyControl.processState = SCHEDULED`." }
+      - { id: 0x0005_0000_0000_0013, name: ProcessStateRunning,
+          effect: "Sets `EnergyControl.processState = RUNNING`." }
+      - { id: 0x0005_0000_0000_0014, name: ProcessStatePaused,
+          effect: "Sets `EnergyControl.processState = PAUSED`." }
+      - { id: 0x0005_0000_0000_0015, name: ProcessStateCompleted,
+          effect: "Sets `EnergyControl.processState = COMPLETED`." }
+      - { id: 0x0005_0000_0000_0016, name: ProcessStateAborted,
+          effect: "Sets `EnergyControl.processState = ABORTED`." }
+
+  - id: 0x0006
+    name: ChargingSession
+    triggers:
+      - { id: 0x0006_0000_0000_0001, name: EVPlugIn,
+          effect: "Sets `ChargingSession.state = PLUGGED_IN_NO_DEMAND` and stamps `sessionStartTime`. Simulates an EV plug-in event without requiring real hardware." }
+      - { id: 0x0006_0000_0000_0002, name: EVUnplug,
+          effect: "Sets `ChargingSession.state = NOT_PLUGGED_IN` and stamps `sessionEndTime`." }
+      - { id: 0x0006_0000_0000_0003, name: EVRequestCharge,
+          effect: "Sets `ChargingSession.state = PLUGGED_IN_DEMAND`." }

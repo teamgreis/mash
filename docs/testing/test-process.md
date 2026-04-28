@@ -394,15 +394,42 @@ The TestControl feature (ID `0x0A`) on endpoint 0 provides a safety-gated mechan
 | Endpoint | 0 (DEVICE_ROOT) |
 | Command ID | 0x01 |
 | Parameters | `enableKey` (string, 32-char hex) + `eventTrigger` (uint64) |
-| Response | `success` (bool) |
+| Response (success) | `{1: success: bool}` per `docs/features/test-control/1.0.yaml` |
 
-**Safety gates:**
-- Device must have `TestMode = true` in its configuration
-- The enable-key in the request must match the device's configured enable-key (128-bit, hex-encoded)
+**Safety gates (DEC-087):**
+- Device MUST have `TestMode = true` in its configuration. Devices that do not differentiate calling zone types (i.e. cannot enforce the TEST-zone rule below) MUST NOT implement TestControl.
+- The enable-key in the request MUST match the device's configured enable-key (128-bit, hex-encoded). On mismatch, the device MUST surface a non-success Status (see *Failure Status semantics* below); it MUST NOT silently return `{1: false}`.
+- TestControl commands are accepted ONLY from controllers whose calling zone type is **TEST** (see [`multi-zone.md`](../multi-zone.md)). Calls from GRID or LOCAL zones MUST be rejected with `Status.NOT_AUTHORIZED`. Devices that lack a TEST-zone capability cannot meet this gate and therefore cannot ship TestControl.
 
-### Known Trigger Opcodes
+### Failure Status semantics (DEC-087)
 
-The trigger opcode encodes a domain in the upper 2 bytes (matching feature IDs) and a specific action in the lower 2 bytes:
+The success-path response shape (`{1: success: bool}`) describes what a successful trigger looks like on the wire. Failure paths use the regular non-success Status envelope per `docs/interaction-model.md §8`:
+
+| Failure | Status | Notes |
+|---------|--------|-------|
+| Calling zone is not TEST | `NOT_AUTHORIZED` (8) | TEST-zone gate. |
+| `enableKey` does not match the device's configured key | `NOT_AUTHORIZED` (8) | Auth-style failure. |
+| `enableKey` parameter missing or wrong type | `INVALID_PARAMETER` (5) | Schema check before auth. |
+| `eventTrigger` parameter missing or wrong type | `INVALID_PARAMETER` (5) | Schema check before auth. |
+| Trigger opcode unknown to this device | `UNSUPPORTED` (10) or `CONSTRAINT_ERROR` (11) | `UNSUPPORTED` if the upper-2-byte feature domain isn't recognised; `CONSTRAINT_ERROR` if the domain is recognised but the device lacks the named feature on any endpoint. |
+| Device cannot apply the trigger (e.g. failsafe active) | `BUSY` (9) | Reserved for transient refusals. |
+| Device has no trigger handler registered (uninitialised TestMode build) | `UNSUPPORTED` (10) | Diagnostic; a bare `{1: false}` is forbidden because it is indistinguishable from a successful no-op. |
+
+Implementations MUST map their internal failures to one of these statuses. The bare `{1: false}` shape is reserved for the success path only — devices MUST NOT return it from a failure.
+
+### Trigger Opcode Registry
+
+The full trigger opcode catalogue lives in [`docs/features/test-control/triggers.yaml`](../features/test-control/triggers.yaml) (DEC-087). New triggers MUST be added to that registry first; implementations follow.
+
+The opcode layout is:
+
+```
+bits 63..48 — domain: feature-id of the affected feature
+bits 47..32 — sub-domain selector (parameterised triggers only; zero for fixed opcodes)
+bits 31..0  — payload value or fixed selector
+```
+
+Common examples (the registry is authoritative):
 
 | Opcode | Name | Domain | Effect |
 |--------|------|--------|--------|
@@ -410,11 +437,12 @@ The trigger opcode encodes a domain in the upper 2 bytes (matching feature IDs) 
 | `0x0001_0000_0000_0002` | ExitCommissioningMode | DeviceInfo | Device closes commissioning window |
 | `0x0001_0000_0000_0003` | FactoryReset | DeviceInfo | Full device reset |
 | `0x0001_0000_0000_0004` | ResetTestState | DeviceInfo | Reset test-modified state to defaults |
-| `0x0001_0001_0000_XXXX` | AdjustClock | DeviceInfo | Offset device clock by N seconds |
+| `0x0001_0001_0000_XXXX` | AdjustClockBase | DeviceInfo | Offset device clock by N seconds (low 32 bits, signed) |
 | `0x0002_0000_0000_0001` | Fault | Status | Trigger a fault condition |
 | `0x0002_0000_0000_0002` | ClearFault | Status | Clear a fault condition |
-| `0x0004_0000_0000_0001` | SetPower100 | Measurement | Set power to 100W |
-| `0x0004_0000_0000_0002` | SetPower1000 | Measurement | Set power to 1kW |
+| `0x0004_0000_0000_0001` | SetPower100 | Measurement | Set power to 100 W |
+| `0x0004_0000_0000_0002` | SetPower1000 | Measurement | Set power to 1 kW |
+| `0x0004_0001_0000_XXXX` | SetPowerCustomBase | Measurement | Set power to N milliwatts (low 32 bits, signed) |
 | `0x0005_0000_0000_0001` | ControlStateAutonomous | EnergyControl | Set control state |
 | `0x0006_0000_0000_0001` | EVPlugIn | ChargingSession | Simulate EV plug-in |
 

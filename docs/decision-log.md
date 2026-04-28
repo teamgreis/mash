@@ -4814,6 +4814,52 @@ Ratify the Go reference implementation's behavior for items 1, 2, 3, and 7. Tigh
 
 ---
 
+### DEC-087: TestControl Failure Status Codes, TEST-Zone Gate, and Trigger Opcode Registry
+
+**Date:** 2026-04-28
+**Status:** Accepted
+
+**Context:**
+TestControl (feature `0x0A`, defined in `docs/features/test-control/1.0.yaml`) is the entry point through which the conformance-test runner drives device state changes (enter commissioning, factory reset, set fault, simulate EV plug-in, …). The yaml + `docs/testing/test-process.md §7` together specified the wire shape of `triggerTestEvent` but left three load-bearing decisions implicit:
+
+1. **Failure-path response shape on enable-key mismatch.** The yaml declares the success response as `{1: success: bool}` only. What does the wire carry when the key doesn't match? The reference `mash-go` returned a generic `errorf` that the invoke dispatcher converted into a non-success Status, but the spec did not name a status code or forbid the bare `{1: false}` shape. Two implementations could reasonably disagree — and a controller that special-cased `success: false` would silently misbehave against the other.
+2. **TEST-zone-only enforcement.** `mash-go/pkg/service/test_event_handler.go::requireTestZone` rejects every TestControl command unless the calling controller is on a TEST zone. The spec only said "TestMode = true in config" — a softer gate. Without the TEST-zone rule, a compromised GRID-zone controller can issue `triggerFactoryReset` against any TestMode device on the network.
+3. **Full trigger opcode catalogue.** `test-process.md §7` listed ~12 opcodes as examples; `mash-go/pkg/features/test_control.go` had ~30. The full registry lived in Go source only, so any third-party harness or non-Go implementation had to read mash-go to know which opcodes do what. New opcodes added to mash-go would silently diverge.
+
+mash-py Phase 17 (`mash-py-tdd-plan.md`) surfaced all three while implementing `mash_py.features.test_control`. Filed as `mash-py-spec-issues.md` Issue #15 sub-A/B/C; this DEC ratifies the resolutions.
+
+**Decision:**
+
+1. **Failure Status semantics.** `triggerTestEvent` failures use the regular non-success Status envelope per `docs/interaction-model.md §8`. The bare `{1: false}` payload is reserved for the **success path only** — devices MUST NOT return it from a failure. The Status mapping is normative:
+   - Calling zone not TEST → `NOT_AUTHORIZED` (8).
+   - `enableKey` mismatch → `NOT_AUTHORIZED` (8).
+   - Missing / wrong-type parameter → `INVALID_PARAMETER` (5).
+   - Unknown opcode (domain unrecognised) → `UNSUPPORTED` (10); known domain but device lacks the named feature → `CONSTRAINT_ERROR` (11).
+   - Transient refusal → `BUSY` (9).
+   - No trigger handler registered (uninitialised TestMode build) → `UNSUPPORTED` (10).
+2. **TEST-zone-only enforcement.** Devices implementing TestControl MUST reject every TestControl command from controllers whose calling zone type is not **TEST**, with `NOT_AUTHORIZED`. Devices that cannot differentiate calling zone types (e.g. devices without zone-aware mTLS) MUST NOT implement TestControl.
+3. **Trigger opcode registry as canonical.** The full opcode catalogue lives in `docs/features/test-control/triggers.yaml`. New triggers MUST be added to the registry first; implementations follow. `test-process.md §7` keeps a short example table for readability but is not authoritative; the registry is.
+
+**Rationale:**
+
+- **Item 1.** A bare `{1: false}` is indistinguishable from a successful application no-op on the wire and is a debugging trap for any controller that doesn't already know which opcode it sent. Surfacing a real Status keeps the failure path uniform with every other interaction (`docs/interaction-model.md §8`) and makes the wire self-describing. `NOT_AUTHORIZED` for both the TEST-zone gate and the enable-key mismatch is correct because both are authentication failures — picking different statuses would let a network observer distinguish them.
+- **Item 2.** TestControl can rewrite operating state, force factory resets, and shift the device clock — the same primitives a runner needs are also the primitives an attacker would want. A non-TEST zone has no legitimate reason to issue these commands. Making the gate normative (rather than implementation-policy) means a non-Go implementer cannot ship a "compliant" TestMode build that quietly forgets the gate. The companion clause "devices that cannot differentiate calling zone types MUST NOT implement TestControl" closes the loophole where a too-simple device claims TestControl conformance without the security property.
+- **Item 3.** The catalogue is a registry, not a decision — it grows with the protocol. Putting it in a YAML file means codegen can emit constants in both `pkg/features/test_control.go` and `mash_py/features/test_control.py` from the same source, and adding a new trigger is a one-file PR rather than a two-implementation race.
+
+**Implementation notes:**
+
+- **Spec.** `docs/testing/test-process.md §7` rewritten to: declare both safety gates as MUSTs, add a Failure-Status table, point at `triggers.yaml` as the canonical opcode registry while keeping a short example table for context. New file `docs/features/test-control/triggers.yaml` lists every opcode with id, domain, parameter encoding, and effect text.
+- **mash-go.**
+  - `pkg/service/test_event_handler.go`: enable-key mismatch returns a `wire.CommandError{Status: wire.StatusNotAuthorized}` rather than a generic `errorf`. `requireTestZone` already returns `StatusNotAuthorized` — no behaviour change.
+  - `pkg/features/test_control.go`: opcode constants are now generated from `docs/features/test-control/triggers.yaml` (folded into `mash-featgen` in a follow-up; constants stay byte-identical until a new trigger is added).
+- **mash-py.**
+  - `mash_py/features/test_control.py` already implements all three points (Phase 17). Module docstring updated to cite DEC-087 instead of "spec is silent."
+- **Acceptance.** Phase 17 unit + interop tests already pin items 1 and 2. Item 3 is pinned by the codegen drift check (`make gen-check` in mash-py; corresponding mash-featgen drift gate in mash-go) — adding a trigger to `triggers.yaml` without regenerating constants in both implementations fails CI.
+
+**Related:** Issue #15 (the surfacing); DEC-051 / DEC-052 (feature-level discovery — adjacent registry pattern); `multi-zone.md` (zone types and the TEST/GRID/LOCAL distinction).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
