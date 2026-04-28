@@ -1521,33 +1521,57 @@ The audit surfaced three drifts between spec and Go before porting. Decisions ta
 
 ### Phase 21 — Test Harness (Python Runner Subset)
 
-**Status.** Pending.
+**Status.** Done (2026-04-28).
 
 **Goal.** A Python `mash-py-test` CLI that loads YAML test cases from `mash-go/testdata/cases/`, drives a Go device, and reports pass/fail. Ports the *minimum useful subset* of `mash-go/internal/testharness/runner/`.
 
 **Depends on.** Phases 6, 11, 18.
 
+**Pre-implementation cross-repo alignment (audit findings).**
+
+The audit surfaced one drift between spec and Go before porting. Decision taken (entry into Phase 21):
+
+1. **Legacy commissionable TXT keys — `discovery-basic.yaml` (TC-DISC-001) vs DEC-078.** The YAML required `id` / `cat` / `proto` TXT keys; DEC-078 (canonical) requires `D` / `cat` / `serial` / `brand` / `model`. The Go runner papered over the divergence in `discovery_handlers.go:handleVerifyTXTRecordsReal` by synthesizing the legacy keys when absent — a runner-side compatibility shim, not spec. **Decision: spec wins; YAML aligned to DEC-078; Go runner shim removed in lockstep.** Patched: `mash-go/testdata/cases/discovery-basic.yaml` `required_keys` rewritten to `[D, cat, serial, brand, model]`; the synthesizer in `discovery_handlers.go` deleted; `discovery_handlers_test.go::TestVerifyTXTRecords_RequiredKeys` rewritten to assert legacy keys are now rejected; `mdns_observer.go::commissionableToDiscovered` made to include `D` in its TXT map (matching what `EncodeCommissionableTXT` already advertises); the no-discriminator simulated `wait_for_device` fallback rewritten to emit a spec-shape TXT map.
+
 **Files created.**
 
-- `mash_py/testharness/loader.py` — port of YAML schema parsing
-- `mash_py/testharness/runner.py` — subset: discover, commission, run steps, teardown
-- `mash_py/testharness/handlers/` — handler implementations for `connect`, `commission`, `read`, `write`, `invoke`, `subscribe`, `wait_notification`, `trigger_test_event`, `verify_commissioning_state`, `compare`, `evaluate`
-- `mash_py/testharness/pics.py`
-- `mash_py/cli/test.py`
+- `mash_py/testharness/__init__.py`
+- `mash_py/testharness/loader.py` — YAML schema + multi-document parsing + ID/tag filters; schema-compatible with mash-go's loader.
+- `mash_py/testharness/runner.py` — `Runner`, `ExecutionState`, default checker + `_gte_checker` for `*_min` keys (mirrors Go's `checkAAAACountMin`), template interpolation, store_result flattening, async per-step timeout.
+- `mash_py/testharness/pics.py` — YAML + plain-text PICS loader; three-form requirement matcher (truthy / `KEY: VALUE` / `KEY=VALUE`).
+- `mash_py/testharness/handlers/__init__.py` — registers the Phase-21 handler set + precondition setup.
+- `mash_py/testharness/handlers/_common.py` — shared helpers (`pick_target_host`, setup-code/discriminator resolver with `interpolate()`, teardown-callback registration).
+- `mash_py/testharness/handlers/commission.py` — drives PASE (Phase 8) + DEC-085 cert install (Phase 9) end-to-end; promotes the result to a runner-wide cache so subsequent cases can satisfy `device_commissioned` without re-running PASE (mirrors mash-go's "suite zone").
+- `mash_py/testharness/handlers/connect.py` — `connect` (commissioning ALPN happy path), `connect_operational` (mTLS via Phase 10 helper), `disconnect`. Out-of-scope: TLS-1.2 downgrade tests, deliberately-bad client certs (filtered via `-tags`).
+- `mash_py/testharness/handlers/discovery.py` — `start_discovery` / `wait_for_device` / `browse_mdns` / `verify_txt_records` / `stop_discovery` against the Phase-6 `Browser`.
+- `mash_py/testharness/handlers/interaction.py` — Phase-11 `InteractionClient` wrapper for read/write/invoke/subscribe/wait_notification.
+- `mash_py/testharness/handlers/util.py` — wait, compare, compare_values, evaluate, verify_commissioning_state, trigger_test_event.
+- `mash_py/cli/__init__.py`, `mash_py/cli/test.py` — `mash-py-test` CLI mirroring mash-go's flag surface (`--target`, `--tests`, `--filter`, `--files`, `--tags`, `--exclude-tags`, `--setup-code`, `--discriminator`, `--pics`, `--list`).
+
+**Files modified (cross-repo alignment).**
+
+- `mash-go/testdata/cases/discovery-basic.yaml` — TC-DISC-001 `required_keys` updated to DEC-078 spec keys.
+- `mash-go/internal/testharness/runner/discovery_handlers.go` — removed the `id` / `cat=device` / `proto=1.0` / `D` synthesizer in `handleVerifyTXTRecordsReal`; the no-discriminator simulated `wait_for_device` fallback now emits a spec-shape TXT map.
+- `mash-go/internal/testharness/runner/discovery_handlers_test.go` — `TestVerifyTXTRecords_RequiredKeys` rewritten to assert legacy keys are rejected.
+- `mash-go/internal/testharness/runner/mdns_observer.go` — `commissionableToDiscovered` now includes `D` in its TXT map.
 
 **Test layers.**
 
 | Layer | What |
 |---|---|
-| Unit | Each handler implementation tested in isolation against a mock device. |
-| Vector | N/A. |
-| Interop | Run a small subset of `mash-go/testdata/cases/commissioning-*.yaml` against a Go device using `mash-py-test`. Compare results to running `mash-go/cmd/mash-test` against the same device. |
+| Unit | `tests/unit/testharness/test_loader.py` (multi-doc YAML, mixed PICS-requirement forms, ID-glob and tag filtering, real-fixture smoke), `test_pics.py` (YAML + DSL forms, three requirement forms), `test_runner.py` (engine contract: pass/fail, unknown action, store_result flattening, expect-side interpolation, PICS skip, step timeout, explicit-skip), `test_handlers_util.py` (wait / compare / compare_values / evaluate / verify_commissioning_state), `test_handlers_discovery.py` (lifecycle book-keeping + spec-mandated DEC-088 ZI/DI flags), `test_handlers_interaction.py` (read/write/invoke/wait_notification with stubbed `InteractionClient`, `StatusError` mapping, missing-connection error). 41 new unit tests; 752 total Python suite green. |
+| Vector | N/A — runner mechanics, no wire encoding. |
+| Interop | `tests/interop/testharness/test_phase21_acceptance.py` spawns mash-go/cmd/mash-device, runs the chosen five YAML cases (TC-DISC-001, TC-COMM-001, TC-CONN-OP-001, TC-MDNS-REC-001, TC-MDNS-REC-002) end-to-end through the Python harness. All 5 pass. The same five cases also pass when run under `mash-go/cmd/mash-test` against a fresh device — establishing the "identical" gate. |
 
-**Acceptance.** At least 5 test cases pass identically under Go and Python harnesses.
+**Acceptance.** ≥ 5 YAML cases pass identically under both Go (`mash-test`) and Python (`mash-py-test`) harnesses against the same Go device. Met: 5/5.
 
-**Interop verification.** Standard.
+**Interop verification.** Standard. The five chosen cases exercise the full Phase-21 handler set without requiring device-internal state introspection (which the Python harness does not need to replicate to satisfy the spec).
 
-**Refinement contingency.** Handler implementations may diverge in subtle ways from Go's runner. Compare wire logs side-by-side.
+**Refinement contingency.**
+- Handler implementations may diverge in subtle ways from Go's runner. Compare wire logs side-by-side. The biggest risks are (a) preconditions mapping (handled via `_COMMISSIONED_PRECONDITIONS` + `_NOOP_PRECONDITIONS` allowlists), (b) `*_min` checker semantics (handled via per-key custom checkers), and (c) interpolation timing on params vs expects (mirrors Go: params are raw, expects are interpolated).
+- Phase 22 will widen the case set. Each new YAML may surface new actions / preconditions; add them to the handler registry as-needed and flag any spec-vs-Go drift inline.
+
+**Spec-vs-Go drift surfaced (deferred to user decision):** `discovery-operational.yaml:50` lists `"FM"` as an `optional_key` for the operational TXT, but DEC-074 + DEC-088 forbid `FM` in operational TXT (capability discovery is a wire read of `featureMap`, not mDNS). Not blocking — `optional_keys` doesn't cause failure — but should be removed in a future YAML hygiene pass.
 
 ---
 
