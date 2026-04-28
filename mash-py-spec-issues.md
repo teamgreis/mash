@@ -859,6 +859,67 @@ C. **Replace §6.5 with "fixed floor only."** Mandates the constant-time floor a
 
 ---
 
+### Issue #15 — TestControl: spec under-specifies the failure shape, the security gate, and the trigger catalogue
+
+**Status:** ✅ Resolved by **DEC-087** (2026-04-28)
+**Resolution.** All three sub-issues addressed in the same workstream. (A) `docs/testing/test-process.md §7` "Failure Status semantics" table now mandates non-success Status envelopes (`NOT_AUTHORIZED` for both auth-style failures, `INVALID_PARAMETER` for schema, `UNSUPPORTED`/`CONSTRAINT_ERROR` for opcode failures). (B) Same §7 makes the TEST-zone gate a normative MUST and adds the companion clause "devices that cannot differentiate calling zone types MUST NOT implement TestControl." (C) New file `docs/features/test-control/triggers.yaml` is the canonical opcode registry; §7 keeps a short example table but points at the YAML as authoritative. mash-go updated in `pkg/service/test_event_handler.go` to surface explicit `wire.StatusNotAuthorized` on enable-key mismatch (was a generic `errorf`) and `wire.StatusConstraintError` / `wire.StatusUnsupported` on dispatcher failures (was the dispatcher's `StatusInvalidCommand` default — wrong). mash-py was already conformant since Phase 17. Future codegen task: emit trigger constants in both implementations from `triggers.yaml`.
+**Surfaced in:** Phase 17 — implementing `mash_py.features.test_control` (2026-04-28)
+**Blocks:** Nothing on the wire if both implementations agree; but every non-Go port will hit this and either copy mash-go silently (lossy) or reinvent the answers. Three sub-issues, one ticket.
+
+**The divergence.**
+
+`docs/features/test-control/1.0.yaml` and `docs/testing/test-process.md §7` together define the TestControl feature, but three load-bearing decisions are not in the spec — mash-go has answers, mash-py copied them, and a third implementation would have to rediscover them.
+
+**A. Failure shape on enable-key mismatch.**
+
+The spec yaml declares the response as `{1: success: bool}` only — no error envelope. But what does the wire actually carry when `enableKey` doesn't match?
+
+- **mash-go** (`pkg/service/test_event_handler.go:39-42`): returns `fmt.Errorf("invalid enable key")` from the handler, which the invoke dispatcher converts into a real `Status` on the wire. In practice the controller sees a non-success Status (commonly `CONSTRAINT_ERROR` from generic `errorf` paths, but `NOT_AUTHORIZED` is the semantically correct status for an authentication mismatch).
+- **mash-py**: surfaces `Status.NOT_AUTHORIZED` via `CommandError`. More precise than mash-go and more useful from the wire.
+
+The spec is silent. The yaml's response shape (`success: bool`) is only meaningful on the success path; the failure path in mash-go bypasses it entirely. Two possible fixes: (1) tighten the yaml to *forbid* an error envelope and require `{1: false}` even on enable-key mismatch (worse — bare `false` looks like a successful no-op and is a debugging trap); or (2) add normative spec text saying "implementations MAY surface a non-success Status on auth/key failures, and SHOULD use `NOT_AUTHORIZED` for enable-key mismatch."
+
+**Recommendation.** Option (2). `NOT_AUTHORIZED` matches what controllers already check; codifying it lets non-Go ports follow the principle without having to read mash-go.
+
+**B. TEST-zone-only enforcement.**
+
+`mash-go/pkg/service/test_event_handler.go:18-27` (`requireTestZone`) refuses every TestControl command unless the calling controller is on a TEST zone — returns `Status.NOT_AUTHORIZED` otherwise. Spec yaml + test-process.md §7 say only "Device must have `TestMode = true` in its configuration" — a softer gate.
+
+This matters because the TEST-zone gate is a *defense in depth* against a TestMode device being shipped accidentally, or a GRID-zone controller compromise. Without it, anyone with a valid GRID-zone certificate can issue `triggerFactoryReset` against a TestMode device.
+
+mash-py mirrors mash-go's stricter gate via `TestControlFeature(zone_type_accessor=...)`. The accessor returns the calling zone type (looked up out-of-band per connection) and any zone type other than `"TEST"` is rejected.
+
+**Recommendation.** Spec normative text: "If the device implements TestControl, the device MUST reject all TestControl commands from controllers whose calling zone type is not TEST. Devices that do not differentiate calling zone types MUST NOT implement TestControl."
+
+**C. Full trigger opcode catalogue.**
+
+`docs/testing/test-process.md §7` lists ~12 opcodes as examples; `mash-go/pkg/features/test_control.go:9-66` has ~30. The full set lives in mash-go and is the de facto registry — meaning the spec's `eventTrigger uint64` parameter has no public catalogue. Any third-party harness has to read mash-go's source to know which opcodes do what.
+
+mash-py mirrors mash-go's catalogue exactly in `mash_py/features/test_control.py`. If mash-go ever adds a new opcode and mash-py doesn't follow, the runner will silently exercise mash-go's new opcode against a Python device that interprets the upper-2-byte domain but not the lower 2 bytes.
+
+**Recommendation.** Move the full opcode catalogue into the spec. Best home: a new `docs/features/test-control/triggers.yaml` companion file, or a section in `test-process.md §7` listing every opcode + effect + parameter encoding (for opcodes like `TRIGGER_ADJUST_CLOCK_BASE` that pack a value into the low 32 bits). Codegen could then emit constants from this yaml in both languages.
+
+**Disposition (proposed).**
+
+1. Spec edits to `docs/testing/test-process.md §7`:
+   - Add the failure-shape paragraph (option A2 above).
+   - Add the TEST-zone-only normative requirement (B).
+   - Add the full opcode table (C) or link to a new `docs/features/test-control/triggers.yaml`.
+2. mash-go: no behavior change required (already conformant).
+3. mash-py: already shipped these behaviors in Phase 17; this issue tracks the spec catching up.
+4. Future codegen task (separate from Phase 17): emit trigger constants from a yaml registry into both `pkg/features/test_control.go` and `mash_py/features/test_control.py` so the catalogue stays in lockstep.
+
+**Affected files.**
+- `docs/features/test-control/1.0.yaml` — silent on failure shape and gate (no edit needed if spec edits land in test-process.md instead).
+- `docs/testing/test-process.md §7` — primary spec edit target.
+- `mash-go/pkg/features/test_control.go` — current de facto opcode registry.
+- `mash-go/pkg/service/test_event_handler.go` — enforces (A) implicitly via `errorf`, (B) via `requireTestZone`.
+- `mash-py/mash_py/features/test_control.py` — Phase 17 implementation; cites this issue at the module level.
+
+**Related.** Phase 17 of `mash-py-tdd-plan.md`; mash-go's test_event_handler dispatcher pattern.
+
+---
+
 ## Backlog (anticipated; not yet hit)
 
 The following are *suspected* spec assumptions that may need similar treatment when mash-py reaches the relevant phase. Listed here so we recognize them when we see them.

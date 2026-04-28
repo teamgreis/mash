@@ -1317,7 +1317,13 @@ mash-go fixes landed in the same workstream: `pkg/wire/message.go::ExtractReadAt
 
 ### Phase 17 — TestControl Feature & Trigger Handlers
 
-**Status.** Pending.
+**Status.** Done (2026-04-28).
+- `mash_py/features/test_control.py` — handwritten companion to `test_control_gen.py`. Defines the full trigger opcode catalogue (parity with mash-go), `TestControlFeature` subclass with enable-key gate + dispatcher hooks (`set_trigger_handler`, `set_duration_handler`), TEST-zone gate via callback accessor, clamped `setCommissioningWindowDuration` (3–10800s).
+- `tests/unit/features/test_test_control.py` — 21 unit tests; cover key-match/mismatch, async dispatcher awaiting, TEST-zone gate (allow/deny/unknown), clamp, missing-handler `UNSUPPORTED`, missing/non-string parameters → `INVALID_PARAMETER`, `testEventTriggersEnabled` reflects key validity (32-hex, non-zero).
+- `tests/interop/interaction/test_trigger_test_event.py` — 3 interop tests (all green): Go controller end-to-end invokes `triggerTestEvent` for the canonical Enter-commissioning opcode, the wrong-enable-key path, and a `CommandError`-raising handler.
+- `tools/run_operational_client/main.go` — extended with `--trigger-opcode`, `--trigger-enable-key`, `--skip-default-ops` so the helper can drive trigger-only invokes without running Phase 15's Read/Write/RemoveZone/Subscribe sequence.
+- Three spec-vs-Go gaps surfaced as **Issue #15** in `mash-py-spec-issues.md` (A: error envelope on enable-key mismatch, B: TEST-zone-only enforcement, C: full opcode catalogue absent from spec).
+- mDNS verification in the interop test was deferred to Phase 18 (mash-py has no commissioning advertiser yet); Phase 17's interop instead asserts the registered callback observed the spec opcode and the wire response carried `{1: True}`.
 
 **Goal.** Python device implements TestControl (feature 0x0A on endpoint 0) so that `mash-test`'s trigger commands work.
 
