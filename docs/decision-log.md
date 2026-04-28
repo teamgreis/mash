@@ -40,6 +40,7 @@ When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick 
 - [DEC-038: Command Parameters vs Stored Attributes](#dec-038-command-parameters-vs-stored-attributes)
 - [DEC-051: Static attributeList Immutability](#dec-051-static-attributelist-immutability)
 - [DEC-052: Feature-Level Subscription Model](#dec-052-feature-level-subscription-model)
+- [DEC-086: Subscription Defaults, Validation, and Priming Uniqueness](#dec-086-subscription-defaults-validation-and-priming-uniqueness)
 - [DEC-069: Max Message Size 8 KB](#dec-069-max-message-size-8-kb)
 - [DEC-070: Attribute Range Validation via YAML min / max](#dec-070-attribute-range-validation-via-yaml-min-max)
 - [DEC-071: Subscription Notification Ordering Across Connections](#dec-071-subscription-notification-ordering-across-connections)
@@ -4762,6 +4763,57 @@ Lockstep update across:
 
 ---
 
+### DEC-086: Subscription Defaults, Validation, and Priming Uniqueness
+
+**Date:** 2026-04-27
+**Status:** Accepted
+
+**Context:**
+`docs/interaction-model.md §6` describes Subscribe / Notification but leaves several behaviors example-only or implicit:
+
+1. The `§6.1` example shows `minInterval: 1000` and `maxInterval: 60000` ms but does not declare these RECOMMENDED defaults when the controller omits / sends `0`.
+2. `maxInterval = 0` (the literal "no heartbeat ever" subscription) is not addressed. The reference Go implementation rejects it; the spec was silent.
+3. The "delta notifications, only changed attributes" rule (§6.5) does not state whether a value identical to the most-recently-delivered value is suppressed. The reference Go implementation suppresses it ("bounce-back suppression"); the spec was silent.
+4. Heartbeat content is described as "current values of all subscribed attributes (same format as priming report)" — but the Go reference exposes a `HeartbeatEmpty` mode that contradicts this.
+5. The Go `subscription.Manager.Subscribe()` callback fires an `IsPriming=true` notification *in addition* to the priming values returned in the Subscribe Response. Two production paths exist in mash-go (`protocol_handler.go::handleSubscribe` vs `dispatch.NotificationDispatcher.HandleSubscribe`) and only the former is wired in production — but the latter would deliver priming twice if it became active. The spec did not explicitly say "priming lives only in the Subscribe Response".
+6. The Subscribe Response carries `subscriptionId` at key 1; whether `0` is permitted was not specified, even though `§3.3` already reserves `0` as the Notification message-id sentinel.
+7. Subscribe to an attribute id not present on the feature has unspecified semantics. Go silently drops it from priming; the spec was silent.
+
+mash-py Phase 16 surfaced all seven gaps while implementing the device-side subscription stack.
+
+**Decision:**
+Ratify the Go reference implementation's behavior for items 1, 2, 3, and 7. Tighten the spec for items 4, 5, and 6 to reject the noncompliant Go variants:
+
+1. **Defaults.** Omitted or `0` `minInterval` → 1000 ms; omitted `maxInterval` → 60000 ms.
+2. **Explicit `maxInterval = 0` is invalid.** Reject with `INVALID_PARAMETER`.
+3. **Bounce-back suppression is mandatory.** Per-subscription, per-attribute equality against the last delivered value.
+4. **Heartbeats MUST carry full current values.** No empty-body heartbeat. The Go `HeartbeatEmpty` mode is removed.
+5. **Priming lives ONLY in the Subscribe Response.** Devices MUST NOT emit a separate priming Notification frame. The Subscribe Response MUST include `currentValues` (key 2) even when empty.
+6. **`subscriptionId` MUST be > 0.** Devices SHOULD allocate from a 1-based monotonic counter and skip `0` on wrap-around.
+7. **Unknown attribute id at Subscribe time is silently dropped from priming.** No error. Static `attributeList` (DEC-051) means the controller can detect the missing id from the priming-map keys.
+
+**Rationale:**
+- Items 1 and 2 codify what every reasonable controller already assumed; making them normative removes the only test of "what does the device do if the controller omits intervals?" from the implementation hot path.
+- Item 3 is the natural reading of §6.5's "delta notifications" rule — without it, an idempotent controller that re-issues a Write triggers a redundant notification that contradicts "only changed attributes".
+- Item 4 closes a corner of the Go API that contradicted the spec text. An empty heartbeat tells the controller almost nothing (just "I'm alive"); the cost of carrying current values is small (controller subscribed at most ~100 attributes per sub) and the win is: heartbeat doubles as a cheap re-priming on the wire.
+- Item 5 forecloses a latent bug in mash-go: the dispatcher's HandleSubscribe path, if used, would double-send priming. Making "priming = Subscribe Response only" canonical means future contributors can't re-introduce the duplicate emission. Sending `currentValues` even when empty also makes the wire shape uniform (controllers don't need to handle a missing key 2).
+- Item 6 makes the §3.3 sentinel rule consistent across the wire — `0` is unconditionally not a valid `subscriptionId`, no special-case for "the subscription that uses 0 as a marker."
+- Item 7 keeps Subscribe lenient in the same way Read is per the existing partial-Read policy: the controller has the static `attributeList` from discovery and can detect mismatches on its side without round-trip cost.
+
+**Implementation notes:**
+- Spec text: `docs/interaction-model.md §6.5` adds the "Defaults and validation (DEC-086)", "Bounce-back suppression (DEC-086)" subsections and tightens the priming / `subscriptionId` / unknown-attribute paragraphs.
+- `mash-go`:
+  - `pkg/subscription/subscription.go`: remove `HeartbeatEmpty` mode (item 4); always send full current values.
+  - `pkg/subscription/manager.go`: stop firing the `IsPriming=true` callback (item 5); the Subscribe Response is the only priming surface.
+  - Existing rejection of `maxInterval = 0` (item 2) and bounce-back suppression (item 3) become spec-mandated rather than implementation choices.
+- `mash-py`:
+  - `mash_py/interaction/subscription.py` and `mash_py/interaction/server.py` implement all seven items as the Phase 16 acceptance gate.
+- Acceptance: Phase 16 conformance vector (mash-test) covers items 1, 2, 5, 6, and 7 with explicit cases. Items 3 and 4 are assertion-tested in the unit test (Go `pkg/subscription`, mash-py `tests/unit/interaction/test_subscription.py`).
+
+**Related:** DEC-051 (static `attributeList` — premise for item 7), DEC-052 (feature-level subscription — premise for item 1's "subscribe to all" default), DEC-071 (write-then-notify ordering — orthogonal but co-located in the dispatcher).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -4905,3 +4957,4 @@ Key learnings:
 | 2026-04-25 | Added DEC-083: CBOR tag 77 wrapper for control messages. Surfaced during mash-py Phase 1 — payload-less Responses with msgID ∈ {1,2,3} encode byte-identically to ControlMessages, and audit found no mash-go dispatcher uses session state as a tiebreaker (msgID=3 + no payload silently closes the connection). Wraps all Ping/Pong/Close in `D8 4D <map>` (tag 77 = ASCII 'M'); +2 bytes per control message; eliminates the ambiguity at the wire level. Both mash-go and mash-py updated together; resolves spec-issues Issue #2. |
 | 2026-04-26 | Added DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2). Surfaced during mash-py Phase 7 — the `commissioning-pase.md §2` SPAKE2+ section was unimplementable as written (`K_shared` undefined, `M = G·H(label)` type-mismatched, PASE_X `bytes[32]` impossible) and the Go reference had exploitable security gaps (no MHF before HKDF — verifier theft brute-forces the 8-digit code in seconds; transcript not length-prefixed; identity element not rejected). DEC-084 adopts RFC 9383 + Matter conventions wholesale: fixed RFC 9383 P-256 M/N constants, PBKDF2-HMAC-SHA256 with 100,000 iterations, derived salt (`SHA-256("MASH PBKDF2 salt v1" \|\| discriminator \|\| setup_code)[:16]`), length-prefixed RFC 9383 §3.3 transcript, KcA/KcB confirmation MAC keys per RFC 9383 §3.4, mandatory identity-element rejection. Preserves the original spec's K_main / K_confirm / K_encrypt three-key chain (clearer than RFC 9383's split). Wire-breaking: `pA`/`pB` are now 65 bytes uncompressed (was incorrectly typed `bytes[32]`). Lands in lockstep across mash-go (Phase 7C) and mash-py (Phase 7D); resolves spec-issues Issue #5. |
 | 2026-04-26 | Added DEC-085: Commissioning cert install uses dedicated MsgTypes 10–13/20, not the renewal envelope. Surfaced during mash-py Phase 9 — three downstream specs (`security.md §4.3/4.5`, `stack-architecture.md §8.4`, `commissioning-pase.md §4.3`) and `mash-go` had drifted from `message-types.md` (canonical) and were driving the renewal envelope (MsgTypes 30–33) on the commissioning ALPN. Decision: `message-types.md` wins. Cert install on `mash-comm/1` uses `CSRRequest (10)`, `CSRResponse (11)`, `CertInstall (12)`, `CertInstallResponse (13)`, `CommissioningComplete (20)`. Renewal stays on `mash/1` with 30–33. Disjoint integer ranges + ALPN routing preserve the namespace-separation invariant single-port (DEC-067) and two-port (DEC-082) deployments depend on. Lands in lockstep across mash-go (Issue #7 fix), mash-py (Phase 9 implementation), and three spec-doc patches; resolves spec-issues Issue #7. |
+| 2026-04-27 | Added DEC-086: Subscription defaults, validation, and priming uniqueness. Surfaced during mash-py Phase 16 — `interaction-model.md §6` was example-only on default intervals (1000 ms / 60000 ms), silent on `maxInterval=0` rejection, silent on bounce-back suppression, ambiguous on heartbeat content (Go has both Empty and Full modes), and silent on the priming wire-frame (Go's `subscription.Manager` would emit a separate priming `Notification` in addition to the values in the Subscribe Response). Spec lifted to RECOMMENDED defaults; `maxInterval=0` and `subscriptionId=0` rejected; bounce-back made mandatory; heartbeat MUST be full; priming MUST live only in the Subscribe Response (key 2 always present). mash-go drops `HeartbeatEmpty` and the duplicate priming-notification path; mash-py implements the full set as the Phase 16 acceptance gate. |

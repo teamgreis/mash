@@ -435,6 +435,24 @@ When a subscription is established, the Subscribe Response includes **all** requ
 - Without priming, client would only see future changes, not current state
 - Essential for late-joining controllers
 
+**Priming is delivered ONLY in the Subscribe Response (DEC-086).** The
+device MUST NOT emit an additional Notification frame carrying the same
+priming values immediately after the Subscribe Response — that would
+cause every controller to receive priming twice. The Subscribe Response
+**MUST** include the `currentValues` map (key 2), even when empty, so the
+shape is uniform across success cases.
+
+**Subscribe Response key 1 (`subscriptionId`) MUST be > 0** — `0` is
+reserved as the Notification message-id sentinel (§3.3). Devices SHOULD
+allocate IDs from a 1-based monotonic counter and skip `0` on
+wrap-around.
+
+**Unknown attribute IDs at Subscribe time** (controller asked to subscribe
+to an attribute that does not exist on the feature) are silently dropped
+from the priming map; the device MUST NOT reject the subscription.
+Static `attributeList` (DEC-051) means the controller can detect missing
+attributes from the priming-map keys without an error round-trip.
+
 #### Subsequent Notifications (Deltas)
 
 After the priming report, notifications contain **only changed attributes**:
@@ -459,9 +477,36 @@ After the priming report, notifications contain **only changed attributes**:
 | minInterval | Minimum time between notifications (coalescing). Multiple changes within minInterval are batched into one notification. |
 | maxInterval | Maximum time without notification (heartbeat). If no changes occur, device sends notification with current values at maxInterval. |
 
+##### Defaults and validation (DEC-086)
+
+- When `minInterval` is omitted or sent as `0`, the device MUST apply the
+  default value **1000 ms**.
+- When `maxInterval` is omitted, the device MUST apply the default value
+  **60000 ms**.
+- A Subscribe request with an **explicit** `maxInterval = 0` (i.e. key 3
+  present and zero) MUST be rejected with status `INVALID_PARAMETER`. A
+  subscription with no heartbeat is incompatible with the liveness model
+  the rest of the protocol assumes (controllers use the heartbeat to
+  detect a stalled device); allowing it would silently break failsafe
+  semantics.
+- A Subscribe request with `minInterval > maxInterval` MUST be rejected
+  with status `INVALID_PARAMETER`.
+
+##### Bounce-back suppression (DEC-086)
+
+The device MUST NOT emit a delta for an attribute whose new value
+equals the value most recently delivered to the subscriber on this
+subscription (priming or prior delta). This keeps the "delta
+notifications, only changed attributes" rule honest in the presence of
+write-back paths and idempotent controllers — a controller that re-issues
+the same Write does not generate a redundant notification.
+
+The suppression is per-subscription and per-attribute: equality is
+compared against the value last delivered on that specific subscription.
+
 #### Heartbeat Notification
 
-If no changes occur within maxInterval, device sends a heartbeat notification containing the **current values** of all subscribed attributes (same format as priming report, but as a notification):
+If no changes occur within maxInterval, device sends a heartbeat notification containing the **current values** of all subscribed attributes (same format as priming report, but as a notification). The heartbeat MUST carry full current values; an empty-body heartbeat is non-conformant.
 
 ```cbor
 // Heartbeat notification (no changes, but confirming device is alive)
