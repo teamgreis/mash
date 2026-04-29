@@ -228,6 +228,96 @@ def default_checker(key: str, expected: Any, state: ExecutionState) -> ExpectRes
 _MISSING = object()
 
 
+def _save_field_checker(
+    field_key: str,
+) -> Callable[[str, Any, ExecutionState], "ExpectResult"]:
+    """Build a ``save_*`` checker that mirrors mash-go's ``checkerSaveField``.
+
+    YAML usage::
+
+        expect:
+          save_subscription_id: sub_id    # saves outputs["subscription_id"] -> state["sub_id"]
+
+    The checker reads ``state.outputs[field_key]`` (set by the just-run
+    handler) and stores it under the operator-supplied target key so
+    later steps can interpolate ``{{ sub_id }}``.
+    """
+
+    def _checker(key: str, expected: Any, state: ExecutionState) -> ExpectResult:
+        if not isinstance(expected, str):
+            return ExpectResult(
+                key, expected, None, False,
+                f"{key} target must be a string, got {type(expected).__name__}",
+            )
+        val = state.outputs.get(field_key, _MISSING)
+        if val is _MISSING or val is None:
+            return ExpectResult(
+                key, expected, None, False, f"no {field_key} in step output",
+            )
+        state.set(expected, val)
+        return ExpectResult(key, expected, val, True, f"saved {field_key} as {expected!r}")
+
+    return _checker
+
+
+def _save_priming_value_checker(
+    key: str, expected: Any, state: ExecutionState,
+) -> ExpectResult:
+    """Save the most recent subscribe priming report under the named state key.
+
+    Mirrors ``CheckerSavePrimingValue`` in
+    mash-go/internal/testharness/engine/checkers.go. The priming data is
+    stashed in ``state.custom["_priming_data"]`` by ``handle_subscribe``.
+    """
+    if not isinstance(expected, str):
+        return ExpectResult(
+            key, expected, None, False,
+            f"save_priming_value target must be a string, got {type(expected).__name__}",
+        )
+    priming = state.custom.get("_priming_data")
+    if priming is None:
+        return ExpectResult(
+            key, expected, None, False, "no priming data available from subscribe",
+        )
+    state.set(expected, priming)
+    return ExpectResult(key, expected, priming, True, f"saved priming data as {expected!r}")
+
+
+def _priming_value_different_from_checker(
+    key: str, expected: Any, state: ExecutionState,
+) -> ExpectResult:
+    """Assert the current priming differs from a value previously saved.
+
+    YAML::
+
+        expect:
+          priming_value_different_from: initial_measurement
+    """
+    if not isinstance(expected, str):
+        return ExpectResult(
+            key, expected, None, False,
+            f"priming_value_different_from target must be a string, got {type(expected).__name__}",
+        )
+    current = state.custom.get("_priming_data")
+    saved = state.outputs.get(expected, _MISSING)
+    if saved is _MISSING:
+        return ExpectResult(
+            key, expected, current, False,
+            f"no saved priming value under {expected!r}",
+        )
+    if current is None:
+        return ExpectResult(
+            key, expected, current, False, "no current priming data available",
+        )
+    different = current != saved
+    msg = (
+        f"priming differs from {expected!r}"
+        if different
+        else f"priming unchanged from {expected!r}: {current!r}"
+    )
+    return ExpectResult(key, expected, current, different, msg)
+
+
 def _gte_checker(key: str, expected: Any, state: ExecutionState) -> ExpectResult:
     """``actual >= expected`` checker for ``*_min`` style keys.
 
@@ -289,6 +379,10 @@ class Runner:
         self.register_checker("addresses_tried_min", _gte_checker)
         self.register_checker("retries_performed_min", _gte_checker)
         self.register_checker("interface_count_min", _gte_checker)
+        self.register_checker("save_subscription_id", _save_field_checker("subscription_id"))
+        self.register_checker("save_delay_as", _save_field_checker("connect_duration_ms"))
+        self.register_checker("save_priming_value", _save_priming_value_checker)
+        self.register_checker("priming_value_different_from", _priming_value_different_from_checker)
 
     # ------------------------------------------------------------------
     # Registration

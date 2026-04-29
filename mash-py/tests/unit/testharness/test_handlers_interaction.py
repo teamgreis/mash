@@ -145,3 +145,81 @@ async def test_no_operational_connection_returns_clear_error() -> None:
     out = await handler_mod.handle_read(Step(action="read"), state)
     assert out["read_success"] is False
     assert "no operational" in out["error"]
+
+
+async def test_subscribe_emits_full_output_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """handle_subscribe must mirror Go's output keys so YAML assertions work.
+
+    The mash-go runner exposes subscribe_success / subscription_id_returned /
+    subscription_id_saved / priming_received / priming_is_priming_flag, and
+    YAML cases reference those names. The Python harness used to return only
+    subscribe_success+subscription_id, which cascade-failed every subscribe
+    expectation.
+    """
+    state = ExecutionState()
+
+    class _SubClient:
+        is_closed = False
+
+        async def subscribe(
+            self,
+            ep: int,
+            feat: int,
+            *,
+            handler: Any,
+            min_interval_ms: int,
+            max_interval_ms: int,
+        ) -> Any:
+            from mash_py.interaction.client import Subscription
+
+            return Subscription(
+                subscription_id=42,
+                endpoint_id=ep,
+                feature_id=feat,
+                initial_values={1: 100, 2: "running"},
+            )
+
+    async def fake_ensure(_s: ExecutionState) -> Any:
+        return _SubClient()
+
+    monkeypatch.setattr(handler_mod, "_ensure_client", fake_ensure)
+
+    out = await handler_mod.handle_subscribe(
+        Step(action="subscribe", params={"endpoint": 1, "feature": 4}),
+        state,
+    )
+    assert out["subscribe_success"] is True
+    assert out["subscription_id"] == 42
+    assert out["subscription_id_returned"] is True
+    assert out["subscription_id_saved"] is True
+    assert out["subscription_id_present"] is True
+    assert out["priming_received"] is True
+    assert out["priming_is_priming_flag"] is True
+    assert out["priming_value"] == {1: 100, 2: "running"}
+    # Priming data must also be stashed for save_priming_value to retrieve.
+    assert state.custom["_priming_data"] == {1: 100, 2: "running"}
+
+
+async def test_subscribe_status_error_keeps_id_flags_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = ExecutionState()
+
+    class _BadClient:
+        is_closed = False
+
+        async def subscribe(self, *_: Any, **__: Any) -> Any:
+            raise StatusError(status=Status.INVALID_ATTRIBUTE, message="nope")
+
+    async def fake_ensure(_s: ExecutionState) -> Any:
+        return _BadClient()
+
+    monkeypatch.setattr(handler_mod, "_ensure_client", fake_ensure)
+
+    out = await handler_mod.handle_subscribe(Step(action="subscribe"), state)
+    assert out["subscribe_success"] is False
+    assert out["subscription_id_returned"] is False
+    assert out["subscription_id_saved"] is False
+    assert out["priming_is_priming_flag"] is False

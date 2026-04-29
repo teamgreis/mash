@@ -190,3 +190,73 @@ async def test_explicit_skip_flag() -> None:
     result = await runner.run_case(tc)
     assert result.skipped
     assert result.skip_reason == "not relevant"
+
+
+# ---------------------------------------------------------------------------
+# Subscription-flow checkers (mirror mash-go RegisterEnhancedCheckers)
+# ---------------------------------------------------------------------------
+
+
+async def test_save_subscription_id_checker_persists_to_state() -> None:
+    runner = Runner()
+
+    async def fake_subscribe(step: Step, state: ExecutionState) -> dict[str, Any]:
+        return {"subscribe_success": True, "subscription_id": 42}
+
+    runner.register("subscribe", fake_subscribe)
+    tc = TestCase(
+        id="TC-SAVE-SUB",
+        steps=[
+            Step(
+                action="subscribe",
+                expect={"subscribe_success": True, "save_subscription_id": "sub_id"},
+            ),
+        ],
+    )
+    result = await runner.run_case(tc)
+    assert result.passed, result.error
+
+
+async def test_save_priming_value_then_priming_value_different_from() -> None:
+    runner = Runner()
+
+    async def first_subscribe(step: Step, state: ExecutionState) -> dict[str, Any]:
+        state.custom["_priming_data"] = {1: 100}
+        return {"subscribe_success": True}
+
+    async def second_subscribe(step: Step, state: ExecutionState) -> dict[str, Any]:
+        state.custom["_priming_data"] = {1: 250}
+        return {"subscribe_success": True}
+
+    runner.register("subscribe1", first_subscribe)
+    runner.register("subscribe2", second_subscribe)
+
+    tc = TestCase(
+        id="TC-PRIMING-DIFF",
+        steps=[
+            Step(action="subscribe1", expect={"save_priming_value": "initial"}),
+            Step(action="subscribe2", expect={"priming_value_different_from": "initial"}),
+        ],
+    )
+    result = await runner.run_case(tc)
+    assert result.passed, [sr.error for sr in result.steps]
+
+
+async def test_priming_value_different_from_fails_when_unchanged() -> None:
+    runner = Runner()
+
+    async def subscribe(step: Step, state: ExecutionState) -> dict[str, Any]:
+        state.custom["_priming_data"] = {1: 100}
+        return {"subscribe_success": True}
+
+    runner.register("subscribe", subscribe)
+    tc = TestCase(
+        id="TC-PRIMING-SAME",
+        steps=[
+            Step(action="subscribe", expect={"save_priming_value": "v"}),
+            Step(action="subscribe", expect={"priming_value_different_from": "v"}),
+        ],
+    )
+    result = await runner.run_case(tc)
+    assert not result.passed
+    assert any("unchanged" in (sr.error or "") for sr in result.steps)

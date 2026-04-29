@@ -41,6 +41,13 @@ _INTERACTION_CLIENT_KEY = "interaction_client"
 _SUBSCRIPTION_KEY = "interaction_subscription"
 _NOTIFICATION_QUEUE_KEY = "interaction_notification_queue"
 
+# Stash for the most recent subscribe priming-report values. Mirrors the Go
+# runner's "_priming_data" state key (see CheckerSavePrimingValue in
+# mash-go/internal/testharness/engine/checkers.go) so the
+# `save_priming_value` / `priming_value_different_from` checkers have a
+# canonical location to read from across step boundaries.
+_PRIMING_DATA_KEY = "_priming_data"
+
 
 async def handle_read(step: Step, state: ExecutionState) -> dict[str, Any]:
     client = await _ensure_client(state)
@@ -154,14 +161,48 @@ async def handle_subscribe(step: Step, state: ExecutionState) -> dict[str, Any]:
             max_interval_ms=max_interval_ms,
         )
     except StatusError as exc:
-        return {"subscribe_success": False, "status": int(exc.status), "error": str(exc)}
+        return {
+            "subscribe_success": False,
+            "status": int(exc.status),
+            "error": str(exc),
+            "subscription_id_returned": False,
+            "subscription_id_saved": False,
+            "subscription_id_present": False,
+            "priming_received": False,
+            "priming_is_priming_flag": False,
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"subscribe_success": False, "error": str(exc)}
+        return {
+            "subscribe_success": False,
+            "error": str(exc),
+            "subscription_id_returned": False,
+            "subscription_id_saved": False,
+            "subscription_id_present": False,
+            "priming_received": False,
+            "priming_is_priming_flag": False,
+        }
 
     state.custom[_SUBSCRIPTION_KEY] = sub
+    # initial_values is the priming report dict[int, Any] (interaction-model.md
+    # §6.2). Stash it under the canonical key so save_priming_value /
+    # priming_value_different_from checkers can read it later, mirroring
+    # CheckerSavePrimingValue in the Go engine.
+    state.custom[_PRIMING_DATA_KEY] = sub.initial_values
+    has_priming = bool(sub.initial_values)
+    saved_id = sub.subscription_id is not None
+    # Output keys mirror handleSubscribe in
+    # mash-go/internal/testharness/runner/runner.go so YAML cases share
+    # the same expectation surface across runners.
     return {
         "subscribe_success": True,
         "subscription_id": sub.subscription_id,
+        "subscription_id_returned": saved_id,
+        "subscription_id_saved": saved_id,
+        "subscription_id_present": saved_id,
+        "priming_received": has_priming,
+        "priming_is_priming_flag": has_priming,
+        "priming_value": sub.initial_values if has_priming else None,
+        "status": 0,
     }
 
 
