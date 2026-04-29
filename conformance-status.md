@@ -9,9 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — F-1 + F-4 + F-2 + F-7 + F-6 fixes shipped today
-
-Two sessions on 2026-04-29 shipped five named fixes:
+## TL;DR — three sessions on 2026-04-29 shipped 7 named fixes
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -20,12 +18,27 @@ Two sessions on 2026-04-29 shipped five named fixes:
   zone-id field), F-7 (mash-py subscribe handler outputs + save checkers),
   and F-6 (TC-E2E-001 inter-test cert leak — two cascading bugs in the
   residual zone sweep + integer-keyed-parameter regression).
+- **Session 3 (evening):** F-6-followup (TC-TRANS-002 LOCAL-zone leak — the
+  `pase.go` `transition_to_operational` path was mutating `pool.Main()`'s
+  Connection struct in place, conflating it with `suite.Conn()`'s alias) and
+  TC-PAIR-001/002/003 corpus + harness alignment.
 
-After session 2: all 5 TC-PAIR-* tests no longer hit "missing required field"
-(2/5 pass; 3 fail on unrelated issues now visible). TC-E2E-001 + TC-TRANS-*
-pass cleanly back-to-back (was: TC-E2E-001 fails after TC-TRANS-004 due to
-leaked LOCAL zone). The 75 device-side feature failures and the 3
-remaining-but-not-F-2 PAIR failures are the next layer of work.
+After session 3: all 5 TC-PAIR-* tests pass (was 2/5 mid-session). TC-TRANS-002
+passes back-to-back with TC-TRANS-001 (was: leaked LOCAL zone broke the next
+commission). TC-E2E-001 + TC-TRANS-* clean. The corpus runner does not hang;
+the prior "stalls at execution_index 145" was a misperception — three
+back-to-back 95-second reaper waits and a 100-second keepalive wait look like
+a stall but the suite completes in ~16 minutes.
+
+## What "no hang at execution_index 145" means
+
+The first session-3 task was diagnosing a reported hang. Root cause: the four
+slowest tests (TC-CONN-REAP-001/002/003 at 95s each + TC-KEEPALIVE-003 at
+100s) sit consecutively at execution_index ~145 in the precondition-sorted
+order. Combined ~6 minutes of mostly-silent device log makes monitor-by-log
+heuristics flag the run as stalled even though it is making progress. A full
+corpus run with the 30s test timeout completes in ~16 minutes. No code change
+was needed for this item.
 
 ## TL;DR — earlier (F-1 + F-4) data
 
@@ -46,11 +59,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix)
+## Headline numbers (post-fix, evening session 2026-04-29)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 102 | 359 | **278** | 81  | **77.4 %** | 75 expectation failures + 5 F-2 (pairing) + 1 F-6 (cert leak). Zero environmental noise. |
+| `mash-test` → Go device     | 461 | 102 | 359 | **283** | 76  | **78.8 %** | All 5 TC-PAIR-* + TC-TRANS-* + TC-E2E-* now PASS. 76 remaining are device-side feature-area gaps. Zero environmental noise. |
 | `mash-test` → Python device | *to re-run* | — | — | — | — | *unblocked* | F-1 fix means `-target <comm-port> -srv-resolve` now works correctly — operational SRV-resolve uses the canonical zone-id derived from the Zone CA cert. TC-CONN-005 verified passing against mash-py. |
 | `mash-py-test` → Go device  | 134 | 0   | 134 | **2**   | 132 | **1.5 %**  | Earlier subset run. 57 fails are Python harness gaps (`unknown action: …`); 24 are PASE timeouts; 32 are genuine assertion failures (mostly subscription/read flow). Tracked as F-3 / F-7. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
@@ -60,6 +73,87 @@ runs every YAML case unless a static `--pics` file is supplied, which is why
 its "Discovered" counts are larger and its failure pile is dominated by tests
 the Python harness cannot execute at all (unknown actions). Quadrants 3-4 are
 not yet directly comparable to 1-2.
+
+## Fixes shipped (evening session — F-6-followup + TC-PAIR-001/002/003)
+
+### F-6 follow-up: TC-TRANS-002 LOCAL-zone leak
+
+**Change:** `mash-go/internal/testharness/runner/pase.go`,
+`mash-go/internal/testharness/runner/connection_state_test.go`.
+
+The F-6 commit (`2d46a23`) made the residual zone sweep run unconditionally
+and fixed the integer-keyed-parameter regression in `requestDeviceState`,
+which made TC-E2E-001 pass. TC-TRANS-002 still failed with the same
+"cert exchange: zone type already exists, code 10" because TC-TRANS-001's
+teardown wasn't actually removing its LOCAL zone.
+
+**Root cause.** `handleCommission` with `transition_to_operational: true`
+mutated `pool.Main()`'s Connection struct *in place*: it called `Close()` on
+the existing struct and then assigned the new operational `tlsConn`/`framer`/
+`state` fields back onto the same pointer. Whenever `suite.Conn()` aliased
+`pool.Main()` (a typical state after `borrowSuiteControlChannelIfAlive` or
+`reconnectToZone`, both of which set the pool main and the suite conn to
+the same `*Connection`), the mutation made the test's *new operational
+LOCAL-zone connection* share the suite alias. The teardown's alias filter
+`zc == c.suite.Conn()` then misclassified the test's zone connection as a
+suite alias, untracked it without sending RemoveZone, and the residual
+sweep that was supposed to catch this asked the wrong connection for
+`getTestState` (TestControl is restricted to TEST zones; the LOCAL leak
+returned `NOT_AUTHORIZED` / status 8) and got nothing back.
+
+**Fix.** `pase.go` now calls a new `swapMainToOperational(opConn)` helper
+that closes the old Connection and installs a fresh struct via
+`pool.SetMain(newConn)`. This decouples `pool.Main` from any pre-existing
+suite alias, exactly matching the invariant that `commissioning.go`'s
+`transitionToOperational` already maintained. New regression test
+`TestSwapMainToOperational_DecouplesSuiteAlias` asserts the property.
+
+**Result.** TC-TRANS-001 → TC-TRANS-002 → TC-TRANS-004 → TC-E2E-001 all
+pass back-to-back (was: TC-TRANS-002 fails after TC-TRANS-001).
+
+### TC-PAIR-001/002/003 — corpus alignment + auto-PICS posture leak
+
+**Change:** `mash-go/internal/testharness/runner/preconditions.go`,
+`mash-go/internal/testharness/runner/coordinator.go`,
+`mash-go/testdata/cases/pairing-request-tests.yaml`.
+
+These three were the "now-visible" failures the F-2 fix exposed.
+
+- **TC-PAIR-001** expected `txt_records: { id: <device_id>, disc: <discriminator> }`,
+  but `id` is not a spec-defined commissionable TXT key (`docs/discovery.md`
+  §2.2 defines only `D, cat, serial, brand, model, DN`). The actual device
+  emits eight TXT keys; the engine's defaultChecker stringifies map equality
+  via `fmt.Sprintf` so the extra spec-required keys broke the check. Switched
+  to `txt_records: present` (the mDNS browser already filters by
+  discriminator, so a non-empty TXT map is sufficient evidence of a
+  spec-compliant commissionable advertisement for the device under test).
+- **TC-PAIR-002** failed at step 1 (`verify_mdns_not_advertising`) because
+  the runner's auto-PICS sends `TriggerEnterCommissioningMode` after the
+  suite zone is recorded so subsequent tests can commission new zones
+  without re-triggering -- but TC-PAIR-002 explicitly wants the device
+  *not* in commissioning mode. The runner's tier model treats level 1 =
+  "commissioning mode active" and ran `WaitForCommissioningMode` at every
+  level-1 entry, hiding the pre-existing commissioning posture from any
+  test that asked for `commissioning_window_closed: true`. Fix in two
+  places: `HandlePreconditionCases` now sends `TriggerExitCommissioningMode`
+  and stops the mDNS observer when `commissioning_window_closed: true`;
+  the precondLevelCommissioning switch in `coordinator.go` skips
+  `WaitForCommissioningMode` (and sets `StateCommissioningActive=false`)
+  for that same case.
+- **TC-PAIR-003** read a `wexp` (window-expiry) TXT key that the spec
+  doesn't define. Reworked the rate-limit verification to compare the
+  `D` (discriminator) TXT field before/after the pairing request: the
+  observable consequence of "device ignored the pairing request" is that
+  the same instance keeps advertising the same discriminator. Replaced the
+  `store_as` field (not recognized by the engine) with `store_result`
+  (which saves the handler's primary `value` output under the named key,
+  per `engine.go:executeStep`).
+
+**Result.** All 5 TC-PAIR-* tests pass in isolation against a single Go
+device. (Cross-LAN runs with multiple commissionable devices on the same
+multicast address still see cross-contamination — the harness mDNS browser
+finds *any* `_mash-comm._tcp` advertiser; that is an environment property,
+not a corpus bug.)
 
 ## Fixes shipped (afternoon session — F-2 + F-7 + F-6)
 
@@ -631,15 +725,19 @@ downside.
 **Result:** 256 environmental failures → 0 environmental failures. Pass rate
 12.5 % → 77.4 %.
 
-### F-5 — Genuine discovery/pairing/TLS assertions in Go-on-Go
+### F-5 — Genuine discovery/pairing/TLS assertions in Go-on-Go  ✅ ALREADY PASSING
 
-| Test | What to investigate |
+The five tests originally listed here all pass against the current mash-go.
+Likely fell out of the F-1/F-4 environmental cleanup; entries kept for
+historical reference.
+
+| Test | Status |
 |---|---|
-| `TC-DISC-001` | mDNS TXT validation in mash-go advertiser; spec is `docs/discovery.md`. |
-| `TC-BROWSE-004` | `D` TXT field surfacing under discriminator-filter browse — likely runner-side `outputs` mapping. |
-| `TC-CONN-REAP-003` | Connection-reaper edge case; could be env-related. |
-| `TC-TLS-CTRL-007` | Controller accepting self-signed cert during commissioning — negative-test polarity issue. |
-| `TC-MULTI-003` | TestControl trigger status 8; cross-reference triggers.yaml registry (DEC-087). |
+| `TC-DISC-001` | PASS |
+| `TC-BROWSE-004` | PASS |
+| `TC-CONN-REAP-003` | PASS (1m35s — slow but passing) |
+| `TC-TLS-CTRL-007` | PASS |
+| `TC-MULTI-003` | PASS |
 
 ### F-6 — Inter-test cert-state leak (zone type already exists, code 10)  ✅ FIXED
 
