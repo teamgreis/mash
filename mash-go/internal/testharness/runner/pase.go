@@ -49,6 +49,37 @@ func (ps *PASEState) SessionKey() []byte {
 	return ps.sessionKey
 }
 
+// swapMainToOperational closes pool.Main()'s existing connection and replaces
+// it with a fresh Connection struct wrapping opConn. It returns the new
+// Connection (also reachable via r.pool.Main()).
+//
+// Why a fresh struct, not in-place mutation:
+// suite.Conn() may alias r.pool.Main() (see borrowSuiteControlChannelIfAlive
+// and reconnectToZone, which both set the pool's main and the suite's conn
+// to the same Connection pointer). Mutating the existing pool.Main() struct
+// in place would carry the test's new operational TLS conn, framer, and
+// state into the suite alias too. The teardown's `zc == c.suite.Conn()`
+// alias filter would then misclassify the test's new zone connection as
+// the suite zone's, untrack it without sending RemoveZone, and leak a
+// LOCAL zone on the device -- breaking the next test's commissioning with
+// "zone type already exists, code 10" (F-6 follow-up: TC-TRANS-002 fails
+// after TC-TRANS-001 leaves a LOCAL zone behind).
+//
+// commissioning.go's transitionToOperational already swaps in a fresh
+// struct; this helper aligns handleCommission's transition path with that
+// invariant.
+func (r *Runner) swapMainToOperational(opConn *tls.Conn) *Connection {
+	_ = r.pool.Main().Close()
+	newConn := &Connection{
+		tlsConn:       opConn,
+		framer:        transport.NewFramer(opConn),
+		state:         ConnOperational,
+		hadConnection: true,
+	}
+	r.pool.SetMain(newConn)
+	return newConn
+}
+
 // registerPASEHandlers registers all PASE-related action handlers.
 func (r *Runner) registerPASEHandlers() {
 	// Primary commissioning action (recommended)
@@ -360,13 +391,12 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		})
 
 		if opErr == nil && doTransition {
-			// Explicit transition: close commissioning conn, replace r.pool.Main().
-			_ = r.pool.Main().Close()
-			r.pool.Main().tlsConn = opConn
-			r.pool.Main().framer = transport.NewFramer(opConn)
-			r.pool.Main().state = ConnOperational
-			r.pool.Main().hadConnection = true
-			state.Set(StateConnection, r.pool.Main())
+			// Explicit transition: swap pool.Main() to a fresh operational
+			// Connection. swapMainToOperational is load-bearing -- see its
+			// docstring for why the fresh struct (vs. in-place mutation)
+			// matters for suite-zone alias decoupling (F-6 follow-up).
+			newConn := r.swapMainToOperational(opConn)
+			state.Set(StateConnection, newConn)
 			state.Set(StateOperationalConnEstablished, time.Now())
 			if err := r.waitForOperationalReady(2 * time.Second); err != nil {
 				r.debugf("handleCommission: %v (continuing)", err)
@@ -374,7 +404,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			if r.connMgr.PASEState() != nil && r.connMgr.PASEState().sessionKey != nil {
 				zoneID := deriveZoneIDFromSecret(r.connMgr.PASEState().sessionKey)
 				connKey := "step-" + zoneID
-				r.pool.TrackZone(connKey, r.pool.Main(), zoneID)
+				r.pool.TrackZone(connKey, newConn, zoneID)
 				r.debugf("handleCommission: transitioned to operational, zone %s", zoneID)
 			}
 		} else if opErr == nil {
