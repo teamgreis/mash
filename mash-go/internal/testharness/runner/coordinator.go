@@ -561,13 +561,23 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		} else {
 			c.ops.EnsureDisconnected()
 		}
-		if c.config.Target != "" {
+		// Tests like TC-PAIR-001/002 want level 1 (uncommissioned) AND a
+		// closed commissioning window so they can verify pairing-request
+		// driven window opening from a clean state. WaitForCommissioningMode
+		// would mDNS-cache the device's pre-close advertisement and the
+		// later verify_mdns_not_advertising step would race against macOS's
+		// mDNSResponder cache. Skip the wait when the test explicitly
+		// asked for a closed window.
+		windowClosedRequested := hasPrecondition(tc.Preconditions, PrecondCommissioningWindowClosed)
+		if c.config.Target != "" && !windowClosedRequested {
 			if err := c.ops.WaitForCommissioningMode(ctx, 3*time.Second); err != nil {
 				c.debugf("commissioning mode: %v (continuing)", err)
 			}
 			c.ops.SetLastDeviceConnClose(time.Now())
 		}
-		state.Set(StateCommissioningActive, true)
+		// StateCommissioningActive reflects the runner's intent: false when
+		// the test explicitly closed the window, true otherwise.
+		state.Set(StateCommissioningActive, !windowClosedRequested)
 	}
 
 	// Crypto restore: if no fresh PASE occurred and crypto was replaced.

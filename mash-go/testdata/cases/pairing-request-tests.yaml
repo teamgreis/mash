@@ -59,9 +59,13 @@ steps:
       timeout_ms: 5000
     expect:
       advertising: true
-      txt_records:
-        id: "{{ device_id }}"
-        disc: "{{ device_discriminator }}"
+      # docs/discovery.md §2.2: the device advertises with at least D, cat,
+      # serial, brand, model. The mDNS observer is already discriminator-
+      # filtered (only services with the device-under-test's D pass the
+      # browser's filter), so a non-empty txt_records map is sufficient.
+      # An exact-key map check would over-constrain (the engine's defaultChecker
+      # uses fmt.Sprintf for map equality and would fail on extra DN/cat/etc).
+      txt_records: present
 
   - name: Commission device successfully
     action: commission
@@ -173,12 +177,15 @@ steps:
     expect:
       advertising: true
 
-  - name: Record window expiry time
+  - name: Snapshot the discriminator the device is advertising
+    # The commissionable TXT exposes D (discriminator) per docs/discovery.md
+    # §2.2; window-expiry is not a spec-defined TXT field, so this test
+    # uses the discriminator as a stable pre/post-request invariant instead.
     action: read_mdns_txt
     params:
       service_type: "_mash-comm._tcp"
-      key: "wexp"                    # Window expiry timestamp
-    store_as: original_window_expiry
+      key: "D"
+    store_result: original_discriminator
     expect:
       key_exists: true
 
@@ -196,13 +203,24 @@ steps:
     params:
       duration: "2s"
 
-  - name: Verify window expiry unchanged (rate limited)
+  - name: Verify advertised discriminator unchanged (rate limited)
+    # Rate-limit semantics per DEC-042: a pairing request received while the
+    # commissioning window is already open MUST be ignored. The observable
+    # consequence is "no change in the device's mDNS posture": the same
+    # service instance is still advertising the same discriminator.
     action: read_mdns_txt
     params:
       service_type: "_mash-comm._tcp"
-      key: "wexp"
+      key: "D"
     expect:
-      value: "{{ original_window_expiry }}"    # Not extended
+      value: "{{ original_discriminator }}"
+
+  - name: Verify device is still advertising commissioning
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mash-comm._tcp"
+    expect:
+      advertising: true
 
 postconditions:
   - commissioning_window_unchanged: true

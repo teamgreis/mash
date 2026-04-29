@@ -1195,6 +1195,28 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 				}
 			case PrecondCommissioningWindowClosed:
 				state.Set(StateCommissioningActive, false)
+				// For real devices, the runner's auto-PICS path explicitly
+				// re-opens the commissioning window after suite-zone setup
+				// (runner.go: TriggerEnterCommissioningMode) so subsequent
+				// tests can commission new zones without re-triggering.
+				// Tests like TC-PAIR-002 need the OPPOSITE -- the device must
+				// be uncommissioned-AND-window-closed at step 1 for the
+				// "verify_mdns_not_advertising" check. Without the trigger
+				// here the auto-PICS posture leaks into the test setup.
+				//
+				// We also stop the runner's mDNS observer so that step 1's
+				// verify_mdns_not_advertising starts a fresh browse rather
+				// than seeing observer-cached service entries from before
+				// the device's goodbye announcement (commissionable mDNS
+				// goodbye is asynchronous; the observer may not have
+				// processed it within the step's default 1s window).
+				if r.config.Target != "" && r.config.EnableKey != "" {
+					r.debugf("commissioning_window_closed: sending TriggerExitCommissioningMode")
+					if err := r.sendTriggerViaZone(ctx, features.TriggerExitCommissioningMode, state); err != nil {
+						r.debugf("commissioning_window_closed: trigger failed: %v (continuing)", err)
+					}
+					r.stopObserver()
+				}
 			case PrecondDeviceInZone:
 				zs := getZoneState(state)
 				if len(zs.zones) == 0 {
