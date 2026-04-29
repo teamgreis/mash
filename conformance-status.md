@@ -9,21 +9,23 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — F-1 + F-4 + F-2 + F-7 fixes shipped today
+## TL;DR — F-1 + F-4 + F-2 + F-7 + F-6 fixes shipped today
 
-Two sessions on 2026-04-29 shipped four named fixes:
+Two sessions on 2026-04-29 shipped five named fixes:
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
   to 77.4% by eliminating 256 environmental connection-refused failures.
 - **Session 2 (afternoon):** F-2 (pairing-request announce was missing the
-  zone-id field) and F-7 (mash-py subscribe handler outputs + save checkers).
+  zone-id field), F-7 (mash-py subscribe handler outputs + save checkers),
+  and F-6 (TC-E2E-001 inter-test cert leak — two cascading bugs in the
+  residual zone sweep + integer-keyed-parameter regression).
 
-After session 2, all 5 TC-PAIR-* tests no longer hit the original "missing
-required field" error; 2/5 pass cleanly. The other 3 fail on distinct issues
-(YAML cases checking non-spec TXT fields like `id` and `wexp`, plus
-TC-PAIR-002's mDNS timing) that were masked by F-2 — those are tracked
-separately, not under F-2.
+After session 2: all 5 TC-PAIR-* tests no longer hit "missing required field"
+(2/5 pass; 3 fail on unrelated issues now visible). TC-E2E-001 + TC-TRANS-*
+pass cleanly back-to-back (was: TC-E2E-001 fails after TC-TRANS-004 due to
+leaked LOCAL zone). The 75 device-side feature failures and the 3
+remaining-but-not-F-2 PAIR failures are the next layer of work.
 
 ## TL;DR — earlier (F-1 + F-4) data
 
@@ -59,7 +61,42 @@ its "Discovered" counts are larger and its failure pile is dominated by tests
 the Python harness cannot execute at all (unknown actions). Quadrants 3-4 are
 not yet directly comparable to 1-2.
 
-## Fixes shipped (afternoon session — F-2 + F-7)
+## Fixes shipped (afternoon session — F-2 + F-7 + F-6)
+
+### F-6: TC-E2E-001 inter-test cert leak
+
+**Change:** `mash-go/internal/testharness/runner/coordinator.go`,
+`mash-go/internal/testharness/runner/coordinator_test.go`,
+`mash-go/internal/testharness/runner/diagnostics.go`,
+`mash-go/internal/testharness/runner/diagnostics_test.go`,
+`mash-go/pkg/service/test_event_handler.go`. Commit `2d46a23`.
+
+Two cascading bugs that together silently disabled the corrective
+residual-zone-sweep at teardown:
+
+1. **The sweep was gated on `-strict-lifecycle`** (a fail-on-leak
+   diagnostic flag). Cleanup must run regardless of the diagnostic
+   surface; silent leaks otherwise cascade into the next test's
+   commission. The TestCoordTeardown_SuiteAlive_RestoresMainBeforeProbe
+   fixture had to be updated to attach a framer to its "alive" suite
+   conn (matching production state) so the sweep's framer-nil check
+   doesn't force an unnecessary ReconnectToZone.
+
+2. **`requestDeviceState` sent string-keyed parameters**
+   (`map[string]any{"enableKey": ...}`), regressing the integer-key
+   convention from Phase 11 / Issue #11. The device's command machinery
+   walks required parameter IDs as `map[uint8]any` keys and rejects
+   with `StatusInvalidParameter` (code 5) before reaching the
+   enable-key check. The residual sweep then saw a nil snapshot and
+   bailed. Switched to integer keys via the new exported constant
+   `service.TestControlCmdGetTestStateParamEnableKey`.
+
+**Result:** TC-E2E-001 + TC-TRANS-* pass back-to-back (the documented
+F-6 reproducer flips from FAIL→PASS). The sweep now actually issues
+RemoveZone for leaked non-suite zones, which is what the residual-sweep
+code was designed to do all along.
+
+### F-2: Pairing-request announce synthesizes a Zone ID when YAML omits it
 
 ### F-2: Pairing-request announce synthesizes a Zone ID when YAML omits it
 
@@ -597,14 +634,24 @@ downside.
 | `TC-TLS-CTRL-007` | Controller accepting self-signed cert during commissioning — negative-test polarity issue. |
 | `TC-MULTI-003` | TestControl trigger status 8; cross-reference triggers.yaml registry (DEC-087). |
 
-### F-6 — Inter-test cert-state leak (zone type already exists, code 10)
+### F-6 — Inter-test cert-state leak (zone type already exists, code 10)  ✅ FIXED
 
-**Owner:** mash-go testharness coordinator + mash-go service.
-**Impact:** 2 failures (`TC-E2E-001`, `TC-TRANS-002`).
-**Why:** A previous test installed a TEST-zone cert and the next test's
-re-commissioning hits "zone type already exists". Either the prior test's
-teardown didn't `RemoveZone` the test zone, or the Go device persisted state
-across the runner's reset.
+**Status:** Fixed in the afternoon session. Commit `2d46a23`. See "Fixes
+shipped (afternoon session)" above.
+
+**Recap of the bug:** A LOCAL-zone commission from a prior test (e.g.
+TC-TRANS-004) was leaving the device with the zone in its `connectedZones`
+map after the runner's local teardown untracked it. The next test that
+commissioned a LOCAL zone hit "zone type already exists code 10". The
+runner had a "residual zone sweep" designed to ask the device for its
+authoritative zone list and remove non-suite zones, but two bugs disabled
+it: a `-strict-lifecycle` gate kept it dormant in normal runs, and even
+when run, `requestDeviceState` used pre-Phase-11 string-keyed parameters
+that the device rejected with `StatusInvalidParameter`.
+
+**Fix:** drop the gate; switch to integer-keyed parameters. Two regression
+tests added: `TestRequestDeviceState_SendsIntegerKeyedParameters` and
+`TestCoordTeardown_DefaultMode_RunsResidualZoneSweep`.
 
 ### F-7 — `mash-py-test` subscribe handler doesn't populate the step `outputs` map  ✅ FIXED
 
