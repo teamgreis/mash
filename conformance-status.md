@@ -9,7 +9,23 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — F-1 + F-4 fixes shipped today
+## TL;DR — F-1 + F-4 + F-2 + F-7 fixes shipped today
+
+Two sessions on 2026-04-29 shipped four named fixes:
+
+- **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
+  F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
+  to 77.4% by eliminating 256 environmental connection-refused failures.
+- **Session 2 (afternoon):** F-2 (pairing-request announce was missing the
+  zone-id field) and F-7 (mash-py subscribe handler outputs + save checkers).
+
+After session 2, all 5 TC-PAIR-* tests no longer hit the original "missing
+required field" error; 2/5 pass cleanly. The other 3 fail on distinct issues
+(YAML cases checking non-spec TXT fields like `id` and `wexp`, plus
+TC-PAIR-002's mDNS timing) that were masked by F-2 — those are tracked
+separately, not under F-2.
+
+## TL;DR — earlier (F-1 + F-4) data
 
 | | Before fixes | After fixes |
 |---|---|---|
@@ -43,7 +59,69 @@ its "Discovered" counts are larger and its failure pile is dominated by tests
 the Python harness cannot execute at all (unknown actions). Quadrants 3-4 are
 not yet directly comparable to 1-2.
 
-## Fixes shipped (this session)
+## Fixes shipped (afternoon session — F-2 + F-7)
+
+### F-2: Pairing-request announce synthesizes a Zone ID when YAML omits it
+
+**Change:** `mash-go/internal/testharness/runner/discovery_handlers.go`,
+`mash-go/internal/testharness/runner/discovery_handlers_test.go`. Commit
+`c013153`.
+
+YAML pairing-request cases (TC-PAIR-001..005) pass `controller_id:
+"{{ controller_id }}"` but the runner's `handleAnnouncePairingRequest`
+read `params[KeyZoneID]` instead, and `{{ controller_id }}` was an
+unset state template. The empty zone-id then failed
+`PairingRequestInfo.Validate()` with `ErrMissingRequired` ("missing
+required field") — that error matched all 5 PAIR tests.
+
+New `resolveAnnounceZoneID(params, crypto)` helper falls through three
+options to produce a 16-hex Zone ID:
+
+1. Honor `params["zone_id"]` if it is exactly 16 hex chars.
+2. Use `canonicalZoneIDFromCrypto(crypto)` when a Zone CA is loaded
+   (post-commission case).
+3. Synthesize from `controller_id` (or "mash-test-runner") via
+   `SHA-256(seed)[0:8]` — the typical pre-commission pairing-request
+   path. The device only matches by Discriminator per `docs/discovery.md`
+   §2.4, so the requesting Zone ID just needs to be well-formed.
+
+Same commit also enhances `handleReadMDNSTXT`: when a YAML step supplies
+a `key` param, the handler now emits a canonical `value` output (previously
+only `txt_<key>`) and `key_exists` reflects the per-key presence rather
+than "any TXT records exist". Lookup is case-insensitive so YAML can
+write either upper- or lower-case keys.
+
+**Result:** 0/5 TC-PAIR tests hit "missing required field" (was 5/5).
+2/5 now pass; the 3 still-failing tests fail on distinct issues that
+were masked by F-2 (test corpus references non-spec TXT keys / has a
+timing race against auto-PICS state). Those are not F-2 cases.
+
+### F-7: mash-py subscribe handler matches Go's output keys
+
+**Change:** `mash-py/mash_py/testharness/handlers/interaction.py`,
+`mash-py/mash_py/testharness/runner.py` (+ tests). Commit `5bad714`.
+
+Python `handle_subscribe` returned only `subscribe_success` and
+`subscription_id`. The shared YAML corpus checks 6 more outputs that
+cascaded as missing-key failures in quadrant 3 of the test matrix:
+`subscription_id_returned`, `subscription_id_saved`,
+`subscription_id_present`, `priming_received`, `priming_is_priming_flag`,
+`priming_value`, `status`. Mirrored those exactly. The Subscription
+object's `initial_values` dict is stashed at `state.custom["_priming_data"]`
+mirroring mash-go's `_priming_data` state slot.
+
+Also registered four checkers that mash-go exposes via
+`engine.RegisterEnhancedCheckers` but mash-py was missing:
+`save_subscription_id`, `save_delay_as`, `save_priming_value`,
+`priming_value_different_from`. Without these the YAML cases that use
+`expect: save_subscription_id: <name>` were misinterpreted by the default
+equality checker.
+
+**Result:** 763 mash-py unit tests pass. Quadrant-3 measurement on full
+corpus deferred to next session (re-run with the same conditions as the
+2026-04-29 morning baseline).
+
+## Fixes shipped (morning session — F-1 + F-4)
 
 ### F-1: Operational SRV-resolve now uses the canonical zone-id
 
@@ -448,17 +526,20 @@ now an explicit parameter computed via `canonicalZoneIDFromCrypto(crypto)`
 at all four call sites. SRV resolution is per-zone-keyed in the dialer
 cache. Documented `-target`'s semantics under DEC-082 in `mash-test --help`.
 
-### F-2 — TC-PAIR-001/002/004: pairing-request envelope missing required field
+### F-2 — TC-PAIR-001/002/004: pairing-request envelope missing required field  ✅ FIXED
 
-**Owner:** mash-go runner (`testharness`).
-**Impact:** 3 real failures in quadrant 1.
-**Where to look:** `mash-go/internal/testharness/runner/discovery_handlers.go`
-(or wherever `announce pairing request` lives — grep for the error string).
-The error originates from the runner serializing/sending the
-pairing-request announce; the device-side validator reports
-"missing required field".
-**Note:** TC-PAIR-003 is the same suite, fails with the related assertion
-`advertising: expected true, got false`.
+**Status:** Fixed in the afternoon session. Commit `c013153`. See "Fixes
+shipped (afternoon session — F-2 + F-7)" above.
+
+**Recap of the bug:** YAML cases pass `controller_id` but the runner read
+`zone_id` only, leaving the announcement's `ZI` TXT field empty —
+`PairingRequestInfo.Validate()` rejects with "missing required field".
+
+**Fix:** `resolveAnnounceZoneID` synthesizes a deterministic 16-hex zone
+id when none is supplied; honors explicit `zone_id` when given.
+
+**Result:** 0/5 PAIR tests hit the original error (was 5/5). 2/5 pass; 3
+fail on unrelated, now-visible issues.
 
 ### F-3 — `mash-py-test` harness has 18 unimplemented actions and dominates failure noise
 
@@ -525,23 +606,25 @@ re-commissioning hits "zone type already exists". Either the prior test's
 teardown didn't `RemoveZone` the test zone, or the Go device persisted state
 across the runner's reset.
 
-### F-7 — `mash-py-test` subscribe handler doesn't populate the step `outputs` map
+### F-7 — `mash-py-test` subscribe handler doesn't populate the step `outputs` map  ✅ FIXED
 
-**Owner:** mash-py harness (`mash-py/mash_py/testharness/handlers/subscribe.py`
-or wherever subscription handling lives — grep for `subscribe_success` /
-`subscription_id_returned`).
-**Impact:** ≥ 13 quadrant-3 failures and a likely chunk of quadrant 4.
-**Symptom:** YAML cases declare `expect: subscribe_success: true` and
-`expect: subscription_id_returned: <captured>`, but the runner reports
-`subscribe_success: expected True, got False` and
-`subscription_id_returned: key not found in outputs`. The handler must be
-returning success but not writing those keys back into the step's outputs
-map (the same map the Go runner populates in
-`mash-go/internal/testharness/runner/subscription_handlers.go`).
-**Suggested fix:** mirror the Go side's output keys exactly. The Python
-handler should set at minimum `subscribe_success: True` and
-`subscription_id_returned: <id>` on success, plus `priming_value` /
-`priming_is_priming_flag` for priming-related expectations.
+**Status:** Fixed in the afternoon session. Commit `5bad714`. See "Fixes
+shipped (afternoon session — F-2 + F-7)" above.
+
+**Recap of the bug:** Python `handle_subscribe` returned only
+`subscribe_success` + `subscription_id`; YAML cases also check
+`subscription_id_returned`, `subscription_id_saved`, `priming_received`,
+`priming_is_priming_flag`, `priming_value`, `status`. Plus four
+"save"-style checkers (`save_subscription_id`, `save_delay_as`,
+`save_priming_value`, `priming_value_different_from`) were not
+registered, so YAML using `expect: save_subscription_id: <name>` was
+mis-evaluated by the default equality checker.
+
+**Fix:** mirror Go's output keys exactly; register the missing checkers;
+stash priming dict at `state.custom["_priming_data"]` mirroring mash-go.
+
+**Result:** 763 mash-py unit tests pass. Full quadrant-3 re-measurement
+deferred — to be run identically to the 2026-04-29 morning baseline.
 
 ---
 
