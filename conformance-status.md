@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-29, post-fix, session 4)
+# MASH Conformance Status (2026-04-29, post-fix, session 5)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — four sessions on 2026-04-29 shipped 8 named fixes; Q1 78.8% → 85.0%
+## TL;DR — five sessions on 2026-04-29 shipped 9 named fixes; Q1 78.8% → 85.5%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -30,6 +30,20 @@ the off-diagonals are the real cross-stack interop signal.
   keys; the device rejected every required-param command before the
   handler ran. Symmetric bug on response: integer-keyed CBOR responses
   never matched named YAML assertions like `response_contains: applied`.
+- **Session 5 (next morning):** F-10 (TEST-zone harness override for
+  controller-authority tests). The auto-PICS suite commissions as TEST
+  per DEC-060 so TestControl works, but TEST zones are pure observers
+  (excluded from limit/setpoint resolution). Tests that drove SetLimit /
+  SetSetpoint / ClearLimit through the suite saw `effectiveConsumptionLimit`
+  stay nil and `controlState` stuck at AUTONOMOUS. New predicate
+  `testCaseNeedsControllerAuthority` detects these tests by invoke
+  command name and explicit zone-type preconditions, then routes them
+  to a fresh disposable LOCAL session while the suite stays TEST.
+  Q1 305/359 = 85.0% → 307/359 = 85.5% in full-corpus mode; deterministic
+  focused-slice retest (TC-CTRL-001..003, TC-STATE-001/002/015,
+  TC-ZONE-001/002/006/007) goes 0/10 → 3/10. The remaining 7 are real
+  device-side feature gaps (CONTROLLED→LIMITED transition, SetSetpoint
+  resolution, `myConsumptionLimit` per-zone read semantics).
 
 After session 3: all 5 TC-PAIR-* tests pass (was 2/5 mid-session). TC-TRANS-002
 passes back-to-back with TC-TRANS-001 (was: leaked LOCAL zone broke the next
@@ -67,11 +81,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, late-evening session 4 — 2026-04-29)
+## Headline numbers (post-fix, session 5 — 2026-04-29)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 102 | 359 | **305** | 54  | **85.0 %** | After F-8 (runner name↔ID translation) + F-9 (EVSE Resume unconditional). Was 283/359 = 78.8% post-session-3. The 22-test lift came from one root cause: every invoke command with required params was rejected pre-fix because the runner sent string-keyed args. |
+| `mash-test` → Go device     | 461 | 102 | 359 | **307** | 52  | **85.5 %** | After F-10 (TEST-zone harness override for controller-authority tests). Was 305/359 = 85.0% post-session-4. The +3 deterministic gain (TC-CTRL-001, TC-STATE-001, TC-ZONE-001) is masked by 1 unrelated full-corpus TLS-race flake (TC-COMM-004 passes in isolation), netting +2 in the headline. |
 | `mash-test` → Python device | *to re-run* | — | — | — | — | *unblocked* | F-1 fix means `-target <comm-port> -srv-resolve` now works correctly — operational SRV-resolve uses the canonical zone-id derived from the Zone CA cert. TC-CONN-005 verified passing against mash-py. |
 | `mash-py-test` → Go device  | 134 | 0   | 134 | **2**   | 132 | **1.5 %**  | Earlier subset run. 57 fails are Python harness gaps (`unknown action: …`); 24 are PASE timeouts; 32 are genuine assertion failures (mostly subscription/read flow). Tracked as F-3 / F-7. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
@@ -81,6 +95,133 @@ runs every YAML case unless a static `--pics` file is supplied, which is why
 its "Discovered" counts are larger and its failure pile is dominated by tests
 the Python harness cannot execute at all (unknown actions). Quadrants 3-4 are
 not yet directly comparable to 1-2.
+
+## Fixes shipped (session 5 — F-10 TEST-zone harness override)
+
+### F-10: Controller-authority tests reused the TEST suite zone, hitting DEC-060 observer-only resolution
+
+**Change:** `mash-go/internal/testharness/runner/coordinator.go`,
+`mash-go/internal/testharness/runner/coordinator_test.go`. Single
+function added (`testCaseNeedsControllerAuthority`) plus the existing
+`needsIsolatedConnectSession` flag union'd into a combined
+`needsIsolatedSession`. Three call sites (lines ~221, 242, 442 in the
+post-edit file) now use the union.
+
+**Recap of the bug.** `runner.runAutoPICS` commissions the suite zone
+as `cert.ZoneTypeTest` so it (a) doesn't count against `MaxZones`, (b)
+is transparent to device logic, and (c) lets the runner drive
+TestControl triggers (per `docs/testing/test-process.md §2`,
+TestControl is restricted to TEST zones). `coordinator.go:151` resets
+the per-test `CommissionZoneType` to TEST between tests for the same
+reason.
+
+But per **DEC-060** ("TEST zones are pure observers: excluded from
+limit resolution and setpoint resolution") and the corresponding
+guards in `pkg/zone/zone.go:159, 192`, a SetLimit/SetSetpoint/
+ClearLimit invoke from a TEST zone is *stored* under the TEST entry
+in `MultiZoneValue.Values` but *skipped* during `ResolveLimits` /
+`ResolveSetpoints`. Tests that did `invoke SetLimit` against the
+implicit suite session therefore saw:
+
+- `response_contains: effectiveConsumptionLimit` succeed (the response
+  field is present)
+- `read effectiveConsumptionLimit` come back **nil** (resolver excluded
+  the only stored value)
+- `controlState` stuck at `0x00 AUTONOMOUS` (no non-TEST zone is
+  controlling the device, by definition)
+
+Failure pattern in the corpus: `TC-CTRL-001/002/003`,
+`TC-STATE-001/002/015`, `TC-ZONE-001/002/006/007` and similar all
+showed `value: expected N, got <nil>` or `value: expected 1, got 0`
+on the read step that followed the SetLimit invoke.
+
+**Fix.** New predicate
+`testCaseNeedsControllerAuthority(tc *loader.TestCase) bool` returns
+true when the test exercises commands or preconditions that require a
+real (non-TEST) controller zone:
+
+- An `invoke` step whose `command` is one of `{SetLimit, ClearLimit,
+  SetSetpoint, ClearSetpoint, SetCurrentLimits}` -- the resolver-going
+  commands. ProcessState commands (Pause / Resume / Stop /
+  ScheduleProcess) are deliberately **not** listed: they're global,
+  not multi-zone resolved, and a TEST zone can drive them just fine.
+  TC-CTRL-004/005/006 already pass post-F-9 from a TEST suite for
+  exactly this reason.
+- An explicit `zone_type: LOCAL` or `zone_type: GRID` precondition.
+- Multi-zone preconditions (`second_zone_connected`,
+  `two_zones_connected`, `two_zones_with_limits`, `zone_count_at_least
+  >= 2`, `no_other_zones_connected`) -- the partner-zone tests
+  implicitly assume the primary participates in resolution.
+
+When the predicate fires AND the suite zone exists AND the current
+`CommissionZoneType` is still TEST, the test session is routed
+through the existing isolation path that connect-probing tests
+already use:
+
+```go
+needsIsolatedSession := needsIsolatedConnectSession || needsControllerAuthority
+if needed >= precondLevelCommissioned && needsIsolatedSession && c.suite.ZoneID() != "" {
+    if c.ops.CommissionZoneType() == cert.ZoneTypeTest {
+        c.ops.SetCommissionZoneType(cert.ZoneTypeLocal)
+        ...
+    }
+    detachMainControlChannel(...)
+    c.ops.SetPASEState(nil)
+    c.ops.ClearWorkingCrypto()
+}
+```
+
+`canReuseSession` and `suiteCanReconnect` then both see
+`!needsIsolatedSession == false` and force a fresh `EnsureCommissioned`
+which commissions a disposable **LOCAL** zone for the test. The TEST
+suite zone is preserved on the device side (still tracked in
+`pool` via the suite alias) for later TestControl trigger delivery
+in teardown. Existing residual-zone-sweep cleanup (F-6) removes the
+disposable LOCAL zone after the test.
+
+**Why not change the resolver to include TEST?** `pkg/zone/zone.go`
+already correctly implements DEC-060. Changing `ResolveLimits` to
+include TEST would let real bugs (a controller silently reading TEST
+observer values as effective limits) slip through in production. The
+test corpus is meant to validate the spec; the harness must commission
+zones that match the spec's authority model.
+
+**Result.** Focused-slice retest (`TC-CTRL-001/002/003`,
+`TC-STATE-001/002/015`, `TC-ZONE-001/002/006/007`):
+
+```
+Before: 0/10 PASS
+After:  3/10 PASS
+```
+
+Newly passing in deterministic order: `TC-CTRL-001 (SetLimit)`,
+`TC-STATE-001 (AUTONOMOUS->CONTROLLED)`, `TC-ZONE-001 (Single Zone
+Sets Limit)`. The remaining 7 are real device-side feature gaps:
+
+- `TC-CTRL-002` -- `limit_is_set: true` precondition has no harness
+  handler; step 1 reads null. This is a corpus/harness gap, not a
+  TEST-zone gap.
+- `TC-CTRL-003`, `TC-ZONE-006` -- SetSetpoint succeeds but
+  `effectiveConsumptionSetpoint` is not populated. Device-side
+  setpoint resolution gap.
+- `TC-STATE-002`, `TC-STATE-015` -- CONTROLLED -> LIMITED transition.
+  Per `pkg/features/limit_resolver.go` comment: "The device application
+  layer is responsible for promoting CONTROLLED -> LIMITED when it
+  detects that its operation is actually being curtailed by the limit."
+  Not implemented in the EVSE example.
+- `TC-ZONE-002` -- `myConsumptionLimit` per-zone read returns the
+  effective (resolved) value rather than the calling zone's stored
+  value. Device-side read-extractor gap.
+- `TC-ZONE-007` -- `disconnect_zone` step environmental issue.
+
+Full-corpus Q1: **305/359 (85.0%) -> 307/359 (85.5%)**. The +2 net
+(vs +3 deterministic) is one unrelated TLS-race flake (TC-COMM-004
+passes in isolation, fails in full-corpus alongside TC-ZONE-010 with
+`commissioning dial failed: remote error: tls: internal error`).
+
+**Tests added.** `TestCaseNeedsControllerAuthority` (12 sub-cases
+covering invoke commands, precondition variants, and the negative
+case for ProcessState commands and zone_type=TEST).
 
 ## Fixes shipped (session 4 — F-8 name↔ID translation + F-9 EVSE Resume)
 
