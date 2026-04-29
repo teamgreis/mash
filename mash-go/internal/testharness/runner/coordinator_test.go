@@ -1931,6 +1931,125 @@ func TestCaseNeedsIsolatedCommissionedSession(t *testing.T) {
 	}
 }
 
+func TestCaseNeedsControllerAuthority(t *testing.T) {
+	tcs := []struct {
+		name string
+		tc   *loader.TestCase
+		want bool
+	}{
+		{
+			name: "empty test case",
+			tc:   &loader.TestCase{},
+			want: false,
+		},
+		{
+			name: "plain read step",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{Action: ActionRead}},
+			},
+			want: false,
+		},
+		{
+			name: "invoke SetLimit",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{
+					Action: ActionInvoke,
+					Params: map[string]any{"command": "SetLimit"},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "invoke ClearLimit",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{
+					Action: ActionInvoke,
+					Params: map[string]any{"command": "ClearLimit"},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "invoke SetSetpoint",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{
+					Action: ActionInvoke,
+					Params: map[string]any{"command": "SetSetpoint"},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "invoke SetCurrentLimits",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{
+					Action: ActionInvoke,
+					Params: map[string]any{"command": "SetCurrentLimits"},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "invoke Pause does NOT need controller authority",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{
+					Action: ActionInvoke,
+					Params: map[string]any{"command": "Pause"},
+				}},
+			},
+			want: false,
+		},
+		{
+			name: "explicit zone_type LOCAL precondition",
+			tc: &loader.TestCase{
+				Preconditions: []loader.Condition{{KeyZoneType: "LOCAL"}},
+			},
+			want: true,
+		},
+		{
+			name: "explicit zone_type GRID precondition",
+			tc: &loader.TestCase{
+				Preconditions: []loader.Condition{{KeyZoneType: "GRID"}},
+			},
+			want: true,
+		},
+		{
+			name: "explicit zone_type TEST precondition does NOT trigger",
+			tc: &loader.TestCase{
+				Preconditions: []loader.Condition{{KeyZoneType: "TEST"}},
+			},
+			want: false,
+		},
+		{
+			name: "second_zone_connected precondition",
+			tc: &loader.TestCase{
+				Preconditions: []loader.Condition{{PrecondSecondZoneConnected: "GRID"}},
+			},
+			want: true,
+		},
+		{
+			name: "two_zones_connected precondition",
+			tc: &loader.TestCase{
+				Preconditions: []loader.Condition{{PrecondTwoZonesConnected: true}},
+			},
+			want: true,
+		},
+		{
+			name: "no_other_zones_connected precondition",
+			tc: &loader.TestCase{
+				Preconditions: []loader.Condition{{PrecondNoOtherZonesConnected: true}},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tcs {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, testCaseNeedsControllerAuthority(tt.tc))
+		})
+	}
+}
+
 func TestSuiteCanReconnect_ConnectTestsUseIsolatedSession(t *testing.T) {
 	c, s, p, o := newCoord(t, nil)
 	suiteConn := &Connection{state: ConnOperational}

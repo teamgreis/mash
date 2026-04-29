@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -217,9 +218,16 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		restoreCommissionZoneTypeSet = true
 	}
 	needsIsolatedConnectSession := testCaseNeedsIsolatedCommissionedSession(tc)
-	if needed >= precondLevelCommissioned && needsIsolatedConnectSession && c.suite.ZoneID() != "" {
-		// Connection-probing tests must not mutate the suite control channel.
-		// Force a disposable commissioned session for this test.
+	needsControllerAuthority := testCaseNeedsControllerAuthority(tc)
+	needsIsolatedSession := needsIsolatedConnectSession || needsControllerAuthority
+	if needed >= precondLevelCommissioned && needsIsolatedSession && c.suite.ZoneID() != "" {
+		// Two sibling reasons to force a disposable, non-suite session:
+		//   1. Connection-probing tests must not mutate the suite control channel.
+		//   2. Per DEC-060, TEST zones (the auto-PICS suite default) are pure
+		//      observers and excluded from limit/setpoint resolution. Tests that
+		//      exercise SetLimit/SetSetpoint/etc. against the suite session see
+		//      `effectiveConsumptionLimit` stay nil and `controlState` stay
+		//      AUTONOMOUS. Commission a fresh LOCAL zone for those tests.
 		if c.ops.CommissionZoneType() == cert.ZoneTypeTest {
 			c.ops.SetCommissionZoneType(cert.ZoneTypeLocal)
 			restoreCommissionZoneTypeSet = true
@@ -237,7 +245,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	canReuseSession := tier == TierApplication &&
 		current >= precondLevelCommissioned &&
 		needed >= precondLevelCommissioned &&
-		!needsIsolatedConnectSession &&
+		!needsIsolatedSession &&
 		!needsZoneConns &&
 		!hasPrecondition(tc.Preconditions, PrecondDeviceZonesFull) &&
 		!hasPrecondition(tc.Preconditions, PrecondDeviceHasGridZone) &&
@@ -437,7 +445,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		// stale PASE/session-key drift from previous non-suite commissions.
 		suiteCanReconnect := c.suite.ZoneID() != "" &&
 			c.ops.CommissionZoneType() == cert.ZoneTypeTest &&
-			!needsIsolatedConnectSession &&
+			!needsIsolatedSession &&
 			!needsZoneConns
 
 		if suiteCanReconnect {
@@ -678,6 +686,71 @@ func testCaseNeedsIsolatedCommissionedSession(tc *loader.TestCase) bool {
 	for _, step := range tc.Steps {
 		switch step.Action {
 		case ActionConnect, ActionConnectAsController, ActionConnectAsZone, ActionConnectWithTiming, ActionConnectOperational, ActionConnectExpectFailure:
+			return true
+		}
+	}
+	return false
+}
+
+// controllerAuthorityCommands lists EnergyControl invokes that go through
+// multi-zone resolution. Per DEC-060, TEST zones are excluded from limit
+// and setpoint resolution, so a test that issues these commands against
+// the auto-PICS TEST suite session sees no effect on `effective*` values
+// and no controlState transition. Such tests need a real LOCAL zone.
+//
+// ProcessState commands (Pause, Resume, Stop, ScheduleProcess) are not
+// listed because they are global, not multi-zone resolved -- a TEST zone
+// can drive them just fine.
+var controllerAuthorityCommands = map[string]bool{
+	"SetLimit":         true,
+	"ClearLimit":       true,
+	"SetSetpoint":      true,
+	"ClearSetpoint":    true,
+	"SetCurrentLimits": true,
+}
+
+// testCaseNeedsControllerAuthority returns true when the test exercises
+// commands or preconditions that require the test session to be a real
+// (non-TEST) controller zone. Without this signal the auto-PICS suite zone
+// (TEST, observer-only per DEC-060) is reused and the test's SetLimit-style
+// commands are stored under TEST and silently dropped during resolution.
+func testCaseNeedsControllerAuthority(tc *loader.TestCase) bool {
+	if tc == nil {
+		return false
+	}
+	// Explicit zone_type precondition asking for LOCAL or GRID.
+	for _, cond := range tc.Preconditions {
+		if v, ok := cond[KeyZoneType].(string); ok {
+			switch strings.ToUpper(v) {
+			case ZoneTypeLocal, ZoneTypeGrid:
+				return true
+			}
+		}
+		// Multi-zone preconditions imply the primary session participates in
+		// resolution as a real controller; the partner zone is added on top.
+		if v, ok := cond[PrecondSecondZoneConnected].(string); ok && v != "" {
+			return true
+		}
+		if b, _ := cond[PrecondTwoZonesConnected].(bool); b {
+			return true
+		}
+		if b, _ := cond[PrecondTwoZonesWithLimits].(bool); b {
+			return true
+		}
+		if n, ok := cond[PrecondZoneCountAtLeast].(int); ok && n >= 2 {
+			return true
+		}
+		if b, _ := cond[PrecondNoOtherZonesConnected].(bool); b {
+			return true
+		}
+	}
+	// Invokes that go through multi-zone resolution.
+	for _, step := range tc.Steps {
+		if step.Action != ActionInvoke {
+			continue
+		}
+		cmd, _ := step.Params["command"].(string)
+		if controllerAuthorityCommands[cmd] {
 			return true
 		}
 	}
