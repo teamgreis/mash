@@ -88,6 +88,71 @@ func GenerateNameTables(
 		fmt.Fprintf(&b, "\t}\n\n")
 	}
 
+	// Per-feature command parameter name tables (name -> wire ID).
+	// Powers the test harness's request encoder so YAML can supply
+	// args by spec name and the runner translates them into the
+	// integer-keyed CBOR map the wire requires.
+	for _, def := range allDefs {
+		hasParams := false
+		for _, cmd := range def.Commands {
+			if len(cmd.Parameters) > 0 {
+				hasParams = true
+				break
+			}
+		}
+		if !hasParams {
+			continue
+		}
+		featureConst := "model.Feature" + def.Name
+		fmt.Fprintf(&b, "\tcommandParamNames[uint8(%s)] = map[uint8]map[string]uint8{\n", featureConst)
+		for _, cmd := range def.Commands {
+			if len(cmd.Parameters) == 0 {
+				continue
+			}
+			cmdConst := "features." + def.Name + "Cmd" + goTitleCase(cmd.Name)
+			paramPrefix := "features." + goTitleCase(cmd.Name) + "Param"
+			fmt.Fprintf(&b, "\t\t%s: {\n", cmdConst)
+			for _, p := range cmd.Parameters {
+				paramConst := paramPrefix + goTitleCase(p.Name)
+				fmt.Fprintf(&b, "\t\t\t%q: %s,\n", p.Name, paramConst)
+			}
+			fmt.Fprintf(&b, "\t\t},\n")
+		}
+		fmt.Fprintf(&b, "\t}\n\n")
+	}
+
+	// Per-feature command response field tables (id -> spec name).
+	// Powers the test harness's response payload remap so YAML can
+	// reference response fields by name rather than wire ID.
+	for _, def := range allDefs {
+		hasResp := false
+		for _, cmd := range def.Commands {
+			if len(cmd.Response) > 0 {
+				hasResp = true
+				break
+			}
+		}
+		if !hasResp {
+			continue
+		}
+		featureConst := "model.Feature" + def.Name
+		fmt.Fprintf(&b, "\tcommandResponseFieldNames[uint8(%s)] = map[uint8]map[uint8]string{\n", featureConst)
+		for _, cmd := range def.Commands {
+			if len(cmd.Response) == 0 {
+				continue
+			}
+			cmdConst := "features." + def.Name + "Cmd" + goTitleCase(cmd.Name)
+			respPrefix := "features." + goTitleCase(cmd.Name) + "Resp"
+			fmt.Fprintf(&b, "\t\t%s: {\n", cmdConst)
+			for _, field := range cmd.Response {
+				fieldConst := respPrefix + goTitleCase(field.Name)
+				fmt.Fprintf(&b, "\t\t\t%s: %q,\n", fieldConst, field.Name)
+			}
+			fmt.Fprintf(&b, "\t\t},\n")
+		}
+		fmt.Fprintf(&b, "\t}\n\n")
+	}
+
 	b.WriteString("}\n")
 
 	return b.String(), nil

@@ -301,4 +301,156 @@ func initGeneratedNameTables() {
 		"setCommissioningWindowDuration": features.TestControlCmdSetCommissioningWindowDuration,
 	}
 
+	commandParamNames[uint8(model.FeatureDeviceInfo)] = map[uint8]map[string]uint8{
+		features.DeviceInfoCmdRemoveZone: {
+			"zoneId": features.RemoveZoneParamZoneID,
+		},
+	}
+
+	commandParamNames[uint8(model.FeatureEnergyControl)] = map[uint8]map[string]uint8{
+		features.EnergyControlCmdSetLimit: {
+			"consumptionLimit": features.SetLimitParamConsumptionLimit,
+			"productionLimit":  features.SetLimitParamProductionLimit,
+			"duration":         features.SetLimitParamDuration,
+			"cause":            features.SetLimitParamCause,
+		},
+		features.EnergyControlCmdClearLimit: {
+			"direction": features.ClearLimitParamDirection,
+		},
+		features.EnergyControlCmdSetCurrentLimits: {
+			"phases":    features.SetCurrentLimitsParamPhases,
+			"direction": features.SetCurrentLimitsParamDirection,
+			"duration":  features.SetCurrentLimitsParamDuration,
+			"cause":     features.SetCurrentLimitsParamCause,
+		},
+		features.EnergyControlCmdClearCurrentLimits: {
+			"direction": features.ClearCurrentLimitsParamDirection,
+		},
+		features.EnergyControlCmdSetSetpoint: {
+			"consumptionSetpoint": features.SetSetpointParamConsumptionSetpoint,
+			"productionSetpoint":  features.SetSetpointParamProductionSetpoint,
+			"duration":            features.SetSetpointParamDuration,
+			"cause":               features.SetSetpointParamCause,
+		},
+		features.EnergyControlCmdClearSetpoint: {
+			"direction": features.ClearSetpointParamDirection,
+		},
+		features.EnergyControlCmdSetCurrentSetpoints: {
+			"phases":    features.SetCurrentSetpointsParamPhases,
+			"direction": features.SetCurrentSetpointsParamDirection,
+			"duration":  features.SetCurrentSetpointsParamDuration,
+			"cause":     features.SetCurrentSetpointsParamCause,
+		},
+		features.EnergyControlCmdClearCurrentSetpoints: {
+			"direction": features.ClearCurrentSetpointsParamDirection,
+		},
+		features.EnergyControlCmdPause: {
+			"duration": features.PauseParamDuration,
+		},
+	}
+
+	commandParamNames[uint8(model.FeatureChargingSession)] = map[uint8]map[string]uint8{
+		features.ChargingSessionCmdSetChargingMode: {
+			"mode":             features.SetChargingModeParamMode,
+			"surplusThreshold": features.SetChargingModeParamSurplusThreshold,
+			"startDelay":       features.SetChargingModeParamStartDelay,
+			"stopDelay":        features.SetChargingModeParamStopDelay,
+		},
+	}
+
+	commandParamNames[uint8(model.FeatureTariff)] = map[uint8]map[string]uint8{
+		features.TariffCmdSetTariff: {
+			"tariffId":    features.SetTariffParamTariffID,
+			"currency":    features.SetTariffParamCurrency,
+			"priceUnit":   features.SetTariffParamPriceUnit,
+			"description": features.SetTariffParamDescription,
+		},
+	}
+
+	commandParamNames[uint8(model.FeatureSignals)] = map[uint8]map[string]uint8{
+		features.SignalsCmdSendPriceSignal: {
+			"source":     features.SendPriceSignalParamSource,
+			"startTime":  features.SendPriceSignalParamStartTime,
+			"validUntil": features.SendPriceSignalParamValidUntil,
+			"slots":      features.SendPriceSignalParamSlots,
+		},
+		features.SignalsCmdSendConstraintSignal: {
+			"source":     features.SendConstraintSignalParamSource,
+			"startTime":  features.SendConstraintSignalParamStartTime,
+			"validUntil": features.SendConstraintSignalParamValidUntil,
+			"slots":      features.SendConstraintSignalParamSlots,
+		},
+		features.SignalsCmdSendForecastSignal: {
+			"source":     features.SendForecastSignalParamSource,
+			"startTime":  features.SendForecastSignalParamStartTime,
+			"validUntil": features.SendForecastSignalParamValidUntil,
+			"slots":      features.SendForecastSignalParamSlots,
+		},
+		features.SignalsCmdClearSignals: {
+			"signalType": features.ClearSignalsParamSignalType,
+		},
+	}
+
+	commandParamNames[uint8(model.FeaturePlan)] = map[uint8]map[string]uint8{
+		features.PlanCmdRequestPlan: {
+			"startTime": features.RequestPlanParamStartTime,
+			"duration":  features.RequestPlanParamDuration,
+		},
+		features.PlanCmdAcceptPlan: {
+			"planId":      features.AcceptPlanParamPlanID,
+			"planVersion": features.AcceptPlanParamPlanVersion,
+		},
+	}
+
+	commandParamNames[uint8(model.FeatureTestControl)] = map[uint8]map[string]uint8{
+		features.TestControlCmdTriggerTestEvent: {
+			"enableKey":    features.TriggerTestEventParamEnableKey,
+			"eventTrigger": features.TriggerTestEventParamEventTrigger,
+		},
+		features.TestControlCmdSetCommissioningWindowDuration: {
+			"enableKey":       features.SetCommissioningWindowDurationParamEnableKey,
+			"durationSeconds": features.SetCommissioningWindowDurationParamDurationSeconds,
+		},
+	}
+
+	commandResponseFieldNames[uint8(model.FeatureDeviceInfo)] = map[uint8]map[uint8]string{
+		features.DeviceInfoCmdRemoveZone: {
+			features.RemoveZoneRespRemoved: "removed",
+		},
+	}
+
+	commandResponseFieldNames[uint8(model.FeatureEnergyControl)] = map[uint8]map[uint8]string{
+		features.EnergyControlCmdSetLimit: {
+			features.SetLimitRespApplied:                   "applied",
+			features.SetLimitRespControlState:              "controlState",
+			features.SetLimitRespEffectiveConsumptionLimit: "effectiveConsumptionLimit",
+			features.SetLimitRespEffectiveProductionLimit:  "effectiveProductionLimit",
+			features.SetLimitRespRejectReason:              "rejectReason",
+		},
+	}
+
+	commandResponseFieldNames[uint8(model.FeatureSignals)] = map[uint8]map[uint8]string{
+		features.SignalsCmdClearSignals: {
+			features.ClearSignalsRespCleared: "cleared",
+		},
+	}
+
+	commandResponseFieldNames[uint8(model.FeaturePlan)] = map[uint8]map[uint8]string{
+		features.PlanCmdRequestPlan: {
+			features.RequestPlanRespPlanID: "planId",
+		},
+		features.PlanCmdAcceptPlan: {
+			features.AcceptPlanRespNewCommitment: "newCommitment",
+		},
+	}
+
+	commandResponseFieldNames[uint8(model.FeatureTestControl)] = map[uint8]map[uint8]string{
+		features.TestControlCmdTriggerTestEvent: {
+			features.TriggerTestEventRespSuccess: "success",
+		},
+		features.TestControlCmdSetCommissioningWindowDuration: {
+			features.SetCommissioningWindowDurationRespSuccess: "success",
+		},
+	}
+
 }

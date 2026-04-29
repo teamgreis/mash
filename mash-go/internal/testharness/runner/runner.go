@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mash-protocol/mash-go/internal/inspect"
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/internal/testharness/reporter"
@@ -1841,18 +1842,33 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
 
-	// Resolve command name to ID and wrap in InvokePayload.
-	var payload any
+	// Resolve command name to ID and wrap in InvokePayload. commandID and
+	// haveCommand are captured for the response remap below: when we know
+	// which command was sent, the harness can rewrite the integer-keyed
+	// CBOR response into a name-keyed map so YAML assertions can target
+	// fields by spec name.
+	var (
+		payload     any
+		commandID   uint8
+		haveCommand bool
+	)
 	if commandRaw, hasCommand := params[ParamCommand]; hasCommand {
-		commandID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
+		cmdID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
 		if cmdErr != nil {
 			return nil, fmt.Errorf("resolving command: %w", cmdErr)
 		}
+		commandID = cmdID
+		haveCommand = true
 		// Read args (primary) or params (fallback) for command parameters.
 		args, _ := params[ParamArgs]
 		if args == nil {
 			args, _ = params[ParamParams]
 		}
+		// YAML supplies args by spec parameter name; the wire requires
+		// integer-keyed parameters per docs/interaction-model.md §7.1.
+		// Translate via the inspect registry. Pre-converted (uint8-keyed)
+		// args pass through unchanged.
+		args = inspect.ConvertCommandParams(featureID, commandID, args)
 		payload = &wire.InvokePayload{
 			CommandID:  commandID,
 			Parameters: args,
@@ -1890,10 +1906,22 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		return nil, err
 	}
 
+	// Remap response payload from CBOR integer keys to spec field names
+	// when the command schema is known. Skipped on non-success because
+	// the payload is then a wire.ErrorPayload ({1: message}) that has
+	// nothing to do with the command's response schema.
+	var namedPayload map[string]any
+	if haveCommand && resp.IsSuccess() {
+		namedPayload = inspect.RemapResponsePayload(featureID, commandID, resp.Payload)
+	}
+	if namedPayload == nil {
+		namedPayload = normalizePayloadMap(resp.Payload)
+	}
+
 	outputs := map[string]any{
 		KeyInvokeSuccess: resp.IsSuccess(),
-		KeyResult:        resp.Payload,
-		KeyResponse:      normalizePayloadMap(resp.Payload),
+		KeyResult:        namedPayload,
+		KeyResponse:      namedPayload,
 		KeyStatus:        resp.Status,
 	}
 
@@ -1904,10 +1932,11 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 	}
 
 	// Flatten response payload into output map for response_contains and
-	// application-level error detection. The payload is typically a
-	// map[any]any or map[string]any from CBOR decoding.
-	if resp.Payload != nil {
-		flattenInvokeResponse(resp.Payload, outputs)
+	// application-level error detection. namedPayload is a map[string]any
+	// keyed by spec field names (when known); flattenInvokeResponse can
+	// then look up "applied"/"rejectReason" by name reliably.
+	if namedPayload != nil {
+		flattenInvokeResponse(namedPayload, outputs)
 	}
 
 	// Update local zone state when RemoveZone succeeds. The response
