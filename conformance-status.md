@@ -86,7 +86,7 @@ bugs and 1 F-6 cert-state leak.
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
 | `mash-test` → Go device     | 461 | 102 | 359 | **307** | 52  | **85.5 %** | After F-10 (TEST-zone harness override for controller-authority tests). Was 305/359 = 85.0% post-session-4. The +3 deterministic gain (TC-CTRL-001, TC-STATE-001, TC-ZONE-001) is masked by 1 unrelated full-corpus TLS-race flake (TC-COMM-004 passes in isolation), netting +2 in the headline. |
-| `mash-test` → Python device | *to re-run* | — | — | — | — | *unblocked* | F-1 fix means `-target <comm-port> -srv-resolve` now works correctly — operational SRV-resolve uses the canonical zone-id derived from the Zone CA cert. TC-CONN-005 verified passing against mash-py. |
+| `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 134 | 0   | 134 | **2**   | 132 | **1.5 %**  | Earlier subset run. 57 fails are Python harness gaps (`unknown action: …`); 24 are PASE timeouts; 32 are genuine assertion failures (mostly subscription/read flow). Tracked as F-3 / F-7. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
 
@@ -95,6 +95,44 @@ runs every YAML case unless a static `--pics` file is supplied, which is why
 its "Discovered" counts are larger and its failure pile is dominated by tests
 the Python harness cannot execute at all (unknown actions). Quadrants 3-4 are
 not yet directly comparable to 1-2.
+
+## Findings (session 5 — F-11 mash-py listener tears down on commissioning window expiry)
+
+**Discovered while re-running Q2:** `mash-py-device` has the same bug
+that F-4 fixed in `mash-go-device`. After the commissioning window
+auto-closes (15-second window with `--window-default-seconds 15`, or
+similar timing), `mash-py` logs "commissioning window expired after
+15s; closing listener" and the listener goes away. Subsequent dials
+to the commissioning port get kernel-level `ECONNREFUSED`.
+
+In a Q2 run this manifests as: auto-PICS commissions cleanly, ~280
+tests run with normal cross-stack signal, then the listener tears
+down mid-suite and every test from that point onward fails its
+precondition setup with `dial tcp 127.0.0.1:18446: connect:
+connection refused` — the exact same noise pattern that drove Go-on-Go
+from 12.5% to 77.4% before F-4.
+
+**Owner.** mash-py (`mash-py/mash_py/cli/device.py` — keep the
+commissioning kernel listener up across window state transitions, the
+ALPN gate at the TLS layer is sufficient to enforce policy).
+
+**Mitigation for measurement.** The 110 PASS / 43 real-FAIL split
+**before the storm** is the honest signal:
+
+```
+Before listener tear-down (~280 tests):
+  PASS: 110
+  FAIL: 43   ← real cross-stack issues (multi-zone, PAIR, RENEW, CERT-VAL,
+              SEC-NONCE, COMM-WINDOW, ZTYPE, MASHO, MULTI...)
+  SKIP: 133  ← PICS-pruned
+
+After listener tear-down (~145 tests):
+  ~145 connection-refused failures, environmental
+```
+
+Pass rate of attempted-and-non-environmental: 110/153 = **71.9%**
+(approximate; some tests in the "before" window may have hit window
+expiry transiently). A clean Q2 number requires F-11 in mash-py.
 
 ## Fixes shipped (session 5 — F-10 TEST-zone harness override)
 
