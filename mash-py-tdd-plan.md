@@ -1678,6 +1678,99 @@ lifts from 9/19 commissioning-* (47%) without TestControl to 21/55
 (38% on the wider corpus the harness now includes once TestControl
 is in PICS). Twelve additional tests pass.
 
+**Phase 22 follow-up (2026-04-28, second pass): Closing the
+commissioning-* failure cluster.**
+
+After the TestControl wiring, the broader `commissioning-*` corpus
+ran at 24/33 (72.7%). Nine remaining failures were addressed in a
+single follow-up workstream:
+
+1. **DEC-047 PASE backoff (TC-SEC-BACKOFF-001/002).** Ported
+   mash-go's `PASEAttemptTracker` to `mash_py/service/pase_tracker.py`
+   (5 unit tests). Wired into `_handle_commissioning_client`:
+   reads PASERequest first via a new `PASEServer.read_request()`
+   split, applies the tier delay before SPAKE2+ math, records
+   failure on auth/protocol error paths, resets on successful PASE
+   and on window close (`_exit_commissioning_mode`). The 0/1/3/10 s
+   tier table matches the spec § 5.5 verbatim.
+
+2. **DEC-063 single-PASE busy (TC-SEC-CONN-001).** Added
+   `_pase_in_flight` counter; second handler entering during an
+   active PASE emits `CommissioningError{Busy, RetryAfter=5000}`
+   via a new `_send_commissioning_busy` helper and closes. Critical
+   subtlety: the in-flight counter is released *immediately after
+   PASE succeeds*, NOT after cert install + DEC-082 op-listener-
+   ready barrier. Without that early release, the auto-PICS
+   commission keeps the cap held for the ~1.5 s mDNS publish
+   window, and the test harness's first `pase_attempts` connection
+   lands during that window and gets a spurious busy rejection
+   that propagates as a missed-failure on the backoff counter
+   (trips TC-SEC-BACKOFF-001).
+
+3. **DEC-048 self-closing window timer (TC-COMM-WINDOW-001).**
+   `_dispatch_duration` now arms a `loop.call_later` timer in
+   `_enter_commissioning_mode` (every call, including the
+   idempotent path — matches mash-go's "open window for N seconds
+   from now" semantics). On expiry, the timer calls
+   `_exit_commissioning_mode` which closes the listener +
+   retracts mDNS. Cancellation on explicit exit and on teardown.
+
+4. **DEC-062 pre-handshake connection cap (TC-SEC-CONN-005).**
+   Phase 4 deliberately deferred this; the flood test forces the
+   reversal because the harness counts every successful TLS dial
+   as `accepted`, so post-handshake close-notify can't move the
+   peak below `max_zones + 1`. Replaced
+   `asyncio.start_server(ssl=ctx)` with a raw start_server +
+   `loop.start_tls` upgrade, gated by a `SharedConnectionCap` of
+   capacity `max_zones + 1 = 3` (DEC-064; **2 operational zones
+   per DEC-043, NOT mash-py's `MAX_ZONES = 3` which counts TEST
+   for type-uniqueness**). Cap-rejected dials surface on the peer
+   as a TLS-handshake EOF, which the harness scores as `rejected`.
+   Documented quirk: `start_tls` requires manually patching
+   `writer._transport` to keep stream writes flowing through the
+   new TLS transport.
+
+5. **mash-go harness gaps (TC-SEC-* + TC-COMM-WINDOW-005 + TC-SEC-
+   ERR-002 cascades).** Two harness-side fixes:
+   - `security_handlers.go`: `handleOpenCommissioningConnection`,
+     `handleBusyPASEExchange`, `measurePASEAttempt`, and
+     `handleFloodConnections` now use the SRV-resolving dialer.
+     Without this, every commissioning-tier dial routed to the
+     literal `-target` (the operational port), TLS-failed, and
+     the security cluster collapsed before reaching any
+     application logic. mash-go single-port runs masked the bug
+     because op port == comm port.
+   - `device_handlers.go`: `sendTriggerViaZone` now always
+     attempts a suite reconnect when `r.suite.ZoneID() != ""` and
+     the conn is dead — previously gated on `StrictLifecycle`.
+     Backward transitions intentionally close the suite TCP to
+     free a cap slot ("preserving suite zone X during
+     commissioning setup"); the strict gate prevented the
+     subsequent reconnect, so any test whose first action was a
+     TestControl trigger (`enter_commissioning_mode`,
+     `exit_commissioning_mode`) on an infrastructure-tier
+     precondition (`device_in_commissioning_mode: true`) hit
+     "no suite zone connection available" and aborted.
+
+**Result.** All 9 originally-failing commissioning tests pass.
+Conformance pass rate on `commissioning-*` lifts from 24/33
+(72.7%) to 32/33 (97.0%). Regression canary
+(TC-PASE-001..007, TC-COMM-001..003) remains 9/9.
+
+**Newly exposed (regression-on-the-wire-of-correctness):**
+- **TC-COMM-WINDOW-002.** Was previously passing for the wrong
+  reason — the window-close didn't fire on duration expiry, so
+  `verify_mdns_not_advertising` passed only because of mDNS
+  cache transients. With the timer correctly closing the window,
+  the test reaches step 5 (`announce_pairing_request`) and step
+  7 (`verify_mdns_advertising`), exposing that mash-py doesn't
+  yet implement the pairing-request (`_mashp._udp`) re-trigger
+  that re-opens the window after expiry. Real spec gap, deferred:
+  the spec calls for a UDP listener that re-arms the comm window
+  on receipt of a discriminator-matching request. Roughly the
+  same shape as DEC-048's window timer, but on a separate UDP
+  port.
+
 **Still-open spec-vs-Go drift (deferred to user decision):**
 - **Cross-test PASE EOFs in suite mode.** A handful of TC-PASE-* /
   TC-COMM-* tests pass in isolation but time out at PASE-read in
