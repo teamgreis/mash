@@ -25,9 +25,11 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from mash_py.testharness.auto_pics import find_base_pics_path, load_base_pics
 from mash_py.testharness.handlers import register_default_handlers
 from mash_py.testharness.loader import (
     LoadError,
+    PICSFile,
     filter_by_pattern,
     filter_by_tags,
     load_test_directory,
@@ -74,7 +76,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=3072,
         help="device discriminator (default: %(default)s)",
     )
-    p.add_argument("--pics", default="", help="path to PICS file (optional)")
+    p.add_argument(
+        "--pics",
+        default="",
+        help="path to PICS file (overrides auto-loaded base, disables auto-PICS)",
+    )
+    p.add_argument(
+        "--pics-base",
+        default="",
+        help="path to base protocol-common PICS (default: <tests>/../pics/protocol-common.yaml)",
+    )
+    p.add_argument(
+        "--no-auto-pics",
+        action="store_true",
+        help="disable automatic base-PICS load (run every case regardless of PICS)",
+    )
     p.add_argument(
         "--timeout",
         type=float,
@@ -107,14 +123,40 @@ def main(argv: Sequence[str] | None = None) -> int:
     cases = filter_by_pattern(cases, args.filter)
     cases = filter_by_tags(cases, include=args.tags, exclude=args.exclude_tags)
 
-    pics = None
+    # PICS resolution order (mirrors mash-go's auto-PICS load order):
+    #   1. Explicit --pics overrides everything (no auto-discovery).
+    #   2. --pics-base loads a custom base file.
+    #   3. Default: load <tests>/../pics/protocol-common.yaml when present.
+    #   4. --no-auto-pics opts out entirely (every case runs).
+    # See docs/note F-3 in conformance-status.md for context.
+    pics: PICSFile | None = None
     if args.pics:
         try:
             pics = load_pics(args.pics)
         except LoadError as exc:
             print(f"error loading PICS: {exc}", file=sys.stderr)
             return 2
+    elif not args.no_auto_pics:
+        try:
+            pics = load_base_pics(test_dir, override=args.pics_base or None)
+        except LoadError as exc:
+            print(f"error loading base PICS: {exc}", file=sys.stderr)
+            return 2
+        if pics is not None:
+            base_src = args.pics_base or str(find_base_pics_path(test_dir))
+            print(
+                f"auto-PICS: loaded {len(pics.items)} base items from {base_src}",
+                file=sys.stderr,
+            )
+    if pics is not None:
+        before = len(cases)
         cases = filter_test_cases(cases, pics)
+        skipped = before - len(cases)
+        if skipped > 0:
+            print(
+                f"auto-PICS: skipping {skipped} of {before} cases (PICS requirements not met)",
+                file=sys.stderr,
+            )
 
     if not cases:
         print("no matching test cases", file=sys.stderr)
