@@ -578,29 +578,36 @@ id when none is supplied; honors explicit `zone_id` when given.
 **Result:** 0/5 PAIR tests hit the original error (was 5/5). 2/5 pass; 3
 fail on unrelated, now-visible issues.
 
-### F-3 — `mash-py-test` harness has 18 unimplemented actions and dominates failure noise
+### F-3 — `mash-py-test` harness has 18 unimplemented actions and dominates failure noise  ⚠️ PARTIAL
+
+**Status:** Partial fix shipped. Commit `8431b6a` adds base-PICS
+auto-load: when `--pics` is not given and `<tests>/../pics/protocol-common.yaml`
+exists, mash-py-test loads it and filters cases by PICS requirements
+before running. On the mash-go corpus this skips 357 of 499 cases as
+PICS-incompatible (cases that require device-specific feature-area PICS
+items the base doesn't supply), leaving 142 cases the harness actually
+attempts.
+
+**Remaining (device-side discovery):** Go's runAutoPICS also commissions
+the device, reads DeviceInfo, walks endpoints/features and reads
+attributeList/commandList/featureMap, then merges those items on top of
+the base. That half is not yet ported because it requires running PASE
+before tests start, which restructures mash-py-test's "load cases, run,
+exit" flow.
 
 **Owner:** mash-py harness (`mash-py/mash_py/testharness/handlers/`,
 `runner.py`, `cli/test.py`).
-**Impact:** 57 of 132 quadrant-3 failures are pure harness gaps — these
-should report as "harness not-implemented" or be PICS-skipped, not as
-runtime failures.
-**Why also:** No PICS auto-discovery, so on the full corpus 490 cases run
-instead of ~150; mDNS-search preconditions wait the full per-test timeout
-when no comm listener is up; `unknown action` fails are O(0 ms) but the
-timed-out tests dominate wall time. Quadrant 4 had to be aborted at 14 tests
-because of this combination — last fresh full-corpus number is the
-2026-04-28 baseline (21/55 = 38 % on a curated subset).
-**Suggested fixes (small):**
-1. Implement PICS auto-discovery in `mash-py-test` mirroring the Go runner
-   (`runAutoPICS` in `mash-go/internal/testharness/runner/runner.go`).
-2. Skip-fast on `unknown action` instead of failing; report as "harness
+**Other suggested fixes (still open):**
+1. Skip-fast on `unknown action` instead of failing; report as "harness
    not-implemented" in a separate bucket.
-3. Lower the default mDNS browse timeout (`mash-py/mash_py/discovery/`)
+2. Lower the default mDNS browse timeout (`mash-py/mash_py/discovery/`)
    when a `--target host:port` is pinned.
-4. Fill the cheap-win actions first (5 of them already have CLI/library
+3. Fill the cheap-win actions first (5 of them already have CLI/library
    support: `open_commissioning_connection`, `enter_commissioning_mode`,
    `set_commissioning_window_duration`, `ping`, `verify_keepalive`).
+4. Add device-side discovery to close the skip-count gap with the Go
+   runner (currently Python skips 357, Go skips 102 — the difference is
+   the discovery half).
 
 ### F-4 — Test-stability cluster: 256 connection-refused failures in Go-on-Go  ✅ FIXED
 
