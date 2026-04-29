@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -709,6 +710,19 @@ func (r *Runner) handleReadMDNSTXT(ctx context.Context, step *loader.Step, state
 		KeyKeyExists:    len(svc.TXTRecords) > 0,
 	}
 
+	// When a specific TXT key was requested via params["key"], expose the
+	// resolved string value under the canonical "value" output -- this lets
+	// YAML cases use `expect: { value: ... }` and `store_as: <name>` (which
+	// reads the "value" output) without each case knowing the per-key name.
+	// Honored case-insensitively so YAML can write either "wexp" or "WEXP".
+	if reqKey, _ := params[KeyKey].(string); reqKey != "" {
+		val, found := lookupTXTCaseInsensitive(svc.TXTRecords, reqKey)
+		outputs[KeyKeyExists] = found
+		if found {
+			outputs[KeyValue] = val
+		}
+	}
+
 	// Expose individual TXT records as "txt_<key>".
 	for k, v := range svc.TXTRecords {
 		outputs["txt_"+k] = v
@@ -925,12 +939,74 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 	}, nil
 }
 
+// resolveAnnounceZoneID returns the 16-hex Zone ID for a pairing-request
+// announcement. Per docs/discovery.md §2.4, the TXT field "ZI" identifies
+// the requesting controller's zone and MUST be a 16-hex canonical id
+// (DEC-088). Resolution order:
+//
+//  1. If params["zone_id"] is exactly 16 hex characters, honor it (lets
+//     YAML cases pin a specific id).
+//  2. If the runner has a Zone CA loaded (post-commission), derive from
+//     SHA-256(Zone-CA-cert-DER)[:8] -- same canonical form as operational
+//     mDNS records.
+//  3. Otherwise, synthesize deterministically from a stable string
+//     ("controller_id" param if any, else the literal "mash-test-runner").
+//     Pairing-request tests run against uncommissioned devices, so case 2
+//     is unreachable in those flows; case 3 is the typical path.
+//
+// Cases 1 and 3 also accept any non-hex string for `zone_id` (or
+// `controller_id`) and hash it -- the device only matches by Discriminator
+// per spec, so the requesting Zone ID just needs to be well-formed.
+func resolveAnnounceZoneID(params map[string]any, crypto CryptoState) string {
+	if raw, _ := params[KeyZoneID].(string); len(raw) == discovery.IDLength && isHex16(raw) {
+		return raw
+	}
+	if zid := canonicalZoneIDFromCrypto(crypto); zid != "" {
+		return zid
+	}
+	seed, _ := params[KeyZoneID].(string)
+	if seed == "" {
+		seed, _ = params[KeyControllerID].(string)
+	}
+	if seed == "" {
+		seed = "mash-test-runner"
+	}
+	sum := sha256.Sum256([]byte(seed))
+	return hex.EncodeToString(sum[:8])
+}
+
+// isHex16 reports whether s is exactly 16 hex characters.
+func isHex16(s string) bool {
+	if len(s) != 16 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
+// lookupTXTCaseInsensitive returns the value for k from a TXT record map,
+// matching k case-insensitively. mDNS TXT keys are conventionally upper-case
+// in the spec (e.g., "D", "ZI", "DI") but YAML cases often spell them in
+// lower case ("disc", "wexp"); accepting either keeps the YAML readable.
+func lookupTXTCaseInsensitive(txt map[string]string, k string) (string, bool) {
+	if v, ok := txt[k]; ok {
+		return v, true
+	}
+	lower := strings.ToLower(k)
+	for kk, vv := range txt {
+		if strings.ToLower(kk) == lower {
+			return vv, true
+		}
+	}
+	return "", false
+}
+
 // handleAnnouncePairingRequest advertises a real _mashp._udp pairing request via mDNS.
 func (r *Runner) handleAnnouncePairingRequest(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
 	discriminator := uint16(paramInt(params, KeyDiscriminator, 0))
-	zoneID, _ := params[KeyZoneID].(string)
+	zoneID := resolveAnnounceZoneID(params, r.connMgr.WorkingCrypto())
 	zoneName, _ := params[KeyZoneName].(string)
 
 	// Store in state for verification.

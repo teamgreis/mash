@@ -292,7 +292,11 @@ func TestHandleAnnouncePairingRequest_AnnouncementSent(t *testing.T) {
 	}
 }
 
-func TestHandleAnnouncePairingRequest_MissingZoneIDWithoutFallbackFails(t *testing.T) {
+// When the YAML omits zone_id and no Zone CA is loaded (typical pairing-request
+// scenario, since the device is uncommissioned), the runner synthesizes a
+// stable 16-hex Zone ID from a deterministic seed. The announcement must
+// succeed and the synthesized id must be exposed in state for assertions.
+func TestHandleAnnouncePairingRequest_SynthesizesZoneIDWhenMissing(t *testing.T) {
 	r := newTestRunner()
 	defer r.Close()
 	state := newTestState()
@@ -302,9 +306,53 @@ func TestHandleAnnouncePairingRequest_MissingZoneIDWithoutFallbackFails(t *testi
 			"discriminator": float64(2048),
 		},
 	}
-	_, err := r.handleAnnouncePairingRequest(context.Background(), step, state)
-	if err == nil {
-		t.Fatal("expected error for missing zone_id")
+	out, err := r.handleAnnouncePairingRequest(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("expected synthesized zone_id fallback to succeed: %v", err)
+	}
+	if out[KeyAnnouncementSent] != true {
+		t.Error("expected announcement_sent=true with synthesized zone_id")
+	}
+	got, _ := out[KeyZoneID].(string)
+	if !isHex16(got) {
+		t.Errorf("expected 16-hex synthesized zone_id, got %q", got)
+	}
+	stored, _ := state.Get("pairing_request_zone_id")
+	if stored != got {
+		t.Errorf("expected stored zone_id %q to match returned %q", stored, got)
+	}
+}
+
+// controller_id is the seed exposed in the pairing-request YAML cases. When
+// only controller_id is supplied, the runner must derive a deterministic
+// 16-hex Zone ID from it.
+func TestHandleAnnouncePairingRequest_DerivesZoneIDFromControllerID(t *testing.T) {
+	r := newTestRunner()
+	defer r.Close()
+	state := newTestState()
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"discriminator": float64(2048),
+			"controller_id": "controller-default",
+		},
+	}
+	out1, err := r.handleAnnouncePairingRequest(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	zid1, _ := out1[KeyZoneID].(string)
+	if !isHex16(zid1) {
+		t.Fatalf("expected 16-hex zone_id, got %q", zid1)
+	}
+
+	out2, err := r.handleAnnouncePairingRequest(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	zid2, _ := out2[KeyZoneID].(string)
+	if zid1 != zid2 {
+		t.Errorf("expected derivation to be deterministic across calls, got %q vs %q", zid1, zid2)
 	}
 }
 
