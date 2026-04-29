@@ -35,17 +35,11 @@ func (s *DeviceService) SetAdvertiser(advertiser discovery.Advertiser) {
 		s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
 	}
 
-	// Register callback for commissioning timeout.
-	// Must mirror the full callback in Start() -- specifically setting
-	// commissioningOpen=false and stopping the listener when idle.
+	// Register callback for commissioning timeout. Must mirror the
+	// callback in Start() -- close the ALPN gate but keep the listener
+	// up. See Start() for the rationale.
 	s.discoveryManager.OnCommissioningTimeout(func() {
 		s.commissioningOpen.Store(false)
-		s.mu.RLock()
-		zoneCount := len(s.connectedZones)
-		s.mu.RUnlock()
-		if zoneCount == 0 {
-			s.stopListener()
-		}
 		s.emitEvent(Event{
 			Type:   EventCommissioningClosed,
 			Reason: "timeout",

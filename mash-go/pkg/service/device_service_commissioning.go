@@ -256,18 +256,18 @@ func (s *DeviceService) ExitCommissioningMode() error {
 	// DEC-047: Reset PASE tracker when commissioning window closes
 	s.ResetPASETracker()
 
-	zoneCount := len(s.connectedZones)
 	dm := s.discoveryManager
 	s.disconnectReentryBlockedUntil = time.Now().Add(s.disconnectReentryHoldoff)
 	s.mu.Unlock()
 
-	// Close the commissioning ALPN gate.
+	// Close the commissioning ALPN gate. The TCP listener stays up for the
+	// lifetime of the service: the ALPN gate (commissioningOpen=false) and
+	// the per-handshake getConfigForClient already reject any traffic that
+	// would be illegal in the current state, so a kernel-level listener
+	// teardown adds no security and would create a TCP-vs-TLS observable
+	// asymmetry that breaks back-to-back tests when the harness re-dials
+	// between commissioning attempts.
 	s.commissioningOpen.Store(false)
-
-	// Stop listener if no zones exist (nothing needs the port).
-	if zoneCount == 0 {
-		s.stopListener()
-	}
 
 	// Stop mDNS commissioning advertising outside the lock because mDNS
 	// operations can take >1s on macOS and would block new connections.
@@ -310,13 +310,12 @@ func (s *DeviceService) exitCommissioningForEpoch(epoch uint64) error {
 	s.commissioningOpen.Store(false)
 	s.disconnectReentryBlockedUntil = time.Now().Add(s.disconnectReentryHoldoff)
 
-	zoneCount := len(s.connectedZones)
 	dm := s.discoveryManager
 	s.mu.Unlock()
 
-	if zoneCount == 0 {
-		s.stopListener()
-	}
+	// Listener stays up for the service lifetime -- see ExitCommissioningMode
+	// above for the rationale. The ALPN gate (commissioningOpen=false) plus
+	// getConfigForClient enforce policy for accepted connections.
 
 	if dm != nil {
 		if err := dm.ExitCommissioningMode(); err != nil {

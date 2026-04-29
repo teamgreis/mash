@@ -147,17 +147,15 @@ func (s *DeviceService) Start(ctx context.Context) error {
 			s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
 		}
 
-		// Register callback for commissioning timeout
+		// Register callback for commissioning timeout. The listener
+		// stays up for the service lifetime; the ALPN gate is the only
+		// state we flip here. Tearing down the kernel listener on
+		// timeout used to cause back-to-back conformance tests to see
+		// ECONNREFUSED whenever the previous test left the device with
+		// zoneCount == 0 -- harmless in production (idle device) but
+		// fatal under the suite-driven test cadence.
 		s.discoveryManager.OnCommissioningTimeout(func() {
-			// Close commissioning gate when the window times out.
 			s.commissioningOpen.Store(false)
-			// Stop listener if no zones exist.
-			s.mu.RLock()
-			zoneCount := len(s.connectedZones)
-			s.mu.RUnlock()
-			if zoneCount == 0 {
-				s.stopListener()
-			}
 			s.emitEvent(Event{
 				Type:   EventCommissioningClosed,
 				Reason: "timeout",
