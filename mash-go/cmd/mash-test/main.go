@@ -70,7 +70,7 @@ import (
 )
 
 var (
-	target          = flag.String("target", "", "Target address (host:port) of device/controller under test")
+	target          = flag.String("target", "", "Target address (host:port) of device/controller under test. With -srv-resolve, may be either the commissioning or operational port; SRV records pin the actual ports per ALPN.")
 	mode            = flag.String("mode", "device", "Test mode: device, controller")
 	pics            = flag.String("pics", "", "Path to PICS file for the target")
 	tests           = flag.String("tests", "./testdata/cases", "Path to test cases directory")

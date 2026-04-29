@@ -107,8 +107,8 @@ func (_c *MockDialer_DialCommissioning_Call) RunAndReturn(run func(ctx context.C
 }
 
 // DialOperational provides a mock function for the type MockDialer
-func (_mock *MockDialer) DialOperational(ctx context.Context, target string, crypto CryptoState) (*tls.Conn, error) {
-	ret := _mock.Called(ctx, target, crypto)
+func (_mock *MockDialer) DialOperational(ctx context.Context, target string, zoneID string, crypto CryptoState) (*tls.Conn, error) {
+	ret := _mock.Called(ctx, target, zoneID, crypto)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DialOperational")
@@ -116,18 +116,18 @@ func (_mock *MockDialer) DialOperational(ctx context.Context, target string, cry
 
 	var r0 *tls.Conn
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, CryptoState) (*tls.Conn, error)); ok {
-		return returnFunc(ctx, target, crypto)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, CryptoState) (*tls.Conn, error)); ok {
+		return returnFunc(ctx, target, zoneID, crypto)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, CryptoState) *tls.Conn); ok {
-		r0 = returnFunc(ctx, target, crypto)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, CryptoState) *tls.Conn); ok {
+		r0 = returnFunc(ctx, target, zoneID, crypto)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*tls.Conn)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, CryptoState) error); ok {
-		r1 = returnFunc(ctx, target, crypto)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, CryptoState) error); ok {
+		r1 = returnFunc(ctx, target, zoneID, crypto)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -142,12 +142,13 @@ type MockDialer_DialOperational_Call struct {
 // DialOperational is a helper method to define mock.On call
 //   - ctx context.Context
 //   - target string
+//   - zoneID string
 //   - crypto CryptoState
-func (_e *MockDialer_Expecter) DialOperational(ctx interface{}, target interface{}, crypto interface{}) *MockDialer_DialOperational_Call {
-	return &MockDialer_DialOperational_Call{Call: _e.mock.On("DialOperational", ctx, target, crypto)}
+func (_e *MockDialer_Expecter) DialOperational(ctx interface{}, target interface{}, zoneID interface{}, crypto interface{}) *MockDialer_DialOperational_Call {
+	return &MockDialer_DialOperational_Call{Call: _e.mock.On("DialOperational", ctx, target, zoneID, crypto)}
 }
 
-func (_c *MockDialer_DialOperational_Call) Run(run func(ctx context.Context, target string, crypto CryptoState)) *MockDialer_DialOperational_Call {
+func (_c *MockDialer_DialOperational_Call) Run(run func(ctx context.Context, target string, zoneID string, crypto CryptoState)) *MockDialer_DialOperational_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -157,14 +158,19 @@ func (_c *MockDialer_DialOperational_Call) Run(run func(ctx context.Context, tar
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 CryptoState
+		var arg2 string
 		if args[2] != nil {
-			arg2 = args[2].(CryptoState)
+			arg2 = args[2].(string)
+		}
+		var arg3 CryptoState
+		if args[3] != nil {
+			arg3 = args[3].(CryptoState)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -175,7 +181,7 @@ func (_c *MockDialer_DialOperational_Call) Return(conn *tls.Conn, err error) *Mo
 	return _c
 }
 
-func (_c *MockDialer_DialOperational_Call) RunAndReturn(run func(ctx context.Context, target string, crypto CryptoState) (*tls.Conn, error)) *MockDialer_DialOperational_Call {
+func (_c *MockDialer_DialOperational_Call) RunAndReturn(run func(ctx context.Context, target string, zoneID string, crypto CryptoState) (*tls.Conn, error)) *MockDialer_DialOperational_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -1160,6 +1160,7 @@ tags:
   - operational
   - env:multi-device
 
+---
 # TC-BROWSE-004: Filter by Discriminator
 id: TC-BROWSE-004
 name: Browse Filtered by Discriminator Finds Matching Device

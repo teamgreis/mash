@@ -13,6 +13,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
@@ -300,7 +301,7 @@ func (r *Runner) reconnectMainFromSuite(state *engine.ExecutionState) error {
 	ctx := context.Background()
 	wc := r.WorkingCrypto()
 	tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
-		return r.dialer.DialOperational(ctx, target, wc)
+		return r.dialer.DialOperational(ctx, target, canonicalZoneIDFromCrypto(wc), wc)
 	})
 	if dialErr != nil {
 		return fmt.Errorf("reconnect main from suite failed: %w", dialErr)
@@ -362,7 +363,7 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	ctx := context.Background()
 	crypto := r.WorkingCrypto()
 	tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
-		return r.dialer.DialOperational(ctx, target, crypto)
+		return r.dialer.DialOperational(ctx, target, canonicalZoneIDFromCrypto(crypto), crypto)
 	})
 	if dialErr != nil {
 		r.invalidateCommissioningState(state)
@@ -430,10 +431,11 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 	const readinessRetries = 2
 	var lastErr error
 
+	canonicalZID := canonicalZoneIDFromCrypto(wc)
 	prevMain := r.pool.Main()
 	for attempt := 1; attempt <= readinessRetries; attempt++ {
 		tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
-			return r.dialer.DialOperational(ctx, target, wc)
+			return r.dialer.DialOperational(ctx, target, canonicalZID, wc)
 		})
 		if dialErr != nil {
 			lastErr = fmt.Errorf("reconnectToZone failed: %w", dialErr)
@@ -524,11 +526,31 @@ func isTransientError(err error) bool {
 	return isIOError(err)
 }
 
-// deriveZoneIDFromSecret derives a zone ID from a PASE shared secret
-// using the same SHA-256 derivation as the device side.
+// deriveZoneIDFromSecret derives the runner's internal zone-tracking key
+// from a PASE shared secret. This is NOT the spec zone-id (DEC-088 mandates
+// SHA-256(Zone-CA-cert-DER)[:8] -- see canonicalZoneIDFromCrypto). It is a
+// stable per-PASE-session string the harness uses as a map key for its own
+// zone bookkeeping (pool.TrackZone, activeZoneConns, suite zone, ...).
+//
+// Mixing the two breaks SRV-resolve under DEC-082 two-port deployments:
+// mDNS instances are keyed on the canonical zone-id, so any browse filter
+// must use that. Use this function only for runner-internal tracking; pass
+// canonicalZoneIDFromCrypto(crypto) to the dialer.
 func deriveZoneIDFromSecret(secret []byte) string {
 	hash := sha256.Sum256(secret)
 	return hex.EncodeToString(hash[:8])
+}
+
+// canonicalZoneIDFromCrypto returns the DEC-088 zone-id of the zone whose
+// CA cert is held in crypto. Returns "" when no Zone CA is loaded yet
+// (pre-commissioning, or after ClearWorkingCrypto). Pass this to the dialer
+// for SRV-resolve filtering -- the device advertises operational mDNS
+// records with this id in the ZI TXT field.
+func canonicalZoneIDFromCrypto(crypto CryptoState) string {
+	if crypto.ZoneCA == nil || crypto.ZoneCA.Certificate == nil {
+		return ""
+	}
+	return discovery.ZoneIDFromCertificate(crypto.ZoneCA.Certificate)
 }
 
 // commissionSuiteZone performs one-time suite-level commissioning.

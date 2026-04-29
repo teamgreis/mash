@@ -13,6 +13,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 	"github.com/stretchr/testify/mock"
@@ -165,6 +166,34 @@ func TestDeriveZoneIDFromSecret(t *testing.T) {
 	other := deriveZoneIDFromSecret([]byte("different-secret"))
 	if zoneID == other {
 		t.Error("different secrets should produce different zone IDs")
+	}
+}
+
+func TestCanonicalZoneIDFromCrypto_EmptyOnNoZoneCA(t *testing.T) {
+	// Pre-commissioning state: no Zone CA yet -> dialer must fall back to
+	// the literal target rather than browse for a non-existent zone.
+	if got := canonicalZoneIDFromCrypto(CryptoState{}); got != "" {
+		t.Errorf("empty crypto: got %q, want empty string", got)
+	}
+}
+
+func TestCanonicalZoneIDFromCrypto_MatchesDEC088(t *testing.T) {
+	// canonicalZoneIDFromCrypto must agree with discovery.ZoneIDFromCertificate
+	// (the device's mDNS instance name source). If the two derivations drift,
+	// SRV-resolve filtering breaks silently because the browse zoneID never
+	// matches advertised records.
+	zca, err := cert.GenerateZoneCA("test-zone-id-canon", cert.ZoneTypeTest)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA: %v", err)
+	}
+
+	got := canonicalZoneIDFromCrypto(CryptoState{ZoneCA: zca})
+	want := discovery.ZoneIDFromCertificate(zca.Certificate)
+	if got != want {
+		t.Errorf("canonical zoneID drift: got %q, want %q", got, want)
+	}
+	if len(got) != 16 {
+		t.Errorf("expected 16 hex chars, got %d: %q", len(got), got)
 	}
 }
 
@@ -538,7 +567,7 @@ func TestTransitionToOperational_FailsWhenReadinessProbeFails(t *testing.T) {
 	}
 
 	mockDialer.EXPECT().
-		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		DialOperational(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(clientTLS, nil).
 		Once()
 
@@ -628,7 +657,7 @@ func TestEnsureCommissioned_DeadMainWithSuite_ReconnectsMainWithoutFreshCommissi
 		Return((*tls.Conn)(nil), fmt.Errorf("must not commission")).
 		Maybe()
 	mockDialer.EXPECT().
-		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		DialOperational(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(clientTLS, nil).
 		Once()
 
@@ -735,11 +764,11 @@ func TestReconnectToZone_RetriesAfterReadinessEOF(t *testing.T) {
 	}
 
 	mockDialer.EXPECT().
-		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		DialOperational(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(c1tls, nil).
 		Once()
 	mockDialer.EXPECT().
-		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		DialOperational(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(c2tls, nil).
 		Once()
 

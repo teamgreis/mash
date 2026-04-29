@@ -44,8 +44,20 @@ type srvResolvingDialer struct {
 
 	mu             sync.Mutex
 	cachedCommAddr string
-	cachedOpAddr   string
+	// cachedOpAddrs maps zoneID -> resolved operational host:port. The empty
+	// string key holds the unfiltered (zoneID="") cache entry for callers
+	// that can't supply a zone-id (e.g. failsafe paths). DEC-088 makes
+	// `_mash._tcp` instances per-zone, so a single shared cache slot would
+	// serve the wrong port to a multi-zone harness.
+	cachedOpAddrs  map[string]operationalCacheEntry
 	cachedAt       time.Time
+}
+
+// operationalCacheEntry pairs a resolved address with its insertion time so
+// the TTL expiry can be checked alongside the zone-keyed lookup.
+type operationalCacheEntry struct {
+	addr string
+	at   time.Time
 }
 
 // srvBrowser narrows discovery.Browser to the two methods srvResolvingDialer
@@ -86,6 +98,7 @@ func newSRVResolvingDialerWithBrowser(base Dialer, browser srvBrowser, debugf fu
 		debugf:        debugf,
 		resolveTTL:    5 * time.Second,
 		discriminator: discriminator,
+		cachedOpAddrs: map[string]operationalCacheEntry{},
 	}
 }
 
@@ -94,17 +107,18 @@ func (d *srvResolvingDialer) DialCommissioning(ctx context.Context, target strin
 	return d.base.DialCommissioning(ctx, resolved)
 }
 
-func (d *srvResolvingDialer) DialOperational(ctx context.Context, target string, crypto CryptoState) (*tls.Conn, error) {
-	// Operational SRV resolution requires a per-device disambiguator, but
-	// the only stable one (zone-id) is derived from the PASE session and
-	// thus unknown at dialer construction. With multiple operational
-	// records visible (typical on shared LANs / CI), unfiltered browse
-	// silently picks a stale record and dials the wrong device's port.
-	// Until the dialer learns the post-PASE zone-id, operational dials
-	// use the literal target -- which the harness has already pinned
-	// to the device-under-test's operational port via the conformance
-	// fixture.
-	return d.base.DialOperational(ctx, target, crypto)
+func (d *srvResolvingDialer) DialOperational(ctx context.Context, target, zoneID string, crypto CryptoState) (*tls.Conn, error) {
+	// Operational SRV resolution under DEC-082: when the caller provides a
+	// zone-id we can filter `_mash._tcp` advertisements to exactly the
+	// device-under-test's operational instance, then dial its SRV-advertised
+	// port. Without a zone-id the operational record set on a shared LAN
+	// is ambiguous, so we fall back to the literal target -- correct under
+	// single-port deployments (mash-go-device) and the legacy harness path.
+	if zoneID == "" {
+		return d.base.DialOperational(ctx, target, zoneID, crypto)
+	}
+	resolved := d.resolveOperational(ctx, target, zoneID)
+	return d.base.DialOperational(ctx, resolved, zoneID, crypto)
 }
 
 // ResolveTarget returns the SRV-resolved address for the requested ALPN, or
@@ -151,26 +165,33 @@ func (d *srvResolvingDialer) resolveCommissioning(ctx context.Context, target st
 }
 
 // resolveOperational returns the SRV-resolved address for the operational
-// service, falling back to the literal target on any failure.
-func (d *srvResolvingDialer) resolveOperational(ctx context.Context, target string) string {
+// service of the given zone, falling back to the literal target on any
+// failure. zoneID is required: the cache is per-zone because multiple
+// operational records can coexist on the same LAN (one per zone).
+func (d *srvResolvingDialer) resolveOperational(ctx context.Context, target, zoneID string) string {
 	d.mu.Lock()
-	if d.cachedOpAddr != "" && time.Since(d.cachedAt) < d.resolveTTL {
-		addr := d.cachedOpAddr
+	if entry, ok := d.cachedOpAddrs[zoneID]; ok && time.Since(entry.at) < d.resolveTTL {
+		addr := entry.addr
 		d.mu.Unlock()
+		if d.debugf != nil {
+			d.debugf("srv-resolve: operational zone=%s %s -> %s (cached)", zoneID, target, addr)
+		}
 		return addr
 	}
 	d.mu.Unlock()
 
-	resolved, ok := d.browseFirstOperational(ctx, target)
+	resolved, ok := d.browseFirstOperational(ctx, target, zoneID)
 	if !ok {
+		if d.debugf != nil {
+			d.debugf("srv-resolve: operational zone=%s browse miss, falling back to literal %s", zoneID, target)
+		}
 		return target
 	}
 	d.mu.Lock()
-	d.cachedOpAddr = resolved
-	d.cachedAt = time.Now()
+	d.cachedOpAddrs[zoneID] = operationalCacheEntry{addr: resolved, at: time.Now()}
 	d.mu.Unlock()
 	if d.debugf != nil {
-		d.debugf("srv-resolve: operational %s -> %s", target, resolved)
+		d.debugf("srv-resolve: operational zone=%s %s -> %s", zoneID, target, resolved)
 	}
 	return resolved
 }
@@ -214,14 +235,19 @@ func (d *srvResolvingDialer) browseFirstCommissionable(parent context.Context, t
 	}
 }
 
-func (d *srvResolvingDialer) browseFirstOperational(parent context.Context, target string) (string, bool) {
+// browseFirstOperational waits up to 3 s for an operational service that
+// matches zoneID. The Browser filters server-side via the Zone-ID TXT field
+// (DEC-088), so this loop only ever sees records the caller asked for --
+// no manual sift here. Empty zoneID means "any operational record" and is
+// kept for callers that have no zone-id to hand (none today; defensive).
+func (d *srvResolvingDialer) browseFirstOperational(parent context.Context, target, zoneID string) (string, bool) {
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 
-	ch, err := d.browser.BrowseOperational(ctx, "")
+	ch, err := d.browser.BrowseOperational(ctx, zoneID)
 	if err != nil {
 		if d.debugf != nil {
-			d.debugf("srv-resolve: BrowseOperational err: %v", err)
+			d.debugf("srv-resolve: BrowseOperational(zone=%s) err: %v", zoneID, err)
 		}
 		return "", false
 	}

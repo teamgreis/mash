@@ -19,7 +19,14 @@ type Dialer interface {
 	DialCommissioning(ctx context.Context, target string) (*tls.Conn, error)
 
 	// DialOperational dials an operational TLS connection using zone crypto.
-	DialOperational(ctx context.Context, target string, crypto CryptoState) (*tls.Conn, error)
+	//
+	// zoneID is the post-PASE zone identifier (16 hex chars) when known,
+	// empty string when not. SRV-resolving dialers use it to filter
+	// `_mash._tcp` mDNS records and pick the correct device's operational
+	// port -- mandatory under DEC-082 two-port deployments where the
+	// commissioning and operational ports differ. The base TLS dialer
+	// ignores this hint and dials the literal target.
+	DialOperational(ctx context.Context, target, zoneID string, crypto CryptoState) (*tls.Conn, error)
 }
 
 // tlsDialer is the production Dialer that uses real TLS connections.
@@ -49,8 +56,11 @@ func (d *tlsDialer) DialCommissioning(_ context.Context, target string) (*tls.Co
 }
 
 // DialOperational dials an operational TLS connection using zone crypto
-// material (controller cert + zone CA for peer verification).
-func (d *tlsDialer) DialOperational(_ context.Context, target string, crypto CryptoState) (*tls.Conn, error) {
+// material (controller cert + zone CA for peer verification). The base
+// dialer ignores zoneID -- it has no service discovery to filter; the
+// SRV-resolving wrapper uses zoneID to pick the right operational port
+// under DEC-082 two-port deployments.
+func (d *tlsDialer) DialOperational(_ context.Context, target, _ string, crypto CryptoState) (*tls.Conn, error) {
 	tlsConfig := buildOperationalTLSConfig(crypto, d.insecureSkipVerify, d.debugf)
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)

@@ -21,8 +21,9 @@ type fakeSRVBrowser struct {
 	commErr        error
 	opErr          error
 
-	commCalls int
-	opCalls   int
+	commCalls    int
+	opCalls      int
+	opZoneFilter []string // captures the zoneID passed to each BrowseOperational call
 }
 
 func (f *fakeSRVBrowser) BrowseCommissionable(ctx context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error) {
@@ -42,6 +43,7 @@ func (f *fakeSRVBrowser) BrowseCommissionable(ctx context.Context) (<-chan *disc
 
 func (f *fakeSRVBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-chan *discovery.OperationalService, error) {
 	f.opCalls++
+	f.opZoneFilter = append(f.opZoneFilter, zoneID)
 	if f.opErr != nil {
 		return nil, f.opErr
 	}
@@ -65,7 +67,7 @@ func (s *stubBaseDialer) DialCommissioning(_ context.Context, target string) (*t
 	return nil, errors.New("stub: skip TLS handshake")
 }
 
-func (s *stubBaseDialer) DialOperational(_ context.Context, target string, _ CryptoState) (*tls.Conn, error) {
+func (s *stubBaseDialer) DialOperational(_ context.Context, target, _ string, _ CryptoState) (*tls.Conn, error) {
 	s.opTargets = append(s.opTargets, target)
 	return nil, errors.New("stub: skip TLS handshake")
 }
@@ -180,11 +182,10 @@ func TestSRVResolvingDialer_CommissioningUsesCommSRVPort(t *testing.T) {
 	}
 }
 
-func TestSRVResolvingDialer_OperationalSkipsSRVResolve(t *testing.T) {
-	// Operational SRV resolution needs a zone-id filter that's only
-	// derivable from the PASE session, so we deliberately skip it and
-	// pass the literal target through to the base dialer. Without this,
-	// stale operational records on shared LANs hijack the dial.
+func TestSRVResolvingDialer_OperationalNoZoneIDUsesLiteral(t *testing.T) {
+	// No zoneID hint means we cannot disambiguate operational records on
+	// a shared LAN -- fall back to the literal target so single-port
+	// deployments and legacy callers keep working unchanged.
 	browser := &fakeSRVBrowser{
 		operational: []*discovery.OperationalService{
 			{Port: 18443, Addresses: []string{"127.0.0.1"}},
@@ -193,38 +194,92 @@ func TestSRVResolvingDialer_OperationalSkipsSRVResolve(t *testing.T) {
 	base := &stubBaseDialer{}
 	d := newSRVResolvingDialerWithBrowser(base, browser, nopDebugf, 0)
 
-	_, _ = d.DialOperational(context.Background(), "127.0.0.1:8443", CryptoState{})
+	_, _ = d.DialOperational(context.Background(), "127.0.0.1:8443", "", CryptoState{})
 
 	if got, want := base.opTargets[0], "127.0.0.1:8443"; got != want {
-		t.Errorf("operational dial should use literal target: got %q, want %q", got, want)
+		t.Errorf("operational dial without zoneID should use literal target: got %q, want %q", got, want)
 	}
 	if browser.opCalls != 0 {
-		t.Errorf("expected no operational SRV browse, got %d calls", browser.opCalls)
+		t.Errorf("expected no operational SRV browse without zoneID, got %d calls", browser.opCalls)
 	}
 }
 
-func TestSRVResolvingDialer_CommissioningResolvedOperationalLiteral(t *testing.T) {
-	// Two-port deployment: commissioning is SRV-resolved, operational
-	// uses the literal target (which the harness has pinned to the
-	// device-under-test's operational port via the conformance fixture).
+func TestSRVResolvingDialer_OperationalWithZoneIDResolvesSRV(t *testing.T) {
+	// With a post-PASE zone-id, operational SRV resolution becomes
+	// disambiguated: BrowseOperational filters mDNS records by the
+	// requested zone, and we dial whatever port that zone advertised
+	// -- mandatory under DEC-082 two-port deployments.
+	browser := &fakeSRVBrowser{
+		operational: []*discovery.OperationalService{
+			{Port: 18445, Addresses: []string{"127.0.0.1"}},
+		},
+	}
+	base := &stubBaseDialer{}
+	d := newSRVResolvingDialerWithBrowser(base, browser, nopDebugf, 0)
+
+	const zoneID = "0123456789abcdef"
+	_, _ = d.DialOperational(context.Background(), "127.0.0.1:18444", zoneID, CryptoState{})
+
+	if got, want := base.opTargets[0], "127.0.0.1:18445"; got != want {
+		t.Errorf("operational dial: got %q, want %q (SRV-resolved port)", got, want)
+	}
+	if browser.opCalls != 1 {
+		t.Errorf("expected 1 operational SRV browse, got %d", browser.opCalls)
+	}
+	if got := browser.opZoneFilter[0]; got != zoneID {
+		t.Errorf("BrowseOperational zoneID: got %q, want %q", got, zoneID)
+	}
+}
+
+func TestSRVResolvingDialer_OperationalCachePerZone(t *testing.T) {
+	// Different zones may advertise on different operational ports. Cache
+	// must be zone-keyed so a hit for zone A doesn't return zone B's port.
+	browser := &fakeSRVBrowser{
+		operational: []*discovery.OperationalService{
+			{Port: 18445, Addresses: []string{"127.0.0.1"}},
+		},
+	}
+	base := &stubBaseDialer{}
+	d := newSRVResolvingDialerWithBrowser(base, browser, nopDebugf, 0)
+
+	// First zone: browse + cache.
+	_, _ = d.DialOperational(context.Background(), "127.0.0.1:18444", "zone-a", CryptoState{})
+	// Same zone again within TTL: cache hit, no second browse.
+	_, _ = d.DialOperational(context.Background(), "127.0.0.1:18444", "zone-a", CryptoState{})
+	// Different zone: must browse again (cache miss).
+	_, _ = d.DialOperational(context.Background(), "127.0.0.1:18444", "zone-b", CryptoState{})
+
+	if browser.opCalls != 2 {
+		t.Errorf("expected 2 operational browses (cache miss for new zone), got %d", browser.opCalls)
+	}
+}
+
+func TestSRVResolvingDialer_TwoPortDeployment(t *testing.T) {
+	// DEC-082: commissioning on one port, operational on another. The
+	// runner SRV-resolves commissioning before PASE, then SRV-resolves
+	// operational with the post-PASE zone-id. The literal -target may
+	// be either port; both must end up on the right wire.
 	browser := &fakeSRVBrowser{
 		commissionable: []*discovery.CommissionableService{
 			{Port: 18444, Addresses: []string{"127.0.0.1"}},
 		},
 		operational: []*discovery.OperationalService{
-			{Port: 18443, Addresses: []string{"127.0.0.1"}},
+			{Port: 18445, Addresses: []string{"127.0.0.1"}},
 		},
 	}
 	base := &stubBaseDialer{}
 	d := newSRVResolvingDialerWithBrowser(base, browser, nopDebugf, 0)
 
-	_, _ = d.DialCommissioning(context.Background(), "127.0.0.1:8443")
-	_, _ = d.DialOperational(context.Background(), "127.0.0.1:8443", CryptoState{})
+	// Caller passes the commissioning port as -target; SRV-resolve handles
+	// the rest. (The other direction -- passing the operational port --
+	// works the same way: the literal port is overwritten by SRV-resolve.)
+	_, _ = d.DialCommissioning(context.Background(), "127.0.0.1:18444")
+	_, _ = d.DialOperational(context.Background(), "127.0.0.1:18444", "0123456789abcdef", CryptoState{})
 
 	if got, want := base.commTargets[0], "127.0.0.1:18444"; got != want {
 		t.Errorf("commissioning: got %q, want %q", got, want)
 	}
-	if got, want := base.opTargets[0], "127.0.0.1:8443"; got != want {
+	if got, want := base.opTargets[0], "127.0.0.1:18445"; got != want {
 		t.Errorf("operational: got %q, want %q", got, want)
 	}
 }

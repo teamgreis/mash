@@ -340,7 +340,7 @@ func (m *connMgrImpl) TransitionToOperational(state *engine.ExecutionState) erro
 	ctx := context.Background()
 	crypto := m.WorkingCrypto()
 	tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
-		return m.dialer.DialOperational(ctx, target, crypto)
+		return m.dialer.DialOperational(ctx, target, canonicalZoneIDFromCrypto(crypto), crypto)
 	})
 	if dialErr != nil {
 		return fmt.Errorf("operational reconnection failed: %w", dialErr)
@@ -389,12 +389,12 @@ func (m *connMgrImpl) ReconnectToZone(state *engine.ExecutionState) error {
 		m.SetWorkingCrypto(saved)
 	}
 
-	m.debugf("reconnectToZone: reconnecting to zone %s", m.suite.ZoneID())
+	m.debugf("reconnectToZone: reconnecting to zone %s", suiteZoneID)
 	target := m.config.Target
 	ctx := context.Background()
 	crypto := m.WorkingCrypto()
 	tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
-		return m.dialer.DialOperational(ctx, target, crypto)
+		return m.dialer.DialOperational(ctx, target, canonicalZoneIDFromCrypto(crypto), crypto)
 	})
 	if dialErr != nil {
 		return fmt.Errorf("reconnectToZone failed: %w", dialErr)
