@@ -198,6 +198,93 @@ func TestRequestDeviceState_DoesNotBlockOnWriteToUnresponsivePeer(t *testing.T) 
 	}
 }
 
+// TestRequestDeviceState_SendsIntegerKeyedParameters guards against a
+// regression of Issue #11 / Phase 11: getTestState's enableKey parameter
+// must travel as an integer-keyed CBOR map (key = 1) so the device's
+// command machinery can match it against the parameter metadata. A
+// string-keyed map encodes correctly on the wire but the device's
+// validateParameters (pkg/model/command.go) rejects the request with
+// StatusInvalidParameter (status 5) before the enable-key check ever
+// runs. That regression silently disabled the residual zone sweep in
+// teardown and caused F-6 (TC-E2E-001 cert leak).
+func TestRequestDeviceState_SendsIntegerKeyedParameters(t *testing.T) {
+	r := newTestRunner()
+	r.config.EnableKey = "deadbeefdeadbeefdeadbeefdeadbeef"
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	r.pool.SetMain(&Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	})
+
+	type capture struct {
+		params any
+	}
+	captured := make(chan capture, 1)
+	go func() {
+		srvFramer := transport.NewFramer(server)
+		reqData, err := srvFramer.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			return
+		}
+		// Pull the parameters off the encoded payload so we can assert
+		// on their keying. wire.DecodeRequest leaves Payload as the raw
+		// CBOR map for unknown command types, so we decode it back.
+		if invoke, ok := req.Payload.(*wire.InvokePayload); ok {
+			captured <- capture{params: invoke.Parameters}
+		} else {
+			captured <- capture{params: req.Payload}
+		}
+		// Reply success with empty snapshot so the caller exits cleanly.
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload:   map[string]any{"zone_count": 0},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = srvFramer.WriteFrame(respData)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = r.requestDeviceState(ctx, engine.NewExecutionState(context.Background()))
+
+	got := <-captured
+	if got.params == nil {
+		t.Fatal("expected parameters map, got nil")
+	}
+	// CBOR decoded into map[any]any with uint64 keys — that's what the device
+	// machinery walks via integer parameter IDs. A string-keyed payload would
+	// surface as map[any]any with string keys here.
+	m, ok := got.params.(map[any]any)
+	if !ok {
+		t.Fatalf("expected parameters to decode as map[any]any, got %T", got.params)
+	}
+	if _, hasIntKey := m[uint64(1)]; !hasIntKey {
+		t.Errorf("expected integer key 1 (enableKey) in parameters, got keys: %v", mapKeys(m))
+	}
+	for k := range m {
+		if _, isString := k.(string); isString {
+			t.Errorf("parameters must be integer-keyed, found string key: %v", k)
+		}
+	}
+}
+
+func mapKeys(m map[any]any) []any {
+	keys := make([]any, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func TestRequestDeviceState_PrefersSuiteConnectionOverMain(t *testing.T) {
 	r := newTestRunner()
 	r.config.EnableKey = "deadbeefdeadbeefdeadbeefdeadbeef"

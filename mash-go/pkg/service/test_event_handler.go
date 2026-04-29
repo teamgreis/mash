@@ -92,6 +92,13 @@ func (s *DeviceService) RegisterSetCommissioningWindowDurationHandler(tc *featur
 	})
 }
 
+// TestControlCmdGetTestStateParamEnableKey is the parameter ID for the
+// enableKey field on the getTestState command. CBOR integer keys per
+// docs/interaction-model.md §7.1; matches the in-line metadata declared
+// in RegisterGetTestStateHandler. Exported so the harness can build
+// integer-keyed parameter maps without hard-coding a magic number.
+const TestControlCmdGetTestStateParamEnableKey uint8 = 1
+
 // TestControlCmdGetTestState is the command ID for the getTestState diagnostic command.
 // This is added manually (not generated) because it's a diagnostic-only command.
 const TestControlCmdGetTestState uint8 = 3

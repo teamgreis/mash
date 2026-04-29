@@ -1421,7 +1421,11 @@ func TestCoordTeardown_SuiteAlive_RestoresMainBeforeProbe(t *testing.T) {
 	cfg := &Config{Target: "localhost:8443", EnableKey: "0011"}
 	c, s, p, o := newCoord(t, cfg)
 
-	aliveConn := &Connection{state: ConnOperational}
+	// An "alive" suite connection in production has both tlsConn and framer
+	// set; the residual zone sweep checks framer != nil to decide whether
+	// to call ReconnectToZone. Faithfully model that here so the sweep
+	// path's framer guard works as it does at runtime.
+	aliveConn := &Connection{state: ConnOperational, framer: &transport.Framer{}}
 
 	// pool.Main() is dead (empty from detach after non-L3 test).
 	deadMain := &Connection{state: ConnDisconnected}
@@ -1456,6 +1460,52 @@ func TestCoordTeardown_SuiteAlive_RestoresMainBeforeProbe(t *testing.T) {
 
 	assert.True(t, setMainCalled, "SetMain should be called with suite.Conn() to restore main before probe")
 	assert.False(t, reconnectCalled, "ReconnectToZone must NOT be called when suite conn is alive")
+}
+
+// TestCoordTeardown_DefaultMode_RunsResidualZoneSweep verifies that the
+// residual zone sweep runs without -strict-lifecycle when target+enable-key
+// are configured (F-6 fix). Previously the sweep was gated on
+// StrictLifecycle, but the gate is for fail-on-leak diagnostics, not
+// corrective cleanup -- silent leaks here cascade into "zone type already
+// exists" failures for the next test that re-commissions the same zone
+// type (TC-E2E-001).
+func TestCoordTeardown_DefaultMode_RunsResidualZoneSweep(t *testing.T) {
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011"} // no StrictLifecycle
+	c, s, p, o := newCoord(t, cfg)
+
+	suiteConn := &Connection{state: ConnOperational, framer: &transport.Framer{}}
+
+	p.EXPECT().Main().Return(suiteConn).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string(nil))
+	o.EXPECT().PASEState().Return(completedPASE())
+
+	s.EXPECT().ZoneID().Return("suite-zone-7").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+	s.EXPECT().ConnKey().Return("main-suite-zone-7").Maybe()
+
+	// Device reports a leaked LOCAL zone alongside the suite zone.
+	leaked := DeviceStateSnapshot{
+		"zones": []any{
+			map[string]any{"id": "suite-zone-7"},
+			map[string]any{"id": "leaked-local-zone"},
+		},
+	}
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(leaked).Maybe()
+
+	// Sweep MUST issue RemoveZone for the leaked LOCAL zone, even without
+	// -strict-lifecycle.
+	removeCalled := false
+	o.EXPECT().SendRemoveZoneOnConn(suiteConn, "leaked-local-zone").Run(func(_ *Connection, _ string) {
+		removeCalled = true
+	}).Return().Maybe()
+
+	o.EXPECT().ProbeSessionHealth().Return(nil).Maybe()
+
+	allMaybe(s, p, o)
+	c.TeardownTest(context.Background(), tcWith("TC"), st())
+
+	assert.True(t, removeCalled,
+		"residual sweep must SendRemoveZoneOnConn for non-suite zones in default (non-strict) mode")
 }
 
 // TestCoordTeardown_NoProbeWithoutSuiteZone verifies that the health probe

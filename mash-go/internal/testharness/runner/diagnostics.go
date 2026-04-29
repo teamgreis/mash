@@ -99,6 +99,12 @@ func (r *Runner) requestDeviceState(ctx context.Context, state *engine.Execution
 		return nil
 	}
 
+	// Parameters use integer keys per docs/interaction-model.md §7.1 (Issue #11).
+	// String-keyed params decode into a CBOR map the device's command
+	// machinery cannot match against required parameter IDs, so the device
+	// returns StatusInvalidParameter (status 5) before reaching the
+	// enable-key check -- which silently disabled the residual zone sweep
+	// (F-6: TC-E2E-001 cert leak).
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpInvoke,
@@ -106,8 +112,8 @@ func (r *Runner) requestDeviceState(ctx context.Context, state *engine.Execution
 		FeatureID:  uint8(model.FeatureTestControl), //nolint:gosec // constant fits in uint8
 		Payload: &wire.InvokePayload{
 			CommandID: service.TestControlCmdGetTestState,
-			Parameters: map[string]any{
-				"enableKey": r.config.EnableKey,
+			Parameters: map[uint8]any{
+				service.TestControlCmdGetTestStateParamEnableKey: r.config.EnableKey,
 			},
 		},
 	}

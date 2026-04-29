@@ -782,10 +782,19 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	}
 
 	// Retry non-suite zone removals once based on device-reported zone IDs.
-	// This is the authoritative source: tracked pool IDs can be stale if a test
-	// replaced connections mid-step. Skip when the test itself removed the
-	// suite -- there is no authoritative control channel to reconnect to.
-	if !suiteRemovedDuringTest && c.config != nil && c.config.StrictLifecycle &&
+	// This is the authoritative source: tracked pool IDs can go stale when a
+	// test step replaces pool.Main() (e.g., transitionToOperational swaps in
+	// a fresh operational conn for a newly commissioned LOCAL zone, then the
+	// alias filter on the original conn no longer fires for the test's own
+	// zone in the primary loop above). Without the sweep, the device retains
+	// the LOCAL zone and the next commission gets "zone type already exists"
+	// (F-6: TC-E2E-001 cert leak).
+	//
+	// Previously gated on -strict-lifecycle, but that flag is for fail-on-leak
+	// diagnostics; the corrective cleanup itself must run regardless. Skip
+	// only when the test itself removed the suite -- there is no authoritative
+	// control channel to reconnect to.
+	if !suiteRemovedDuringTest && c.config != nil &&
 		c.config.Target != "" && c.config.EnableKey != "" {
 		sc := c.suite.Conn()
 		if (sc == nil || !sc.isConnected() || sc.framer == nil) && c.suite.ZoneID() != "" {
