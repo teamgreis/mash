@@ -200,16 +200,21 @@ func (e *EVSE) setupCommandHandlers() {
 		return nil
 	})
 
-	// Resume handler
+	// Resume handler. Per docs/features/energy-control.md §"Resume",
+	// Resume restores a paused operation -- the contract is the
+	// processState transition PAUSED -> RUNNING, not a side check on
+	// plug state. The simulation's plug state is informational and
+	// can be re-evaluated by the natural simulation loop after Resume
+	// completes; gating Resume on IsPluggedIn here was an
+	// implementation overreach that broke conformance for any test
+	// that drove processState via TestControl rather than the natural
+	// plug-in -> charging path (TC-STATE-009, TC-CTRL-005).
 	e.energyControl.OnResume(func(ctx context.Context) error {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 
-		if e.chargingSession.IsPluggedIn() {
-			_ = e.status.SetOperatingState(features.OperatingStateRunning)
-			_ = e.energyControl.SetProcessState(features.ProcessStateRunning)
-		}
-
+		_ = e.status.SetOperatingState(features.OperatingStateRunning)
+		_ = e.energyControl.SetProcessState(features.ProcessStateRunning)
 		return nil
 	})
 
