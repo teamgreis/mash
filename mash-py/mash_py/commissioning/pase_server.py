@@ -236,10 +236,37 @@ class PASEServer:
     # Public API
     # ------------------------------------------------------------------
 
+    async def read_request(
+        self,
+        reader: asyncio.StreamReader,
+    ) -> PASERequest:
+        """Read just the first frame and return it as a :class:`PASERequest`.
+
+        Splits step 1 of :meth:`handshake` so callers can inspect the
+        request *before* spending CPU on SPAKE2+ math — for example to
+        apply DEC-047 backoff delays or DEC-063 busy-rejections after the
+        peer has demonstrated intent (sent a PASERequest) but before any
+        secret material is processed. Mirrors mash-go's
+        ``WaitForPASERequest`` + ``CompleteHandshake`` split.
+
+        The handshake-start clock starts ticking on entry (so the §6.5
+        timing-oracle floor still measures from "first byte processed"
+        when the handler later calls :meth:`handshake_with_request`).
+
+        Raises:
+            PASEProtocolError: same conditions as :meth:`handshake`
+                (truncated frame, malformed CBOR, wrong message type).
+        """
+        frame_reader = AsyncFrameReader(reader, max_message_size=self._max_message_size)
+        if self._handshake_start is None:
+            self._handshake_start = time.monotonic()
+        return await self._recv_pase_request(frame_reader)
+
     async def handshake(
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
+        request: PASERequest | None = None,
     ) -> bytes:
         """Run the four-message PASE exchange, return the derived ``K_main``.
 
@@ -248,6 +275,10 @@ class PASEServer:
         already been written to the wire by the time the exception is
         raised; the caller's job is to close the TLS connection and
         return to ADVERTISING.
+
+        ``request`` may be supplied by callers that have already drained
+        the first frame via :meth:`read_request` — that path skips the
+        initial read but reuses the same handshake-start clock.
 
         Raises:
             PASEProtocolError: peer sent a frame the spec does not
@@ -261,10 +292,14 @@ class PASEServer:
         """
         frame_reader = AsyncFrameReader(reader, max_message_size=self._max_message_size)
         frame_writer = AsyncFrameWriter(writer, max_message_size=self._max_message_size)
-        self._handshake_start = time.monotonic()
+        if self._handshake_start is None:
+            self._handshake_start = time.monotonic()
 
-        # Step 1: read PASERequest with the controller's pA + ClientIdentity.
-        request = await self._recv_pase_request(frame_reader)
+        # Step 1: read PASERequest with the controller's pA + ClientIdentity
+        # (skipped if the caller already drained the first frame via
+        # :meth:`read_request`).
+        if request is None:
+            request = await self._recv_pase_request(frame_reader)
 
         # §4.2 / DEC-019 reservation: ClientIdentity MUST equal
         # b"mash-controller" in v1. Rejection emits PASEComplete (NOT

@@ -158,6 +158,7 @@ GO_ARGS=(
     -timeout 30s
 )
 [[ -n "$FILTER" ]] && GO_ARGS+=(-filter "$FILTER")
+[[ "$LOG_LEVEL" == "debug" ]] && GO_ARGS+=(-debug)
 
 set +e
 ( cd "$MASH_GO_DIR" && go run ./cmd/mash-test "${GO_ARGS[@]}" )

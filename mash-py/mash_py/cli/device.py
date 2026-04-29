@@ -35,6 +35,7 @@ import logging
 import os
 import secrets
 import signal
+import ssl
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -47,10 +48,19 @@ from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 
 from mash_py.commissioning import (
     CertExchangeServer,
+    CommissioningError,
     PASEServer,
     Verifier,
+    encode_message,
     generate_verifier,
 )
+from mash_py.commissioning.messages import ERR_CODE_BUSY
+from mash_py.commissioning.pase_server import (
+    PASEAuthFailedError,
+    PASEPhaseTimeoutError,
+    PASEProtocolError,
+)
+from mash_py.wire.framing import AsyncFrameWriter, DEFAULT_MAX_MESSAGE_SIZE
 from mash_py.crypto.certs import generate_commissioning_cert
 from mash_py.discovery import (
     DEFAULT_OPERATIONAL_PORT,
@@ -74,7 +84,13 @@ from mash_py.features.test_control import (
 )
 from mash_py.commissioning.cert_store import ZoneType
 from mash_py.model import Device, Endpoint, EndpointType
-from mash_py.service import DeviceService
+from mash_py.service import (
+    ConnectionCapExceededError,
+    DeviceService,
+    SharedConnectionCap,
+    derive_connection_cap,
+)
+from mash_py.service.pase_tracker import PASEAttemptTracker
 from mash_py.transport.tls import ZoneCertEntry, make_commissioning_context
 from mash_py.zone import ZoneExistsError, ZonePool, ZoneTypeExistsError
 
@@ -581,6 +597,54 @@ class _DeviceLifecycle:
         # value in logs so operators can see what the harness asked for.
         self._comm_window_duration_s: int | None = None
 
+        # DEC-048 / commissioning-window-timing.md: self-closing window
+        # timer. ``setCommissioningWindowDuration`` stores a duration on
+        # this lifecycle; ``_enter_commissioning_mode`` (re-)arms a
+        # one-shot timer that retracts the comm listener + mDNS record
+        # when it fires. Resets on successful commissioning, explicit
+        # exit, and lifecycle teardown.
+        self._comm_window_timer: asyncio.TimerHandle | None = None
+        # Epoch at which the active timer was armed. The timer callback
+        # checks this against ``_comm_epoch`` before acting so a window
+        # that's been re-armed by a fresh enter/exit cycle doesn't get
+        # closed by a stale timer.
+        self._comm_window_timer_epoch: int = -1
+
+        # DEC-047 / commissioning-pase.md §5.5: per-device PASE attempt
+        # tracker. The handler applies the tier delay before responding
+        # to PASERequest, records failures on auth/protocol error paths,
+        # and resets on successful commissioning + window close.
+        self._pase_tracker = PASEAttemptTracker()
+        # DEC-063 / TC-SEC-CONN-001: only one in-flight PASE handshake
+        # per device. Newcomers receive ``CommissioningError{Busy}``
+        # with a non-zero ``retry_after_ms`` hint and the connection is
+        # closed. Counter (not Lock) because the rejection path also
+        # needs to send a frame — a Lock would block the second handler
+        # entirely; we need it to read the request, decline, and close.
+        self._pase_in_flight: int = 0
+        # Spec doesn't pin a retry-after value; mash-go derives one
+        # dynamically. Phase 22 keeps it simple: a fixed 5 s hint, which
+        # is the order-of-magnitude mash-go returns for an active PASE
+        # rejection (TestComputeBusyRetryAfter_Branches: 5000 ms).
+        self._busy_retry_after_ms: int = 5000
+
+        # DEC-062 / DEC-064: pre-handshake connection cap on the comm
+        # port. Capacity follows DEC-064 (``max_zones + 1``) where
+        # ``max_zones`` is **2** per DEC-043 (1 GRID + 1 LOCAL): the TEST
+        # zone (DEC-060) is an *extra observer slot* that does not count
+        # against the cap, so production-conformant capacity is 3 even
+        # though :class:`ZonePool`'s :data:`MAX_ZONES` is 3 (which
+        # includes TEST for type-uniqueness bookkeeping).
+        # Applied only to the commissioning listener for now — the
+        # operational listener uses ``TwoPortListener``'s post-handshake
+        # cap. The flood test (TC-SEC-CONN-005) only exercises the comm
+        # ALPN, and pre-handshake rejection there is what flips the
+        # harness's peak-concurrent count from O(rate*duration) to
+        # ``max_zones + 1``.
+        self._comm_conn_cap = SharedConnectionCap(
+            capacity=derive_connection_cap(2)
+        )
+
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
@@ -604,17 +668,7 @@ class _DeviceLifecycle:
 
     async def _enter_uncommissioned(self) -> None:
         async with self._comm_lock:
-            ssl_ctx = make_commissioning_context(
-                self._comm_cert, self._comm_key
-            )
-            self._comm_server = await asyncio.start_server(
-                self._handle_commissioning_client,
-                host="0.0.0.0",
-                port=self._args.commissioning_port,
-                ssl=ssl_ctx,
-                ssl_handshake_timeout=30.0,
-                start_serving=True,
-            )
+            self._comm_server = await self._start_comm_listener()
             self._comm_epoch += 1
             actual_port = _resolve_first_port(self._comm_server)
             _log.info("commissioning listener up on :%d", actual_port)
@@ -722,10 +776,105 @@ class _DeviceLifecycle:
         _log.info(
             "commissioning peer connected: %s (initial=%s)", peer, is_initial
         )
+        # Tracks whether this handler has reserved the in-flight PASE
+        # slot, so the outer ``finally`` releases it exactly once even
+        # on the busy-rejection / read-error early-return paths.
+        cap_held = False
         try:
             pase_server = PASEServer(self._verifier)
-            k_main = await pase_server.handshake(reader, writer)
+            # DEC-061 / DEC-047 ordering: read the first frame *before*
+            # touching shared state (backoff tracker, in-flight cap,
+            # SPAKE2+ math). A peer that just opens TLS and never
+            # speaks drops on the framing read without blocking
+            # legitimate concurrent attempts.
+            try:
+                request = await pase_server.read_request(reader)
+            except (PASEProtocolError, asyncio.IncompleteReadError):
+                _log.debug(
+                    "commissioning peer %s closed before sending PASERequest",
+                    peer,
+                )
+                return
+
+            # DEC-063 / TC-SEC-CONN-001: at most one in-flight PASE per
+            # device. If another handler is already past the cap check,
+            # send ``CommissioningError{Busy, RetryAfter}`` and close —
+            # the peer surfaces this as a ``PASEBusyError``. The cap
+            # is held across PASE + cert install, released in the outer
+            # ``finally``.
+            if self._pase_in_flight > 0:
+                _log.info(
+                    "commissioning peer %s rejected (busy, in-flight=%d)",
+                    peer,
+                    self._pase_in_flight,
+                )
+                await _send_commissioning_busy(
+                    writer,
+                    retry_after_ms=self._busy_retry_after_ms,
+                    reason="commissioning already in progress",
+                )
+                # DEC-047: a busy rejection where another PASE is
+                # actually in progress does NOT count as a failed
+                # attempt — the second peer never got to verify
+                # anything, so the global tier counter would be
+                # double-counting.
+                return
+
+            self._pase_in_flight += 1
+            cap_held = True
+            # DEC-047 backoff: apply the per-tier wall-clock delay
+            # *after* we have a peer-supplied PASERequest in hand but
+            # *before* spending CPU on SPAKE2+ math. The harness measures
+            # time from "PASERequest sent" to the failure response;
+            # injecting the sleep here surfaces the tier delay on the
+            # wire and matches mash-go (which applies the same delay
+            # before ``acceptCommissioningConnection``).
+            delay = await self._pase_tracker.get_delay()
+            if delay > 0:
+                _log.debug(
+                    "applying PASE backoff delay: %.3fs (failed_attempts=%d)",
+                    delay,
+                    await self._pase_tracker.attempt_count(),
+                )
+                await asyncio.sleep(delay)
+
+            try:
+                k_main = await pase_server.handshake(
+                    reader, writer, request=request
+                )
+            except (
+                PASEAuthFailedError,
+                PASEProtocolError,
+                PASEPhaseTimeoutError,
+            ):
+                # DEC-047: every PASE-failure path increments the backoff
+                # tier. The PASE server has already emitted the
+                # appropriate envelope (``PASEComplete{auth_failed}`` for
+                # auth failures; nothing for phase timeout) — record
+                # and re-raise so the outer ``finally`` closes the
+                # socket.
+                await self._pase_tracker.record_failure()
+                raise
             _log.debug("PASE complete: K_main=%s...", k_main[:8].hex())
+            # DEC-047: reset the backoff tier on successful PASE. Cert
+            # install can still fail downstream, but the peer demonstrated
+            # knowledge of the setup code so the rate limit no longer
+            # applies.
+            await self._pase_tracker.reset()
+            # DEC-063: the in-flight cap is per-PASE-handshake, not
+            # per-commissioning-attempt. A peer that has finished the
+            # SPAKE2+ exchange has consumed its slot; let the next
+            # peer through *before* we wait through cert install + the
+            # DEC-082 op-listener-ready barrier (~1.5 s for mDNS
+            # publish on the initial-commission path). Without this,
+            # the auto-PICS commission keeps the cap held for the
+            # whole mDNS publish window, and the test harness's first
+            # ``pase_attempts`` connection lands during that window
+            # and gets a spurious busy rejection — which propagates as
+            # a missed-failure on the backoff counter.
+            if cap_held:
+                self._pase_in_flight -= 1
+                cap_held = False
 
             cert_server = CertExchangeServer()
             result = await cert_server.run(reader, writer)
@@ -860,9 +1009,99 @@ class _DeviceLifecycle:
             self._last_commission_error = exc
             _log.warning("commissioning attempt failed: %r", exc)
         finally:
+            if cap_held:
+                self._pase_in_flight -= 1
             writer.close()
             with contextlib.suppress(ConnectionError, OSError):
                 await writer.wait_closed()
+
+    async def _start_comm_listener(self) -> asyncio.Server:
+        """Bind a raw TCP listener, then upgrade to TLS per accepted conn.
+
+        DEC-062 wants the connection cap enforced *before* TLS handshake
+        completes so a flooding peer can't burn slot budget by completing
+        thousands of TLS handshakes the device would have to immediately
+        close. ``asyncio.start_server(ssl=...)`` hides the handshake
+        inside its accept path — by the time our handler is called, TLS
+        is done and the harness's ``tls.Dial`` has already returned
+        success. ``loop.start_tls`` lets us interleave: accept raw TCP,
+        check the cap, refuse pre-handshake on overflow, otherwise
+        upgrade to TLS and run the existing handler.
+
+        The cap slot is held for the duration of the connection
+        (handshake + PASE + cert install). Slot release happens in the
+        outer try/finally inside ``_handle_commissioning_client``.
+        """
+        ssl_ctx = make_commissioning_context(self._comm_cert, self._comm_key)
+
+        async def _on_raw_accept(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            peer = writer.get_extra_info("peername")
+            try:
+                slot = self._comm_conn_cap.acquire()
+            except ConnectionCapExceededError:
+                # Pre-handshake reject. Closing the raw TCP socket here
+                # surfaces on the peer as a TLS-handshake failure (peer
+                # was about to send ClientHello), which the flood
+                # harness counts as ``rejected`` rather than
+                # ``accepted``. The whole point of pre-handshake cap is
+                # to make that count match DEC-064 (max_zones + 1).
+                _log.debug(
+                    "rejecting comm conn from %s: cap exhausted (active=%d/%d)",
+                    peer,
+                    self._comm_conn_cap.active,
+                    self._comm_conn_cap.capacity,
+                )
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
+                return
+            try:
+                # Upgrade the raw TCP transport to TLS in place. The
+                # StreamReaderProtocol attached to the existing transport
+                # keeps feeding the StreamReader, so ``reader`` continues
+                # to work after the upgrade. ``writer._transport`` must
+                # be repointed at the new TLS transport — otherwise
+                # writes would go to the now-orphaned raw transport.
+                loop = asyncio.get_running_loop()
+                raw_transport = writer.transport
+                protocol = raw_transport.get_protocol()
+                tls_transport = await loop.start_tls(
+                    raw_transport,
+                    protocol,
+                    ssl_ctx,
+                    server_side=True,
+                    ssl_handshake_timeout=30.0,
+                )
+                # Repoint the writer at the new TLS transport so frames
+                # written via ``writer.write`` actually reach the peer
+                # encrypted. Documented asyncio quirk:
+                # https://docs.python.org/3/library/asyncio-stream.html
+                # # asyncio.StreamWriter.start_tls
+                writer._transport = tls_transport  # noqa: SLF001
+                await self._handle_commissioning_client(reader, writer)
+            except (ssl.SSLError, ConnectionError, OSError, asyncio.TimeoutError) as exc:
+                _log.debug(
+                    "comm conn from %s aborted during TLS upgrade: %r",
+                    peer,
+                    exc,
+                )
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
+            finally:
+                slot.release()
+
+        return await asyncio.start_server(
+            _on_raw_accept,
+            host="0.0.0.0",
+            port=self._args.commissioning_port,
+            # No ssl=... here on purpose: we upgrade per-connection
+            # inside ``_on_raw_accept`` after the cap check.
+            start_serving=True,
+        )
 
     async def _stop_commissioning_listener(self) -> None:
         if self._comm_server is None:
@@ -908,58 +1147,127 @@ class _DeviceLifecycle:
         """
         async with self._comm_lock:
             self._comm_epoch += 1
+            armed_epoch = self._comm_epoch
             if self._comm_server is not None:
                 _log.debug(
                     "enter_commissioning_mode: listener already up "
                     "(epoch=%d)",
                     self._comm_epoch,
                 )
-                return
-            ssl_ctx = make_commissioning_context(
-                self._comm_cert, self._comm_key
-            )
-            self._comm_server = await asyncio.start_server(
-                self._handle_commissioning_client,
-                host="0.0.0.0",
-                port=self._args.commissioning_port,
-                ssl=ssl_ctx,
-                ssl_handshake_timeout=30.0,
-                start_serving=True,
-            )
-            actual_port = _resolve_first_port(self._comm_server)
-            _log.info(
-                "re-opened commissioning listener on :%d (window=%ss epoch=%d)",
-                actual_port,
-                self._comm_window_duration_s
-                if self._comm_window_duration_s is not None
-                else "default",
+                # Even on the idempotent path, (re-)arm the
+                # window-expiry timer below — the harness's
+                # ``setCommissioningWindowDuration`` + ``enter`` sequence
+                # expects "open window for N seconds from now", which
+                # mash-go honours regardless of whether the listener
+                # was already bound.
+            else:
+                self._comm_server = await self._start_comm_listener()
+                actual_port = _resolve_first_port(self._comm_server)
+                _log.info(
+                    "re-opened commissioning listener on :%d (window=%ss epoch=%d)",
+                    actual_port,
+                    self._comm_window_duration_s
+                    if self._comm_window_duration_s is not None
+                    else "default",
+                    self._comm_epoch,
+                )
+                assert self._advertiser is not None
+                await self._advertiser.publish_commissionable(
+                    CommissionableAdvertisement(
+                        discriminator=self._args.discriminator,
+                        serial=self._args.serial,
+                        brand=self._args.brand,
+                        model=self._args.model,
+                        port=actual_port,
+                        device_name=self._args.name,
+                    )
+                )
+                _log.info(
+                    "re-advertised _mash-comm._tcp (discriminator=%d, port=%d)",
+                    self._args.discriminator,
+                    actual_port,
+                )
+
+        # Arm the window-expiry timer outside the comm lock so the
+        # callback (which acquires the same lock) cannot deadlock with
+        # an enter/exit sequence racing it.
+        self._arm_window_timer(armed_epoch)
+
+    def _arm_window_timer(self, armed_epoch: int) -> None:
+        """Schedule a one-shot timer that retracts the commissioning
+        window after ``_comm_window_duration_s`` seconds.
+
+        Cancels any previously-armed timer first — a fresh
+        ``enter_commissioning_mode`` (or factory-reset cycle) restarts
+        the window's clock per DEC-048. The callback short-circuits if
+        the comm-epoch has moved past ``armed_epoch`` (a re-entry has
+        overtaken us); without that guard, an expiry from a stale
+        window would close the listener the harness expects to be open.
+        """
+        self._cancel_window_timer()
+        if self._comm_window_duration_s is None:
+            return
+        loop = asyncio.get_running_loop()
+        self._comm_window_timer_epoch = armed_epoch
+        self._comm_window_timer = loop.call_later(
+            self._comm_window_duration_s,
+            lambda: asyncio.ensure_future(
+                self._on_window_expired(armed_epoch)
+            ),
+        )
+        _log.debug(
+            "armed window-expiry timer: %ds (epoch=%d)",
+            self._comm_window_duration_s,
+            armed_epoch,
+        )
+
+    def _cancel_window_timer(self) -> None:
+        """Cancel any pending window-expiry timer. Safe to call when no
+        timer is armed."""
+        if self._comm_window_timer is not None:
+            self._comm_window_timer.cancel()
+            self._comm_window_timer = None
+            self._comm_window_timer_epoch = -1
+
+    async def _on_window_expired(self, armed_epoch: int) -> None:
+        """Window-expiry callback. Closes the listener + retracts mDNS
+        when no fresh enter has overtaken ``armed_epoch``.
+
+        Mirrors mash-go's ``windowExpiryCloser`` — the spec (DEC-048 +
+        commissioning-window-timing.md §5) requires the window to
+        self-close on duration expiry, indistinguishable on the wire
+        from an explicit ``exit_commissioning_mode``.
+        """
+        if self._comm_epoch != armed_epoch:
+            _log.debug(
+                "window-expiry skipped: epoch advanced %d → %d",
+                armed_epoch,
                 self._comm_epoch,
             )
-            assert self._advertiser is not None
-            await self._advertiser.publish_commissionable(
-                CommissionableAdvertisement(
-                    discriminator=self._args.discriminator,
-                    serial=self._args.serial,
-                    brand=self._args.brand,
-                    model=self._args.model,
-                    port=actual_port,
-                    device_name=self._args.name,
-                )
-            )
-            _log.info(
-                "re-advertised _mash-comm._tcp (discriminator=%d, port=%d)",
-                self._args.discriminator,
-                actual_port,
-            )
+            return
+        _log.info(
+            "commissioning window expired after %ds; closing listener",
+            self._comm_window_duration_s,
+        )
+        await self._exit_commissioning_mode()
 
     async def _exit_commissioning_mode(self) -> None:
         """Close the commissioning listener + retract the mDNS record.
 
         Idempotent. The operational service is left untouched —
         controllers in the existing zone keep their connections.
+
+        DEC-047 / commissioning-pase.md §5.5: window-close resets the
+        backoff counter — the operator regained physical control by
+        ending the commissioning window, so the next time it reopens
+        the rate-limit budget starts fresh. Also cancels the
+        DEC-048 window-expiry timer so a self-close from a fresh
+        enter doesn't fire after this manual exit.
         """
+        self._cancel_window_timer()
         async with self._comm_lock:
             await self._stop_commissioning_listener()
+        await self._pase_tracker.reset()
 
     def _remove_zone_sync(self, zone_id: str) -> bool:
         """Sync entry point for the DeviceInfo.removeZone command handler.
@@ -1233,6 +1541,7 @@ class _DeviceLifecycle:
             _log.info("trigger: factory reset")
             await self._factory_reset()
         elif opcode == TRIGGER_RESET_TEST_STATE:
+            _log.debug("trigger: reset test state — start")
             # Two effects on each reset:
             #
             # 1. **Drop leaked non-suite, non-TEST zones.** mash-go's
@@ -1270,6 +1579,7 @@ class _DeviceLifecycle:
                 await self._remove_zone_async(zid)
             await self._exit_commissioning_mode()
             await self._enter_commissioning_mode()
+            _log.debug("trigger: reset test state — done")
         else:
             _log.info("trigger: unsupported opcode 0x%016x (no-op)", opcode)
 
@@ -1342,6 +1652,7 @@ class _DeviceLifecycle:
 
     async def _teardown(self) -> None:
         _log.info("teardown: stopping device service + listeners")
+        self._cancel_window_timer()
         if self._device_service is not None:
             with contextlib.suppress(Exception):
                 await self._device_service.stop()
@@ -1357,6 +1668,43 @@ class _DeviceLifecycle:
                 await self._advertiser.close()
             self._advertiser = None
         _log.info("teardown: complete (mDNS goodbyes sent)")
+
+
+async def _send_commissioning_busy(
+    writer: asyncio.StreamWriter,
+    *,
+    retry_after_ms: int,
+    reason: str,
+) -> None:
+    """Emit a single ``CommissioningError{Busy, RetryAfter}`` frame and drain.
+
+    Used by the comm handler for DEC-063 busy rejections. ``CommissioningError``
+    is the only legitimate envelope on the comm channel before/instead of
+    ``PASEResponse``; PASE-internal failures use ``PASEComplete{auth_failed}``.
+    Best-effort write — the peer may have already torn down the socket; in
+    that case we still want to fall through and let the handler's ``finally``
+    close cleanly.
+    """
+    msg = CommissioningError(
+        error_code=ERR_CODE_BUSY,
+        message=reason,
+        retry_after_ms=retry_after_ms,
+    )
+    try:
+        framer = AsyncFrameWriter(writer, max_message_size=DEFAULT_MAX_MESSAGE_SIZE)
+        encoded = encode_message(msg)
+        _log.debug(
+            "sending CommissioningError{Busy} (%d bytes, retry_after=%dms)",
+            len(encoded),
+            retry_after_ms,
+        )
+        await framer.write_frame(encoded)
+        await writer.drain()
+    except (ConnectionError, OSError, asyncio.TimeoutError) as exc:
+        # Peer already gone — outer finally closes the writer. Suppress so
+        # busy-rejection telemetry doesn't trip the broad-except handler
+        # in the caller.
+        _log.debug("CommissioningError{Busy} write failed (peer gone?): %r", exc)
 
 
 def _resolve_first_port(server: asyncio.Server) -> int:
