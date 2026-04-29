@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-29, post-fix)
+# MASH Conformance Status (2026-04-29, post-fix, session 4)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — three sessions on 2026-04-29 shipped 7 named fixes
+## TL;DR — four sessions on 2026-04-29 shipped 8 named fixes; Q1 78.8% → 85.0%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -22,6 +22,14 @@ the off-diagonals are the real cross-stack interop signal.
   `pase.go` `transition_to_operational` path was mutating `pool.Main()`'s
   Connection struct in place, conflating it with `suite.Conn()`'s alias) and
   TC-PAIR-001/002/003 corpus + harness alignment.
+- **Session 4 (late evening):** F-8 (runner-side name↔ID translation for
+  invoke args + responses, commits `d1f9f6a` + `7c53214`) and F-9 (EVSE
+  Resume unconditional, commit `9b4c8fc`). Together those moved Q1 from
+  283/359 = 78.8% to 305/359 = 85.0% (+22 tests). The runner had been
+  silently smuggling string-keyed CBOR onto a wire that requires integer
+  keys; the device rejected every required-param command before the
+  handler ran. Symmetric bug on response: integer-keyed CBOR responses
+  never matched named YAML assertions like `response_contains: applied`.
 
 After session 3: all 5 TC-PAIR-* tests pass (was 2/5 mid-session). TC-TRANS-002
 passes back-to-back with TC-TRANS-001 (was: leaked LOCAL zone broke the next
@@ -59,11 +67,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, evening session 2026-04-29)
+## Headline numbers (post-fix, late-evening session 4 — 2026-04-29)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 102 | 359 | **283** | 76  | **78.8 %** | All 5 TC-PAIR-* + TC-TRANS-* + TC-E2E-* now PASS. 76 remaining are device-side feature-area gaps. Zero environmental noise. |
+| `mash-test` → Go device     | 461 | 102 | 359 | **305** | 54  | **85.0 %** | After F-8 (runner name↔ID translation) + F-9 (EVSE Resume unconditional). Was 283/359 = 78.8% post-session-3. The 22-test lift came from one root cause: every invoke command with required params was rejected pre-fix because the runner sent string-keyed args. |
 | `mash-test` → Python device | *to re-run* | — | — | — | — | *unblocked* | F-1 fix means `-target <comm-port> -srv-resolve` now works correctly — operational SRV-resolve uses the canonical zone-id derived from the Zone CA cert. TC-CONN-005 verified passing against mash-py. |
 | `mash-py-test` → Go device  | 134 | 0   | 134 | **2**   | 132 | **1.5 %**  | Earlier subset run. 57 fails are Python harness gaps (`unknown action: …`); 24 are PASE timeouts; 32 are genuine assertion failures (mostly subscription/read flow). Tracked as F-3 / F-7. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
@@ -73,6 +81,131 @@ runs every YAML case unless a static `--pics` file is supplied, which is why
 its "Discovered" counts are larger and its failure pile is dominated by tests
 the Python harness cannot execute at all (unknown actions). Quadrants 3-4 are
 not yet directly comparable to 1-2.
+
+## Fixes shipped (session 4 — F-8 name↔ID translation + F-9 EVSE Resume)
+
+### F-8: Runner sent string-keyed invoke args; device rejected with INVALID_PARAMETER
+
+**Change:** `mash-go/internal/inspect/names.go` (+ generated tables in
+`names_gen.go`), `mash-go/cmd/mash-featgen/generate_names.go`,
+`mash-go/internal/testharness/runner/runner.go`,
+`mash-go/internal/testharness/runner/connection_handlers.go`,
+`mash-go/internal/testharness/runner/preconditions.go`. Commits
+`d1f9f6a` + `7c53214`.
+
+**Recap of the bug.** YAML test cases supply invoke args by **spec
+name** (`{consumptionLimit: 7000000, cause: 3}`), but
+`docs/interaction-model.md §7.1` requires integer-keyed CBOR
+parameters on the wire. The runner stuffed the string-keyed map
+directly into `wire.InvokePayload.Parameters` and CBOR-encoded it
+verbatim. The device's `pkg/model/command.go::validateParameters`
+checks `params[uint8(N)]` for each `Required: true` parameter and
+returned `StatusInvalidParameter` (status 5) before the handler
+ever ran — so SetLimit, SetSetpoint, ClearLimit, RemoveZone, and
+every other required-param-bearing command failed with
+`invoke_success: false` on the YAML side.
+
+Symmetric bug on the response path: CBOR-decoded payloads arrived
+as `map[any]any` keyed by uint8 wire IDs. The runner's
+`normalizePayloadMap` and `flattenInvokeResponse` stringified the
+keys to `"1"`, `"2"`, `"3"`, so YAML assertions written against
+spec field names (`response_contains: effectiveConsumptionLimit`,
+`response.applied: true`) never matched. The
+`flattenInvokeResponse → m["applied"] == false → invoke_success
+downgrade` was equally broken: it never found the `applied` key
+because the key was actually `"1"`.
+
+**Fix.** Two generated registries collected from existing per-command
+constants in `pkg/features/*_gen.go`:
+
+- `commandParamNames[featureID][cmdID][name] = id` — encode side.
+- `commandResponseFieldNames[featureID][cmdID][id] = name` — decode side.
+
+Two helpers in `internal/inspect/names.go`:
+
+- `inspect.ConvertCommandParams(featureID, cmdID, args) any`
+- `inspect.RemapResponsePayload(featureID, cmdID, payload) map[string]any`
+
+The runner calls them in `handleInvoke` (and `handleInvokeAsZone`,
+which had a copy-paste of the same bug) so args are normalized to
+`map[uint8]any` before encoding and the response payload is
+normalized to `map[string]any` keyed by spec names before being
+stored in `result`/`response` step outputs. Response remap is gated
+on `resp.IsSuccess()` so failure responses (which carry a
+`wire.ErrorPayload{1: message}` unrelated to the command schema)
+fall back to the existing stringified-key normaliser.
+
+`buildRemoveZoneRequest` in `preconditions.go` (the harness's own
+internal residual zone sweep) was also using
+`map[string]any{"zoneId": ...}` with bare integer feature/cmd
+literals; switched to integer-keyed parameters via
+`features.RemoveZoneParamZoneID`.
+
+**Result.** Q1 lifted from 283/359 = 78.8% to 305/359 = 85.0%.
+Newly-passing tests include (focused-slice retest):
+- TC-CTRL-004 (Pause), TC-CTRL-005 (Resume), TC-CTRL-006 (Stop)
+- TC-STATE-005 (OVERRIDE), TC-STATE-009 (Resume PAUSED→RUNNING)
+- TC-ZONE-REMOVE-001..005 (every RemoveZone test)
+- TC-ZTYPE-002/003/005/006/007 (zone-type-constraint tests)
+
+This is the F-6-pattern fix (Issue #11 / integer-keyed params)
+generalised from the TestControl-only special case in
+`requestDeviceState` to all invoke commands.
+
+### F-9: EVSE Resume gated on plug state, breaking processState conformance
+
+**Change:** `mash-go/internal/examples/evse.go`. Commit `9b4c8fc`.
+
+**Recap of the bug.** EVSE's `OnResume` handler conditioned the
+`PAUSED → RUNNING` transition on `chargingSession.IsPluggedIn() ==
+true`. Every conformance test that established `processState: PAUSED`
+via TestControl (`TriggerProcessStatePaused`) — i.e. teleporting state
+without going through plug-in → charging → Pause — saw Resume return
+success but processState stayed at PAUSED, because the simulation's
+plug state was false. TC-STATE-009 and TC-CTRL-005 were the visible
+casualties.
+
+**Fix.** Removed the `IsPluggedIn` gate. The Resume command's contract
+per `docs/features/energy-control.md §"Resume"` is the state
+transition itself; plug-state is informational and re-evaluated by
+the natural simulation loop. Pause was already unconditional; Resume
+now matches.
+
+**Result.** TC-STATE-009 and TC-CTRL-005 PASS. Other charging-session
+behavior is unchanged because Resume's downstream effects (currentPower,
+AC active power telemetry) live on the plug-in / charging path, not
+on the immediate Resume invocation.
+
+### What's left in Q1 (54 failures)
+
+Group by error pattern:
+
+| Pattern | Count | Likely owner |
+|---|---|---|
+| `value_is_not_null = false` | 6 | Device feature: attributes returning null when populated value expected |
+| `value` mismatch (key not found / wrong number) | ~10 | Device-side state machine + TEST-zone semantics (DEC-060 excludes TEST from limit/setpoint resolution, breaking SetLimit response expectations on auto-PICS suite zone) |
+| `value_lte` / `value_in_range` / `value_gte_saved` cannot compare nil | 5 | Device feature: numeric attributes returning nil |
+| `commission zone LOCAL: TLS_ERROR` | 2 | Pre-existing TC-ZONE-010-style race; environmental |
+| Misc (within_limit, value_type, value_in, response_contains) | ~30 | Real device-implementation gaps |
+
+Grouped by feature prefix:
+
+```
+TC-GPL-S    8   Generic Power Load use case
+TC-EVC-S    6   EV-charging use case
+TC-ZONE     5   Zone management (ZONE-007/008 etc.)
+TC-STATE    5   Failsafe state machine
+TC-CTRL     5   EnergyControl (failsafe + unsupported-cap)
+TC-FAIL     4   Failsafe timing / persistence
+TC-MEAS     3   Measurement
+TC-STATUS, PODF, MPD, GPL, ELEC, CHRG  2 each
+TESTCTRL-ZONE, POEN, ITPCM, FRAME, FI, DISC  1 each
+```
+
+These are device-side feature-implementation gaps, not infrastructure.
+The remaining lift requires per-feature work driven by the spec docs in
+`docs/features/<feature>/1.0.yaml` and the matching `.md` semantics
+notes.
 
 ## Fixes shipped (evening session — F-6-followup + TC-PAIR-001/002/003)
 
