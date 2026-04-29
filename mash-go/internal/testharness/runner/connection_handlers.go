@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/mash-protocol/mash-go/internal/inspect"
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/transport"
@@ -391,17 +392,27 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
 
-	// Resolve command name to ID and wrap in InvokePayload (same as handleInvoke).
-	var payload any
+	// Resolve command name to ID and wrap in InvokePayload. Mirrors
+	// handleInvoke's name<->ID translation: YAML supplies args by spec
+	// name, the wire requires integer keys, and the response payload
+	// gets remapped back to spec names below for assertion targeting.
+	var (
+		payload     any
+		commandID   uint8
+		haveCommand bool
+	)
 	if commandRaw, hasCommand := params[ParamCommand]; hasCommand {
-		commandID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
+		cmdID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
 		if cmdErr != nil {
 			return nil, fmt.Errorf("resolving command: %w", cmdErr)
 		}
+		commandID = cmdID
+		haveCommand = true
 		args, _ := params[ParamArgs]
 		if args == nil {
 			args, _ = params[ParamParams]
 		}
+		args = inspect.ConvertCommandParams(featureID, commandID, args)
 		payload = &wire.InvokePayload{
 			CommandID:  commandID,
 			Parameters: args,
@@ -434,10 +445,22 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 
+	// Remap response payload from CBOR integer keys to spec field names
+	// when the command schema is known and the call succeeded; mirrors
+	// handleInvoke. Skipped on failure because the payload is then a
+	// wire.ErrorPayload ({1: message}), unrelated to the command schema.
+	var namedPayload map[string]any
+	if haveCommand && resp.IsSuccess() {
+		namedPayload = inspect.RemapResponsePayload(featureID, commandID, resp.Payload)
+	}
+	if namedPayload == nil {
+		namedPayload = normalizePayloadMap(resp.Payload)
+	}
+
 	outputs := map[string]any{
 		KeyInvokeSuccess: resp.IsSuccess(),
-		KeyResult:        resp.Payload,
-		KeyResponse:      normalizePayloadMap(resp.Payload),
+		KeyResult:        namedPayload,
+		KeyResponse:      namedPayload,
 		KeyStatus:        resp.Status,
 	}
 
@@ -449,8 +472,8 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 
 	// Flatten response payload so expectations can reference fields
 	// like "applied", "effectiveConsumptionLimit", etc.
-	if resp.Payload != nil {
-		flattenInvokeResponse(resp.Payload, outputs)
+	if namedPayload != nil {
+		flattenInvokeResponse(namedPayload, outputs)
 	}
 
 	// DEC-059: When RemoveZone succeeds on a real device, reset

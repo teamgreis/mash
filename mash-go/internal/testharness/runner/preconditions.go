@@ -761,14 +761,20 @@ func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
 }
 
 func (r *Runner) buildRemoveZoneRequest(zoneID string) (*wire.Request, []byte, error) {
+	// Wire spec uses integer-keyed parameters (docs/interaction-model.md
+	// §7.1); a string key here is silently rejected by the device with
+	// StatusInvalidParameter (the reason TC-ZONE-REMOVE-001 / TC-ZTYPE-005
+	// were failing pre-fix).
 	req := &wire.Request{
 		MessageID:  r.pool.NextMessageID(),
 		Operation:  wire.OpInvoke,
 		EndpointID: 0,
-		FeatureID:  1, // DeviceInfo
+		FeatureID:  uint8(model.FeatureDeviceInfo),
 		Payload: &wire.InvokePayload{
-			CommandID:  16, // DeviceInfoCmdRemoveZone
-			Parameters: map[string]any{"zoneId": zoneID},
+			CommandID: features.DeviceInfoCmdRemoveZone,
+			Parameters: map[uint8]any{
+				features.RemoveZoneParamZoneID: zoneID,
+			},
 		},
 	}
 	data, err := wire.EncodeRequest(req)
