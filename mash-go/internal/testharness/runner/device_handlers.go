@@ -484,9 +484,15 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 		}
 	}
 
-	// In strict mode, maintain the authoritative suite control path by
-	// attempting to reconnect the suite zone before failing.
-	if r.config != nil && r.config.StrictLifecycle && r.suite.ZoneID() != "" {
+	// Suite zone TCP can be intentionally closed by the coordinator during
+	// backward transitions (commissioned → commissioning) to free a cap
+	// slot. The crypto is preserved, so reconnecting is safe and gives
+	// commissioning-tier tests (TC-SEC-BACKOFF-*, TC-SEC-CONN-*) a working
+	// control channel before their first action runs. Previously gated on
+	// StrictLifecycle, but the gate had no value: reconnecting a dead suite
+	// is always preferable to hard-failing a trigger when we hold the
+	// crypto.
+	if r.suite.ZoneID() != "" {
 		if err := r.reconnectToZone(state); err == nil {
 			conn = r.suite.Conn()
 			if conn != nil && conn.isConnected() && conn.framer != nil {

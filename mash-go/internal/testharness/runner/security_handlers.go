@@ -125,6 +125,22 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	secState := getSecurityState(state)
 
 	target := r.getTarget(step.Params)
+	// DEC-082 two-port deployment: when -srv-resolve is enabled the
+	// dialer can map the literal -target to the per-ALPN port the device
+	// is actually using. Without this, two-port devices route every
+	// commissioning dial to the operational port, where the TLS profile
+	// rejects the comm config (no client cert, presents the operational
+	// cert) and the entire security cluster fails before reaching any
+	// app-level logic. handleConnect already does this; security
+	// handlers historically didn't because mash-go single-port runs
+	// happen to use the same port for both ALPNs.
+	dialTarget := target
+	if resolver, ok := r.dialer.(targetResolver); ok {
+		dialTarget = resolver.ResolveTarget(ctx, target, true)
+		if dialTarget != target {
+			r.debugf("open_commissioning_connection: srv-resolve %s -> %s", target, dialTarget)
+		}
+	}
 
 	// Create commissioning TLS config
 	tlsConfig := transport.NewCommissioningTLSConfig()
@@ -133,7 +149,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	// first dial can race with socket teardown and fail with reset/EOF.
 	conn, err := dialWithTransientRetry(ctx, 3, func() (*tls.Conn, error) {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		return tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		return tls.DialWithDialer(dialer, "tcp", dialTarget, tlsConfig)
 	})
 	if err != nil {
 		// DEC-063: When send_pase is requested and the TLS connection fails
@@ -387,6 +403,17 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 	duration := paramInt(params, "duration_seconds", 5)
 
 	target := r.getTarget(params)
+	// DEC-082 two-port: target the comm port via SRV resolution. The
+	// flood is a TCP-level test (TLS handshake either completes or
+	// fails); routing it to the operational port would always fail and
+	// hide whether the cap actually engaged.
+	if resolver, ok := r.dialer.(targetResolver); ok {
+		resolved := resolver.ResolveTarget(ctx, target, true)
+		if resolved != target {
+			r.debugf("flood_connections: srv-resolve %s -> %s", target, resolved)
+			target = resolved
+		}
+	}
 
 	// Track results
 	var accepted, rejected int32
@@ -860,6 +887,15 @@ func (r *Runner) handlePASEAttemptTimed(ctx context.Context, step *loader.Step, 
 // measurePASEAttempt measures the time for a single PASE attempt.
 func (r *Runner) measurePASEAttempt(ctx context.Context, setupCode string) (time.Duration, error, error) {
 	target := r.getTarget(nil)
+	// DEC-082 two-port: route the comm dial through the SRV resolver
+	// when -srv-resolve is in effect; matches handleConnect behaviour.
+	if resolver, ok := r.dialer.(targetResolver); ok {
+		resolved := resolver.ResolveTarget(ctx, target, true)
+		if resolved != target {
+			r.debugf("measurePASEAttempt: srv-resolve %s -> %s", target, resolved)
+			target = resolved
+		}
+	}
 
 	// Create connection
 	tlsConfig := transport.NewCommissioningTLSConfig()
@@ -1272,6 +1308,16 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 			KeyBusyRetryAfter:        30,
 			KeyBusyRetryAfterPresent: true,
 		}, nil
+	}
+
+	// DEC-082 two-port: resolve the per-ALPN comm target via SRV when
+	// available so two-port devices route the dial to the comm port.
+	if resolver, ok := r.dialer.(targetResolver); ok {
+		resolved := resolver.ResolveTarget(context.Background(), target, true)
+		if resolved != target {
+			r.debugf("handleBusyPASEExchange: srv-resolve %s -> %s", target, resolved)
+			target = resolved
+		}
 	}
 
 	// Real device: connect, send PASERequest, read CommissioningError.
