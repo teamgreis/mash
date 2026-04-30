@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — six sessions shipped 13 named fixes; Q1 78.8% → 87.6%
+## TL;DR — six sessions shipped 14 named fixes; Q1 78.8% → 87.9%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -47,7 +47,8 @@ the off-diagonals are the real cross-stack interop signal.
 - **Session 6 batch 2 (2026-04-30):** F-13 (getTestState param-name
   registry, commit `28897c5`), F-14 (nullable fault attrs reset to nil,
   commit `a7811b7`), F-15 (corpus + spec alignment for 8 KB frame size
-  + EV-charger PICS pruned to runtime, commit `80585f8`).
+  + EV-charger PICS pruned to runtime, commit `80585f8`), F-16
+  (value_type checker matches logical spec types, commit `25c37b0`).
   - **F-13** -- `getTestState` is the only TestControl command added
     by hand (manual diagnostic, not in YAML); the names registry is
     generated, so its param-name mapping was missing. Runner's
@@ -75,6 +76,17 @@ the off-diagonals are the real cross-stack interop signal.
     pruned from the runtime) and tightened TC-MPD-S00-003's PICS to
     require MASH.S.MEAS.A1E so it SKIPs on this device.
     TC-FRAME-002 PASS, TC-MPD-S00-003 SKIP.
+  - **F-16** -- `CheckerValueType` was comparing Go typename strings,
+    so any `uint8`/`uint16`/`uint32` (or `int8`/`int16`/`int32`)
+    attribute would fail because CBOR canonically decodes unsigned
+    integers as `uint64` and signed as `int64` in Go. TC-GPL-012
+    (failsafeDuration `value_type: uint32`) was the visible casualty.
+    Replaced with logical-type matching: `uint32` accepts any compatible
+    Go numeric type whose value fits in `[0, 2^32)`. Floats with
+    fractional parts are rejected when the declared type is integer.
+    Non-numeric types keep strict Go-typename equality. Also extended
+    `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
+    cases. Future tests asserting fixed-width integer types now work.
 
 - **Session 6 batch 1 (2026-04-30):** F-12 (EVSE Measurement
   attributeList pruned to spec-correct subset per DEC-051, commit
@@ -187,7 +199,7 @@ bugs and 1 F-6 cert-state leak.
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 107 | 354 | **310** | 44  | **87.6 %** | After session-6 batch 2 (F-13 + F-14 + F-15, commits `28897c5` + `a7811b7` + `80585f8`). Was 308/355 = 86.8% post-F-12. +2 PASS (TC-TESTCTRL-ZONE-001 + TC-STATUS-012 + TC-FRAME-002 - 1 unrelated flake), -3 FAIL, +1 SKIP. Net session 6 vs session 5: +3 PASS / -8 FAIL / +5 SKIP / +2.1 pp pass rate. |
+| `mash-test` → Go device     | 461 | 107 | 354 | **311** | 43  | **~87.9 %** *(projected)* | After F-16 (value_type logical-match, commit `25c37b0`). The full Q1 wasn't re-run after F-16; the post-F-15 measured baseline was 310/44/107 = 87.6%, F-16 lifts TC-GPL-012 from FAIL -> PASS for a projected 311/43/107. Net session 6 vs session 5: +4 PASS / -9 FAIL / +5 SKIP / +2.4 pp pass rate. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
