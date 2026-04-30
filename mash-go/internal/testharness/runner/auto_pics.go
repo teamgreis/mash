@@ -20,6 +20,31 @@ import (
 // sibling of the test cases directory.
 const basePICSFilename = "protocol-common.yaml"
 
+// capabilityBoolAttrs lists per-feature attribute IDs whose values are
+// read and emitted as PICS booleans (rather than the default true-on-
+// presence). For these attributes, the PICS item reflects the device's
+// actual capability rather than "the device exposes this attribute".
+//
+// Why: corpus tests like TC-CTRL-003 gate on `MASH.S.CTRL.A0C`
+// (acceptsSetpoints presence) but the test author's intent is "this
+// device accepts setpoints". An EVSE that has the attribute but its
+// value is false should SKIP the test, not run it. CheckPICSRequirements
+// already treats `value: false` as failing the requirement, so the only
+// missing piece was reading the value. Same shape as the static PICS
+// files (e.g. testdata/pics/inverter.yaml) which encode
+// `MASH.S.E01.CTRL.A0C: false`.
+var capabilityBoolAttrs = map[uint8][]uint16{
+	uint8(model.FeatureEnergyControl): {
+		features.EnergyControlAttrAcceptsLimits,
+		features.EnergyControlAttrAcceptsCurrentLimits,
+		features.EnergyControlAttrAcceptsSetpoints,
+		features.EnergyControlAttrAcceptsCurrentSetpoints,
+		features.EnergyControlAttrIsPausable,
+		features.EnergyControlAttrIsShiftable,
+		features.EnergyControlAttrIsStoppable,
+	},
+}
+
 // buildAutoPICS loads the base protocol PICS from YAML, then discovers
 // device-specific capabilities over the wire and merges them on top.
 // The runner must have an active connection (commissioned) before calling this.
@@ -88,10 +113,24 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 				continue
 			}
 
+			// Capability boolean attributes need their actual values read
+			// so PICS gates correctly skip tests on devices that expose
+			// the attribute but answer "false". Pre-fetch all attributes
+			// for this feature when it has registered capability bools,
+			// otherwise the default true-on-presence emission is fine.
+			var featureAttrs map[uint16]any
+			if _, hasCapBools := capabilityBoolAttrs[uint8(featID)]; hasCapBools {
+				if attrs, rerr := r.readAttributes(ctx, ep.id, uint8(featID)); rerr == nil {
+					featureAttrs = attrs
+				} else if r.config.Verbose {
+					log.Printf("auto-PICS: warning: failed to read attributes for E%02X.%s: %v", ep.id, picsCode, rerr)
+				}
+			}
 			for _, attrID := range attrList {
-				items[fmt.Sprintf("%s.A%02X", featKey, attrID)] = true
+				picsValue := capabilityPICSValue(uint8(featID), attrID, featureAttrs)
+				items[fmt.Sprintf("%s.A%02X", featKey, attrID)] = picsValue
 				// Endpoint-free attribute key.
-				items[fmt.Sprintf("MASH.S.%s.A%02X", picsCode, attrID)] = true
+				items[fmt.Sprintf("MASH.S.%s.A%02X", picsCode, attrID)] = picsValue
 			}
 			for _, cmdID := range cmdList {
 				items[fmt.Sprintf("%s.C%02X.Rsp", featKey, cmdID)] = true
@@ -138,6 +177,33 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 		Items:  items,
 	}
 	return pf, nil
+}
+
+// capabilityPICSValue returns the PICS value for an attribute. Most
+// attributes get the default true-on-presence; capability booleans
+// listed in capabilityBoolAttrs return the device's actual value when
+// available, falling back to true if the read failed or the value
+// wasn't a bool (defensive default -- an unreadable capability flag
+// shouldn't gate the test more strictly than presence alone).
+func capabilityPICSValue(featureID uint8, attrID uint16, featureAttrs map[uint16]any) any {
+	caps, ok := capabilityBoolAttrs[featureID]
+	if !ok {
+		return true
+	}
+	isCap := false
+	for _, id := range caps {
+		if id == attrID {
+			isCap = true
+			break
+		}
+	}
+	if !isCap || featureAttrs == nil {
+		return true
+	}
+	if v, ok := featureAttrs[attrID].(bool); ok {
+		return v
+	}
+	return true
 }
 
 // readAttributes sends a Read request for all attributes of a feature
