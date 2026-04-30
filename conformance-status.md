@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 7 batch 2)
+# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 1)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — seven sessions shipped 17 named fixes; Q1 78.8% → 89.0%
+## TL;DR — eight sessions shipped 18 named fixes; Q1 78.8% → 88.7% (89.0% F-19 baseline; F-20 lands TC-STATUS-011 inside run-to-run noise band)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,48 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 8 batch 1 (2026-04-30):** F-20 (`set_state_detail`
+  device_local_action wires through to the device via a new
+  `TriggerSetStateDetailBase` opcode). Q1 measured 314/40/107 = **88.7%**
+  -- TC-STATUS-011 went FAIL -> PASS (real lift), but two timing-margin
+  tests flipped PASS -> FAIL relative to the F-19 baseline (315/39/107 =
+  89.0%), netting -1 PASS in the headline. Same noise band F-18's notes
+  document. The structural lift is real even though the headline didn't
+  move.
+  - **F-20** -- TC-STATUS-011 ("State Detail Vendor-Specific Data") read
+    `stateDetail` after step 1 wrote `value: 0x1001`, and got `<nil>`.
+    The `set_state_detail` runner handler only mutated harness-side
+    `ds.stateDetails[key]` -- and silently no-op'd when no `key` was
+    provided (the corpus only sends `value`). Same shape of bug F-19
+    fixed for `device_trigger enter_fault`. Three-layer fix:
+    - **Trigger encoding (`pkg/features/test_control.go`).** Added
+      `TriggerSetStateDetailBase = 0x0002_0002_0000_0000` (Status
+      domain, sub-domain 2, with the uint32 stateDetail value in the
+      lower 32 bits). Status sub-domain 0 was already used by the bare
+      triggers (Fault/ClearFault/SetStandby/SetRunning) and sub-domain
+      1 by `TriggerFaultWithCodeBase`; 2 is the natural slot.
+    - **Device handler (`pkg/service/test_event_handler.go`).** Added a
+      case in `handleStatusTrigger` that decodes the lower 32 bits and
+      calls `feat.SetAttributeInternal(features.StatusAttrStateDetail, value)`.
+      Also extended `TriggerResetTestState` to clear stateDetail to nil
+      so the test-supplied value doesn't leak into TC-STATUS-012 ("read
+      stateDetail when not set").
+    - **Runner side (`internal/testharness/runner/device_handlers.go`).**
+      `handleSetStateDetail` now coerces the corpus's `value` to uint32
+      and dispatches `TriggerSetStateDetailBase | uint64(stateDetail)`
+      via `sendTriggerViaZone` whenever a real device target is
+      configured. Harness-only `key` semantics preserved for any
+      simulation-only callers.
+    - **Corpus.** No corpus changes needed. The test asserted on the
+      symptoms; the fix is entirely on the implementation side.
+    - **Validation.** TC-STATUS-011 PASS in isolation (7ms). Critical
+      reset-path check: TC-STATUS-012 ("nullable attributes return null
+      when unset") still PASS, confirming the new clear-to-nil in
+      `TriggerResetTestState` is correct. Warmup smoke (TC-CTRL-002,
+      TC-CTRL-010, TC-MPD-S02-002, TC-GPL-012, TC-FRAME-002, TC-STATUS-011,
+      TC-STATUS-012) 7/7 PASS. Unit tests across `pkg/features`,
+      `pkg/service`, `internal/testharness/...` all clean.
 
 - **Session 7 batch 2 (2026-04-30):** F-19 (`device_trigger` action wires
   `enter_fault` to a parameterized `TriggerFaultWithCodeBase` opcode).
@@ -318,11 +360,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 7 batch 2 — 2026-04-30)
+## Headline numbers (post-fix, session 8 batch 1 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 107 | 354 | **315** | 39  | **89.0 %** *(measured)* | After F-19 (device_trigger enter_fault dispatch + parameterized faultCode, session 7 batch 2). +1 PASS / -1 FAIL vs F-18 measured baseline (314/40/107 = 88.7%). Clean single-test lift: TC-MPD-S02-002 flipped FAIL -> PASS. Net session 7 (both batches) vs session 6 batch 3: +5 PASS / -5 FAIL / +1.4 pp pass rate. |
+| `mash-test` → Go device     | 461 | 107 | 354 | **314** | 40  | **88.7 %** *(measured)* | After F-20 (set_state_detail wires to device via new TriggerSetStateDetailBase opcode). TC-STATUS-011 flipped FAIL -> PASS as the local lift; two unrelated timing-margin tests flipped PASS -> FAIL (run-to-run noise, identical band F-18 documents). Net headline -1 PASS / +1 FAIL vs F-19 baseline (315/39/107 = 89.0%); same headline as F-18 baseline (314/40/107). Structural conformance gains a test relative to either prior baseline. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
