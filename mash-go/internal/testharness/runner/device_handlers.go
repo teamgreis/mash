@@ -622,7 +622,15 @@ func (r *Runner) sendTriggerOnConn(ctx context.Context, trigger uint64, conn *Co
 	return fmt.Errorf("trigger response not received after skipping notifications")
 }
 
-// handleSetStateDetail sets stateDetails vendor data.
+// handleSetStateDetail sets the Status.stateDetail vendor-specific value.
+//
+// Two semantics coexist:
+//   - When `key` is provided, the value is recorded in harness-side state
+//     under that key (used by simulation-only tests).
+//   - When `value` is provided, the value is also pushed to the device
+//     via TriggerSetStateDetailBase so subsequent reads of stateDetail
+//     return the test-supplied uint32. The corpus relies on this for
+//     TC-STATUS-011 ("State Detail Vendor-Specific Data").
 func (r *Runner) handleSetStateDetail(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
@@ -632,6 +640,14 @@ func (r *Runner) handleSetStateDetail(ctx context.Context, step *loader.Step, st
 
 	if key != "" {
 		ds.stateDetails[key] = value
+	}
+
+	if r.config.Target != "" && value != nil {
+		stateDetail := uint32(paramInt(params, KeyValue, 0))
+		opcode := features.TriggerSetStateDetailBase | uint64(stateDetail)
+		if err := r.sendTriggerViaZone(ctx, opcode, state); err != nil {
+			return nil, fmt.Errorf("trigger set_state_detail on device: %w", err)
+		}
 	}
 
 	return map[string]any{

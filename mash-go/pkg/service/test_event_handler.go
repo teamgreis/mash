@@ -279,6 +279,7 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 				_ = f.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateStandby))
 				_ = f.SetAttributeInternal(features.StatusAttrFaultCode, nil)
 				_ = f.SetAttributeInternal(features.StatusAttrFaultMessage, nil)
+				_ = f.SetAttributeInternal(features.StatusAttrStateDetail, nil)
 			}
 			// Reset Measurement to zero.
 			if f, err := ep.GetFeatureByID(uint8(model.FeatureMeasurement)); err == nil {
@@ -427,6 +428,11 @@ func (s *DeviceService) handleStatusTrigger(_ context.Context, trigger uint64) e
 			_ = feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateFault))
 			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, faultCode)
 			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, "Test trigger fault")
+			return nil
+		case trigger&0xFFFF_FFFF_0000_0000 == features.TriggerSetStateDetailBase:
+			stateDetail := uint32(trigger & 0xFFFF_FFFF)
+			s.debugLog("trigger: setting state detail", "stateDetail", stateDetail, "endpoint", ep.ID())
+			_ = feat.SetAttributeInternal(features.StatusAttrStateDetail, stateDetail)
 			return nil
 		case trigger == features.TriggerClearFault:
 			s.debugLog("trigger: clearing fault", "endpoint", ep.ID())

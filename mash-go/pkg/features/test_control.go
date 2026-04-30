@@ -31,6 +31,12 @@ const (
 	// uses faultCode=1.
 	// Usage: TriggerFaultWithCodeBase | uint64(faultCode)
 	TriggerFaultWithCodeBase uint64 = 0x0002_0001_0000_0000
+
+	// TriggerSetStateDetailBase encodes a vendor-specific stateDetail value
+	// in the lower 32 bits. The harness uses this so corpus tests can
+	// populate the nullable Status.stateDetail attribute on the device.
+	// Usage: TriggerSetStateDetailBase | uint64(stateDetail)
+	TriggerSetStateDetailBase uint64 = 0x0002_0002_0000_0000
 )
 
 // Measurement triggers (domain 0x0004 = Measurement).
