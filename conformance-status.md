@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 2)
+# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 3)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — eight sessions shipped 19 named fixes; Q1 78.8% → 89.8% (best measured Q1 to date)
+## TL;DR — eight sessions shipped 20 named fixes; Q1 78.8% → 90.3% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,47 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 8 batch 3 (2026-04-30):** F-22 (EVSE + HeatPump Electrical
+  attributeList pruned per DEC-051). Q1 measured **316/34/111 = 90.3%**
+  (pass rate of run; 316/(316+34) = 90.29%). Best measured Q1 to date,
+  exceeds F-21's 89.8%.
+  - **F-22** -- TC-ELEC-007 ("Asymmetric Support Levels") and
+    TC-ELEC-008 ("Energy Capacity for Storage Device") failed against
+    EVSE because `NewElectrical()` registers all 12 spec attributes
+    regardless of hardware capability. EVSE doesn't implement
+    per-phase asymmetric control and has no internal energy store, but
+    auto-PICS picked up ELEC.A0F + ELEC.A14 from the over-advertised
+    attributeList and ran tests the device cannot meaningfully satisfy.
+    Same shape as F-12 (Measurement pruning).
+    - **Production layer.** Removed `supportsAsymmetric` (A0F) and
+      `energyCapacity` (A14) from EVSE *and* HeatPump Electrical
+      features via `RemoveAttribute` (the same primitive F-12 added to
+      `Feature`). Both pruned attributes are spec-defined but not
+      implemented in either simulation: per-phase control isn't wired
+      on top of the symmetric `MaxCurrentPerPhase` field, and neither
+      device has an internal battery.
+    - **Side effect.** EVSE no longer claims `MPD.S01` (the ELECTRICAL
+      scenario in the Monitor Power Device use case) because per
+      `docs/usecases/1.0/mpd.yaml` the scenario requires
+      nominalMaxConsumption AND nominalMaxProduction AND
+      energyCapacity, and the use-case matcher
+      (`pkg/usecase/matcher.go:139`) is strict-AND.
+      TC-MPD-S01-001/002 now SKIP on EVSE. This is the correct outcome
+      -- they were previously passing because the PICS gate let them
+      run on a device that didn't fully implement S01.
+    - **Net Q1 impact.** 4 tests reclassified to correct outcomes:
+      TC-ELEC-007 + TC-ELEC-008 went FAIL -> SKIP (2 false FAILs lifted),
+      TC-MPD-S01-001 + TC-MPD-S01-002 went PASS -> SKIP (2 spurious
+      PASSes converted to correct SKIPs). Pass count drops 318 -> 316
+      but pass rate rises 89.8% -> 90.3% because the denominator (Run)
+      drops by 4. Conformance signal more accurate.
+    - **Run-to-run flakes** that flipped on this run: TC-COMM-004
+      (PASS -> FAIL, the documented TLS-race flake), TC-TESTCTRL-ZONE-001
+      (PASS -> FAIL), TC-SEC-CONN-005 (FAIL -> PASS), TC-ZONE-010
+      (FAIL -> PASS). All four flake-band; not F-22-related. Net effect
+      on PASS-list cancels (-2/+2); net effect on FAIL-list cancels
+      (+2/-2 minus the 2 ELEC lifts).
 
 - **Session 8 batch 2 (2026-04-30):** F-21 (`TriggerEVPlugIn` populates
   rich EV state + new `each_item_has` checker). Q1 measured **318/36/107
@@ -405,11 +446,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 8 batch 2 — 2026-04-30)
+## Headline numbers (post-fix, session 8 batch 3 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 107 | 354 | **318** | 36  | **89.8 %** *(measured)* | After F-21 (TriggerEVPlugIn populates rich EV state + new each_item_has checker). Net structural lift = 4 tests: TC-CHRG-009 (the target) + TC-EVC-S01-001/002/003 (free wins from extending precondition wiring to corpus's `ev_plugged_in` synonym + adding evMin/TargetStateOfCharge to plug-in setup). +4 PASS / -4 FAIL vs F-20 baseline (314/40/107 = 88.7%). Best measured Q1 to date; exceeds F-19's 89.0%. Two run-to-run flakes flipped (TC-TESTCTRL-ZONE-001 lifted, TC-ZONE-010 newly failing) -- both PASS in isolation, so they're pre-existing zone-state-cross-contamination defects surfacing only in the full ordered corpus. |
+| `mash-test` → Go device     | 461 | 111 | 350 | **316** | 34  | **90.3 %** *(measured)* | After F-22 (EVSE + HeatPump Electrical attributeList pruned per DEC-051). 4 tests reclassified to correct outcomes: TC-ELEC-007/008 (false FAILs lifted to SKIP), TC-MPD-S01-001/002 (spurious PASSes downgraded to SKIP because pruning removed energyCapacity, which MPD.S01 strictly requires). Pass rate up despite -2 PASS because Run denominator drops by 4. Net positive: -2 false FAILs, more accurate conformance signal. Run-to-run flakes flipped (TC-COMM-004, TC-TESTCTRL-ZONE-001 PASS->FAIL; TC-SEC-CONN-005, TC-ZONE-010 FAIL->PASS) net to zero on the headline. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
