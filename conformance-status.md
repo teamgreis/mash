@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 5)
+# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 6)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — eight sessions shipped 22 named fixes; Q1 78.8% → 91.9% (best measured Q1 to date)
+## TL;DR — eight sessions shipped 23 named fixes; Q1 78.8% → 92.2% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,39 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 8 batch 6 (2026-04-30):** F-25 (`invoke_success` strictly
+  wire-level + corpus migration). Q1 measured **320/27/114 = 92.2%** --
+  single clean lift (TC-GPL-011 FAIL -> PASS).
+  - **F-25** -- The runner used to override `invoke_success: false`
+    whenever an invoke response payload carried `applied: false`,
+    conflating wire-level success (`resp.IsSuccess()`) with
+    application-level success (the command took effect). TC-GPL-011
+    sends a negative consumption limit and expects wire-level SUCCESS
+    + applied=false (per spec, the LimitResolver rejects with
+    rejectReason=LimitRejectReasonInvalidValue at app level). The
+    override silently turned that into wire-level FAILURE in the
+    harness output, breaking the test's `invoke_success: true`
+    assertion.
+    - **Production layer.** Collapsed `flattenInvokeResponse` to a
+      no-op (kept the symbol with documentation explaining the
+      historical override). Dropped the orphan
+      `rejectReasonToErrorCode` helper. `invoke_success` now strictly
+      tracks `wire.IsSuccess()` -- a wire-level concept.
+    - **Corpus migration.** TC-ERR-005 was the only corpus test that
+      depended on the override (its expected
+      `invoke_success: false; error_code: INVALID_PARAMETER` shape
+      came from the LimitRejectReason->INVALID_PARAMETER mapping in
+      `rejectReasonToErrorCode`). Migrated it to the F-24
+      `check_response field: applied/rejectReason value: false/2`
+      pattern. All other corpus tests with `invoke_success: false`
+      (TC-ERR-006 CONSTRAINT_ERROR, TC-OPT-OUT_ACTIVE,
+      TC-CTRL-010 UNSUPPORTED, TC-TESTCTRL-ZONE-* zone-type
+      enforcement, etc.) were already expecting wire-level
+      rejections and continue to work unchanged.
+    - **Net Q1 impact.** TC-GPL-011 (Negative Limit Rejected) flips
+      FAIL -> PASS as the single clean lift. TC-ERR-005 stays PASS
+      via the new corpus shape. Zero collateral.
 
 - **Session 8 batch 5 (2026-04-30):** F-24 (`check_response` handler
   field-extract mode). Q1 measured **319/28/114 = 91.9%** -- single-test
@@ -506,11 +539,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 8 batch 5 — 2026-04-30)
+## Headline numbers (post-fix, session 8 batch 6 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 114 | 347 | **319** | 28  | **91.9 %** *(measured)* | After F-24 (`check_response` handler now extracts `params.field` from prior invoke response into the standard `value` output so the `value: <expected>` checker fires). Single clean lift: TC-EVC-S00-001 FAIL -> PASS. +1 PASS, -1 FAIL vs F-23 baseline (318/29/114 = 91.6%). Best measured Q1 to date. |
+| `mash-test` → Go device     | 461 | 114 | 347 | **320** | 27  | **92.2 %** *(measured)* | After F-25 (`invoke_success` now strictly wire-level; corpus TC-ERR-005 migrated to the F-24 `check_response field: applied` pattern). Single clean lift: TC-GPL-011 FAIL -> PASS. +1 PASS, -1 FAIL vs F-24 baseline (319/28/114 = 91.9%). Best measured Q1 to date. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
