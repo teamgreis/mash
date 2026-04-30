@@ -300,14 +300,35 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 }
 
 // handleCheckResponse verifies response status and payload fields.
+//
+// Supports two corpus shapes:
+//
+//  1. expected_fields-map mode (legacy):
+//     params:
+//     expected_status: 0
+//     expected_fields:
+//     applied: true
+//     -> emits status_matches/payload_matches outputs.
+//
+//  2. field-extract mode (used by TC-EVC-S00-*, TC-FLOA-*, TC-GPL-* etc.):
+//     params:
+//     field: applied
+//     expect:
+//     value: true
+//     -> extracts the named field from the prior step's response/result
+//     and exposes it as the standard `value` output, so the existing
+//     value: <expected> checker fires.
 func (r *Runner) handleCheckResponse(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
+
+	out := map[string]any{}
 
 	statusMatches := true
 	if expected, ok := params[ParamExpectedStatus]; ok {
 		actual, _ := state.Get(KeyStatus)
 		statusMatches = fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", expected)
 	}
+	out[KeyStatusMatches] = statusMatches
 
 	payloadMatches := true
 	if fields, ok := params[ParamExpectedFields].(map[string]any); ok {
@@ -319,11 +340,46 @@ func (r *Runner) handleCheckResponse(ctx context.Context, step *loader.Step, sta
 			}
 		}
 	}
+	out[KeyPayloadMatches] = payloadMatches
 
-	return map[string]any{
-		KeyStatusMatches:  statusMatches,
-		KeyPayloadMatches: payloadMatches,
-	}, nil
+	// Field-extract mode: pull `params.field` out of the most recent
+	// response/result map and expose it as `value`.
+	if fieldName, _ := params["field"].(string); fieldName != "" {
+		var fieldValue any
+		var found bool
+		for _, src := range []string{"response", "result"} {
+			val, ok := state.Get(src)
+			if !ok || val == nil {
+				continue
+			}
+			if v, present := lookupMapField(val, fieldName); present {
+				fieldValue = v
+				found = true
+				break
+			}
+		}
+		if found {
+			out[KeyValue] = fieldValue
+		}
+	}
+
+	return out, nil
+}
+
+// lookupMapField extracts a string-named key from a map, accepting both
+// Go-native (`map[string]any`) and CBOR-decoded
+// (`map[interface{}]interface{}`) shapes.
+func lookupMapField(m any, key string) (any, bool) {
+	switch v := m.(type) {
+	case map[string]any:
+		val, ok := v[key]
+		return val, ok
+	case map[interface{}]interface{}:
+		val, ok := v[key]
+		return val, ok
+	default:
+		return nil, false
+	}
 }
 
 // handleVerifyCorrelation checks txnId correlation between request/response.
