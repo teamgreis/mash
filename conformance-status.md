@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 3)
+# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 4)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — eight sessions shipped 20 named fixes; Q1 78.8% → 90.3% (best measured Q1 to date)
+## TL;DR — eight sessions shipped 21 named fixes; Q1 78.8% → 91.6% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,41 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 8 batch 4 (2026-04-30):** F-23 (3-line corpus PICS tightening:
+  GPL production-side tests). Q1 measured **318/29/114 = 91.6%** -- best
+  measured Q1 to date, +1.3 pp over F-22's 90.3%.
+  - **F-23** -- The three production-side `TC-GPL-S00-*` tests
+    (Production Limit Accepted, ClearLimit Restores Autonomous
+    Production, Nominal Max Production Readable) were tagged with PICS
+    `MASH.S.UC.GPL.S00` (BASE) instead of `MASH.S.UC.GPL.S02`
+    (PRODUCTION). They ran on EV chargers and inevitably failed because
+    EVSEs are consumption-only by spec.
+    - **Spec authority.** Per `docs/usecases/1.0/gpl.yaml`, GPL.S02 is
+      the PRODUCTION scenario with `endpointTypes:
+      [INVERTER, BATTERY, GRID_CONNECTION]` (explicitly excluding
+      `EV_CHARGER`). The use-case matcher
+      (`pkg/usecase/matcher.go:70`) already enforces the per-scenario
+      endpointType filter at runtime, so an EVSE doesn't claim GPL.S02.
+      The corpus PICS gate just needed to point at S02 instead of S00.
+    - **Three-line edit.** Same change applied to lines 476, 533, 578
+      of `testdata/cases/gpl-tests.yaml` -- swap `MASH.S.UC.GPL.S00` to
+      `MASH.S.UC.GPL.S02` with a brief comment citing the use-case
+      spec. No production-code change.
+    - **Net Q1 impact.** 3 tests reclassified FAIL -> SKIP (target),
+      plus 2 timing-band flake recoveries went FAIL -> PASS
+      (TC-COMM-004, TC-TESTCTRL-ZONE-001). Total: +2 PASS, -5 FAIL,
+      +3 SKIP. Pass rate jumps 1.3 pp because both PASS up and FAIL
+      drops.
+    - **Out of scope.** The remaining GPL/PODF/POEN/ITPCM/EVC-S04
+      failures (TC-GPL-S00-001/002/003 consumption-side, TC-GPL-S01-*,
+      TC-GPL-011, TC-PODF-S00-002/003, TC-POEN-S00-002,
+      TC-ITPCM-S00-003, TC-EVC-S04-003) are real device-side
+      implementation gaps, not over-advertising. The Plan/Signals
+      OnRequestPlan/OnAcceptPlan handlers exist but never advance the
+      planID counter, so AcceptPlan with `planId: 1` never matches.
+      Filed for a future bucket #4 implementation pass (more involved
+      than PICS tightening: needs Plan-feature semantics in EVSE).
 
 - **Session 8 batch 3 (2026-04-30):** F-22 (EVSE + HeatPump Electrical
   attributeList pruned per DEC-051). Q1 measured **316/34/111 = 90.3%**
@@ -446,11 +481,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 8 batch 3 — 2026-04-30)
+## Headline numbers (post-fix, session 8 batch 4 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 111 | 350 | **316** | 34  | **90.3 %** *(measured)* | After F-22 (EVSE + HeatPump Electrical attributeList pruned per DEC-051). 4 tests reclassified to correct outcomes: TC-ELEC-007/008 (false FAILs lifted to SKIP), TC-MPD-S01-001/002 (spurious PASSes downgraded to SKIP because pruning removed energyCapacity, which MPD.S01 strictly requires). Pass rate up despite -2 PASS because Run denominator drops by 4. Net positive: -2 false FAILs, more accurate conformance signal. Run-to-run flakes flipped (TC-COMM-004, TC-TESTCTRL-ZONE-001 PASS->FAIL; TC-SEC-CONN-005, TC-ZONE-010 FAIL->PASS) net to zero on the headline. |
+| `mash-test` → Go device     | 461 | 114 | 347 | **318** | 29  | **91.6 %** *(measured)* | After F-23 (corpus PICS gate for 3 production-side TC-GPL-S00-* tests changed from S00 BASE to S02 PRODUCTION per docs/usecases/1.0/gpl.yaml). 3 false FAILs reclassified to SKIP (TC-GPL-S00-001/002/003 production-side); 2 timing-band flake recoveries to PASS (TC-COMM-004, TC-TESTCTRL-ZONE-001). +2 PASS, -5 FAIL, +3 SKIP vs F-22 baseline (316/34/111 = 90.3%). Best measured Q1 to date by 1.3 pp. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
