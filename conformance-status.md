@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 6)
+# MASH Conformance Status (2026-04-30, post-fix, session 6 batch 2)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — six sessions shipped 10 named fixes; Q1 78.8% → 86.8%
+## TL;DR — six sessions shipped 13 named fixes; Q1 78.8% → 87.6%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -44,8 +44,41 @@ the off-diagonals are the real cross-stack interop signal.
   TC-ZONE-001/002/006/007) goes 0/10 → 3/10. The remaining 7 are real
   device-side feature gaps (CONTROLLED→LIMITED transition, SetSetpoint
   resolution, `myConsumptionLimit` per-zone read semantics).
-- **Session 6 (2026-04-30):** F-12 (EVSE Measurement attributeList
-  pruned to spec-correct subset per DEC-051, commit `47d8cba`). The
+- **Session 6 batch 2 (2026-04-30):** F-13 (getTestState param-name
+  registry, commit `28897c5`), F-14 (nullable fault attrs reset to nil,
+  commit `a7811b7`), F-15 (corpus + spec alignment for 8 KB frame size
+  + EV-charger PICS pruned to runtime, commit `80585f8`).
+  - **F-13** -- `getTestState` is the only TestControl command added
+    by hand (manual diagnostic, not in YAML); the names registry is
+    generated, so its param-name mapping was missing. Runner's
+    `invoke_as_zone -> ConvertCommandParams` hit the unregistered-cmd
+    pass-through and forwarded the YAML's string-keyed args. Device
+    `validateParameters` then rejected with INVALID_PARAMETER before
+    `requireTestZone` could return NOT_AUTHORIZED. Fix moves the
+    constants from pkg/service into pkg/features/test_control.go (the
+    manual file alongside the generated one) so both pkg/service and
+    internal/inspect reach them without import cycles, then registers
+    `{enableKey: 1}` in inspect.init(). TC-TESTCTRL-ZONE-001 PASS.
+  - **F-14** -- `TriggerResetTestState` and `TriggerClearFault` were
+    setting nullable `faultCode` (uint32, nullable) and `faultMessage`
+    (string, nullable) to 0 and "" respectively. Per spec, "no fault
+    present" maps to null, not zero. Cleared to nil instead.
+    TC-STATUS-012 PASS.
+  - **F-15** -- protocol-common.yaml + message-framing-tests.yaml +
+    transport.{Server,Client}.MaxMessageSize comments all said
+    65536 (64 KB), but DefaultMaxMessageSize is 8192 (8 KB per
+    DEC-069) and docs/transport.md + docs/interaction-model.md agree.
+    TC-FRAME-002 sent 64 KB and expected parse_success, then failed
+    because the device correctly rejected the oversized frame.
+    Aligned all four locations to 8 KB. Also tightened
+    testdata/pics/ev-charger.yaml to remove A14/A15/A1E (which F-12
+    pruned from the runtime) and tightened TC-MPD-S00-003's PICS to
+    require MASH.S.MEAS.A1E so it SKIPs on this device.
+    TC-FRAME-002 PASS, TC-MPD-S00-003 SKIP.
+
+- **Session 6 batch 1 (2026-04-30):** F-12 (EVSE Measurement
+  attributeList pruned to spec-correct subset per DEC-051, commit
+  `47d8cba`). The
   generated `NewMeasurement()` constructor registers all 25+ Measurement
   attributes; EVSE composed it without subtracting battery- and DC-only
   attributes (stateOfCharge, powerFactor, dcPower, ...). Auto-PICS
@@ -150,11 +183,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 6 — 2026-04-30)
+## Headline numbers (post-fix, session 6 batch 2 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 106 | 355 | **308** | 47  | **86.8 %** | After F-12 (EVSE Measurement attributeList pruned to spec-correct subset per DEC-051, commit `47d8cba`). Was 307/359 = 85.5% post-session-5. -4 false failures (TC-MEAS-003/-004/-008/-009 correctly SKIP rather than running on a device with no battery/DC sensors), +1 PASS, +4 SKIP. Auto-PICS items 645 → 599. |
+| `mash-test` → Go device     | 461 | 107 | 354 | **310** | 44  | **87.6 %** | After session-6 batch 2 (F-13 + F-14 + F-15, commits `28897c5` + `a7811b7` + `80585f8`). Was 308/355 = 86.8% post-F-12. +2 PASS (TC-TESTCTRL-ZONE-001 + TC-STATUS-012 + TC-FRAME-002 - 1 unrelated flake), -3 FAIL, +1 SKIP. Net session 6 vs session 5: +3 PASS / -8 FAIL / +5 SKIP / +2.1 pp pass rate. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
