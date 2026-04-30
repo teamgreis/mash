@@ -151,7 +151,7 @@ func CheckerValueInRange(key string, expected interface{}, state *ExecutionState
 			Expected: expected,
 			Actual:   actual,
 			Passed:   false,
-			Message:  "cannot compare non-numeric values",
+			Message:  fmt.Sprintf("cannot compare non-numeric values: actual=%T(%v) min=%T(%v) max=%T(%v)", actual, actual, minVal, minVal, maxVal, maxVal),
 		}
 	}
 
@@ -1398,10 +1398,10 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValueMax, CheckerValueMax)
 	e.RegisterChecker(CheckerNameValueLTE, CheckerValueLTE)
 	e.RegisterChecker(CheckerNameValueNot, CheckerValueNot)
-	e.RegisterChecker(CheckerNameValueNotEqual, CheckerValueNot)           // alias
-	e.RegisterChecker(CheckerNameValueDifferentFrom, CheckerValueNot)      // alias
-	e.RegisterChecker(CheckerNameValueAtLeast, CheckerValueGTE)            // alias
-	e.RegisterChecker(CheckerNameValueGreaterOrEqual, CheckerValueGTE)     // alias
+	e.RegisterChecker(CheckerNameValueNotEqual, CheckerValueNot)       // alias
+	e.RegisterChecker(CheckerNameValueDifferentFrom, CheckerValueNot)  // alias
+	e.RegisterChecker(CheckerNameValueAtLeast, CheckerValueGTE)        // alias
+	e.RegisterChecker(CheckerNameValueGreaterOrEqual, CheckerValueGTE) // alias
 	e.RegisterChecker(CheckerNameValueIn, CheckerValueIn)
 	e.RegisterChecker(CheckerNameValueNonNegative, CheckerValueNonNegative)
 	e.RegisterChecker(CheckerNameValueIsArray, CheckerValueIsArray)
@@ -1413,7 +1413,7 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValueGTESaved, CheckerValueGTESaved)
 	e.RegisterChecker(CheckerNameValueMaxRef, CheckerValueMaxRef)
 	e.RegisterChecker(CheckerNameKeysArePhases, CheckerKeysArePhases)
-	e.RegisterChecker(CheckerNameKeysValidPhases, CheckerKeysArePhases)             // alias
+	e.RegisterChecker(CheckerNameKeysValidPhases, CheckerKeysArePhases) // alias
 	e.RegisterChecker(CheckerNameValuesValidGridPhases, CheckerValuesValidGridPhases)
 	e.RegisterChecker(CheckerNameArrayNotEmpty, CheckerArrayNotEmpty)
 	e.RegisterChecker(CheckerNameSavePrimingValue, CheckerSavePrimingValue)

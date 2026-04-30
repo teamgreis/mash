@@ -18,6 +18,8 @@ description: |
 pics_requirements:
   - MASH.S.SUB
   - MASH.S.MEAS
+  - MASH.S.MEAS.A01          # acActivePower (asserted in contains)
+  - MASH.S.MEAS.A02          # acReactivePower (asserted in contains)
 
 preconditions:
   - session_established: true

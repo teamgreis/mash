@@ -125,9 +125,40 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 	_ = e.electrical.SetSupportedDirections(direction)
 	charger.AddFeature(e.electrical.Feature)
 
-	// Measurement - real-time telemetry
+	// Measurement - real-time telemetry. NewMeasurement registers the full
+	// spec attribute set; per DEC-051, attributeList must reflect the hardware
+	// capabilities of this device. The EVSE simulation populates only
+	// acActivePower today, so prune the rest. Add an attribute back when the
+	// simulation populates it (e.g., per-phase current/voltage, energy).
 	e.measurement = features.NewMeasurement()
 	e.measurement.Feature.SetFeatureMap(evseCapabilities)
+	for _, id := range []uint16{
+		features.MeasurementAttrACReactivePower,
+		features.MeasurementAttrACApparentPower,
+		features.MeasurementAttrACActivePowerPerPhase,
+		features.MeasurementAttrACReactivePowerPerPhase,
+		features.MeasurementAttrACApparentPowerPerPhase,
+		features.MeasurementAttrACCurrentPerPhase,
+		features.MeasurementAttrACVoltagePerPhase,
+		features.MeasurementAttrACVoltagePhaseToPhasePair,
+		features.MeasurementAttrACFrequency,
+		features.MeasurementAttrPowerFactor,
+		features.MeasurementAttrACEnergyConsumed,
+		features.MeasurementAttrACEnergyProduced,
+		features.MeasurementAttrDCPower,
+		features.MeasurementAttrDCCurrent,
+		features.MeasurementAttrDCVoltage,
+		features.MeasurementAttrDCEnergyIn,
+		features.MeasurementAttrDCEnergyOut,
+		features.MeasurementAttrStateOfCharge,
+		features.MeasurementAttrStateOfHealth,
+		features.MeasurementAttrStateOfEnergy,
+		features.MeasurementAttrUseableCapacity,
+		features.MeasurementAttrCycleCount,
+		features.MeasurementAttrTemperature,
+	} {
+		_ = e.measurement.Feature.RemoveAttribute(id)
+	}
 	charger.AddFeature(e.measurement.Feature)
 
 	// EnergyControl - accepts limits from CEM

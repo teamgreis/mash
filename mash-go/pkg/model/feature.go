@@ -133,6 +133,25 @@ func (f *Feature) AddAttribute(attr *Attribute) {
 	f.attributes[attr.ID()] = attr
 }
 
+// RemoveAttribute removes a non-global attribute from the feature so that it
+// no longer appears in attributeList. Per DEC-051, attributeList reflects the
+// device's hardware capabilities; generated feature constructors register the
+// full set of spec attributes, and device applications prune to what their
+// hardware actually supports. Returns ErrFeatureReadOnly for global IDs
+// (0xFFF0+) and ErrAttributeNotFound when the attribute is already absent.
+func (f *Feature) RemoveAttribute(id uint16) error {
+	if id >= AttrIDGlobalBase {
+		return ErrFeatureReadOnly
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.attributes[id]; !exists {
+		return ErrAttributeNotFound
+	}
+	delete(f.attributes, id)
+	return nil
+}
+
 // GetAttribute returns an attribute by ID.
 func (f *Feature) GetAttribute(id uint16) (*Attribute, error) {
 	f.mu.RLock()

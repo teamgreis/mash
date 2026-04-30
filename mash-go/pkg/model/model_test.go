@@ -327,6 +327,47 @@ func TestFeature(t *testing.T) {
 		}
 	})
 
+	t.Run("RemoveAttribute", func(t *testing.T) {
+		const id uint16 = 0x0099
+		attr := NewAttribute(&AttributeMetadata{
+			ID:     id,
+			Name:   "scratch",
+			Type:   DataTypeInt32,
+			Access: AccessReadOnly,
+		})
+		feature.AddAttribute(attr)
+
+		listed := false
+		for _, listID := range feature.AttributeList() {
+			if listID == id {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			t.Fatalf("expected attribute 0x%04x in attributeList before removal", id)
+		}
+
+		if err := feature.RemoveAttribute(id); err != nil {
+			t.Fatalf("RemoveAttribute returned %v, want nil", err)
+		}
+		if _, err := feature.GetAttribute(id); err != ErrAttributeNotFound {
+			t.Errorf("after RemoveAttribute, GetAttribute returned %v, want ErrAttributeNotFound", err)
+		}
+		for _, listID := range feature.AttributeList() {
+			if listID == id {
+				t.Errorf("attribute 0x%04x still present in attributeList after removal", id)
+			}
+		}
+
+		if err := feature.RemoveAttribute(id); err != ErrAttributeNotFound {
+			t.Errorf("second RemoveAttribute returned %v, want ErrAttributeNotFound", err)
+		}
+		if err := feature.RemoveAttribute(AttrIDFeatureMap); err != ErrFeatureReadOnly {
+			t.Errorf("RemoveAttribute on global ID returned %v, want ErrFeatureReadOnly", err)
+		}
+	})
+
 	t.Run("AddCommand", func(t *testing.T) {
 		cmd := NewCommand(&CommandMetadata{
 			ID:   CmdIDPrimary,
@@ -747,8 +788,8 @@ func TestFeatureTypeString(t *testing.T) {
 		{FeatureStatus, "Status"},
 		{FeatureDeviceInfo, "DeviceInfo"},
 		{FeatureVendorBase, "Vendor"},
-		{FeatureType(0xFF), "Vendor"},   // 0xFF is in vendor range (0x80-0xFF)
-		{FeatureType(0x10), "Unknown"},  // 0x10 is undefined standard feature
+		{FeatureType(0xFF), "Vendor"},  // 0xFF is in vendor range (0x80-0xFF)
+		{FeatureType(0x10), "Unknown"}, // 0x10 is undefined standard feature
 	}
 
 	for _, tt := range tests {
