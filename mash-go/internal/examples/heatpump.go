@@ -95,6 +95,16 @@ func (h *HeatPump) setupHeatPumpEndpoint(cfg HeatPumpConfig) {
 		_ = h.electrical.SetMaxCurrentPerPhase(cfg.MaxCurrentPerPhase)
 	}
 	_ = h.electrical.SetSupportedDirections(features.DirectionConsumption)
+	// Prune Electrical attributes that don't apply to a HeatPump (mirrors
+	// the EVSE pruning for consistency with DEC-051):
+	//   - supportsAsymmetric: per-phase control not implemented
+	//   - energyCapacity: HeatPump has no internal energy store
+	for _, id := range []uint16{
+		features.ElectricalAttrSupportsAsymmetric,
+		features.ElectricalAttrEnergyCapacity,
+	} {
+		_ = h.electrical.Feature.RemoveAttribute(id)
+	}
 	hpEndpoint.AddFeature(h.electrical.Feature)
 
 	// Measurement - real-time telemetry

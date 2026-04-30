@@ -123,6 +123,19 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 		direction = features.DirectionBidirectional
 	}
 	_ = e.electrical.SetSupportedDirections(direction)
+	// Prune Electrical attributes that don't apply to an EVSE. Per
+	// DEC-051 attributeList must reflect actual hardware capability:
+	//   - supportsAsymmetric: per-phase control capability not
+	//     implemented in this simulation (would require per-phase limit
+	//     plumbing on top of the symmetric MaxCurrentPerPhase field)
+	//   - energyCapacity: a battery/storage attribute; EVSE has no
+	//     internal energy store
+	for _, id := range []uint16{
+		features.ElectricalAttrSupportsAsymmetric,
+		features.ElectricalAttrEnergyCapacity,
+	} {
+		_ = e.electrical.Feature.RemoveAttribute(id)
+	}
 	charger.AddFeature(e.electrical.Feature)
 
 	// Measurement - real-time telemetry. NewMeasurement registers the full
