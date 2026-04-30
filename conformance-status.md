@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-29, post-fix, session 5)
+# MASH Conformance Status (2026-04-30, post-fix, session 6)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — five sessions on 2026-04-29 shipped 9 named fixes; Q1 78.8% → 85.5%
+## TL;DR — six sessions shipped 10 named fixes; Q1 78.8% → 86.8%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -44,6 +44,75 @@ the off-diagonals are the real cross-stack interop signal.
   TC-ZONE-001/002/006/007) goes 0/10 → 3/10. The remaining 7 are real
   device-side feature gaps (CONTROLLED→LIMITED transition, SetSetpoint
   resolution, `myConsumptionLimit` per-zone read semantics).
+- **Session 6 (2026-04-30):** F-12 (EVSE Measurement attributeList
+  pruned to spec-correct subset per DEC-051, commit `47d8cba`). The
+  generated `NewMeasurement()` constructor registers all 25+ Measurement
+  attributes; EVSE composed it without subtracting battery- and DC-only
+  attributes (stateOfCharge, powerFactor, dcPower, ...). Auto-PICS
+  picked up the over-advertised set, so tests like TC-MEAS-008 (battery
+  SoC range) and TC-MEAS-009 (power factor bounds) ran on an EVSE that
+  has neither sensor and failed with `<nil>` reads. Added
+  `RemoveAttribute(id)` primitive on `Feature`; EVSE prunes Measurement
+  to its actually-populated subset (acActivePower today). TC-MEAS-008/-009
+  and TC-MEAS-003/-004 flip FAIL → SKIP (the correct outcome — they
+  should never have run on this device). Tightened TC-SUB-001 PICS so
+  it only runs on devices that expose both attributes it asserts on.
+  Q1 307/359 = 85.5% → 308/355 = 86.8%; -4 false failures, +1 PASS,
+  +4 SKIP. Auto-PICS items dropped 645 → 599. Diagnostic lift: the
+  `value_in_range` checker now prints `%T(%v)` for actual/min/max so
+  the next nil-from-device shows up named in the failure log.
+
+### Session 6 findings on the remaining 47 Q1 failures
+
+After F-12, the remaining failures group into four buckets, **most of
+which need infrastructure-depth work, not surgical per-test fixes**:
+
+1. **Failsafe state machine (8-10 tests)** — TC-CTRL-009, TC-FAIL-002,
+   TC-FAIL-008, TC-FAIL-010, TC-STATE-003, TC-STATE-004, TC-FI-007.
+   The pkg/failsafe Timer fires but its `Limits` are never set, the
+   LimitResolver has no failsafe-active branch (only ClearZone path),
+   `handleFailsafe` only flips a boolean, and ControlState never
+   transitions to FAILSAFE. Adding EVSE factory failsafe defaults is
+   one line; the wiring underneath is 2-3 hours touching pkg/failsafe
+   + LimitResolver + EnergyControl + EVSE.
+
+2. **Precondition handlers (~5 tests)** — TC-EVC-S01-001/002/003 fail
+   on `ev_plugged_in: true` precondition that has no handler. The
+   TestControl trigger `TriggerEVPlugIn` exists but only sets state +
+   start time; the rich EV battery telemetry (evStateOfCharge,
+   evBatteryCapacity, evDemandMode, evEnergyRequests) is set in
+   evse.go's `OnPlug` callback path, not in
+   `pkg/service/test_event_handler.go`'s trigger handler. The fix
+   wants either an OnTrigger callback hook in EVSE or duplicating the
+   state setup into the trigger handler. Similar shape to failsafe:
+   primitive trigger exists, but the population side is incomplete.
+
+3. **CONTROLLED → LIMITED transition (~5 tests)** — TC-STATE-002,
+   TC-STATE-015, TC-FAIL-008, TC-ZONE-011. Per the comment in
+   `pkg/features/limit_resolver.go`: "the device application layer is
+   responsible for promoting CONTROLLED → LIMITED when it detects that
+   its operation is actually being curtailed by the limit." Not
+   implemented in EVSE. Needs an EVSE simulation hook that compares
+   current power draw vs. effective limit and promotes state when
+   constrained.
+
+4. **GPL/inverter use cases (~10 tests)** — TC-GPL-S00-*, TC-GPL-S01-*,
+   TC-PODF-S00-*, TC-POEN-S00-*. The EVSE example doesn't implement
+   most of these use cases; tests pass through PICS gating because
+   EVSE registers every feature with the full attribute set, then
+   fail because the values are nil. Same root cause as F-12 in
+   non-Measurement features. Per-feature pruning (Status, Plan,
+   Signals, ChargingSession's session-energy-counter half, etc.)
+   would convert most of these to SKIP. Caveat: ChargingSession
+   attributes like evStateOfCharge are *spec-required* in
+   attributeList per DEC-051 even when null — pruning them would be
+   wrong; those need bucket #2.
+
+5. **Genuine surgical fixes (5-7 tests)** — TC-FRAME-002 (max-size
+   frame parse), TC-MPD-S00-003 (energy counters monotonic),
+   TC-STATUS-011/012 (vendor data + nullable defaults),
+   TC-TESTCTRL-ZONE-001 (NOT_AUTHORIZED vs INVALID_PARAMETER error
+   code mapping). Each ≤30 min likely. Did not pursue this session.
 
 After session 3: all 5 TC-PAIR-* tests pass (was 2/5 mid-session). TC-TRANS-002
 passes back-to-back with TC-TRANS-001 (was: leaked LOCAL zone broke the next
@@ -81,11 +150,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 5 — 2026-04-29)
+## Headline numbers (post-fix, session 6 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 102 | 359 | **307** | 52  | **85.5 %** | After F-10 (TEST-zone harness override for controller-authority tests). Was 305/359 = 85.0% post-session-4. The +3 deterministic gain (TC-CTRL-001, TC-STATE-001, TC-ZONE-001) is masked by 1 unrelated full-corpus TLS-race flake (TC-COMM-004 passes in isolation), netting +2 in the headline. |
+| `mash-test` → Go device     | 461 | 106 | 355 | **308** | 47  | **86.8 %** | After F-12 (EVSE Measurement attributeList pruned to spec-correct subset per DEC-051, commit `47d8cba`). Was 307/359 = 85.5% post-session-5. -4 false failures (TC-MEAS-003/-004/-008/-009 correctly SKIP rather than running on a device with no battery/DC sensors), +1 PASS, +4 SKIP. Auto-PICS items 645 → 599. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
