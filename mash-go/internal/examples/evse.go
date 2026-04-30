@@ -220,6 +220,9 @@ func (e *EVSE) setupCommandHandlers() {
 
 	// Pause handler
 	e.energyControl.OnPause(func(ctx context.Context, req features.PauseRequest) error {
+		if !e.energyControl.IsPausable() {
+			return features.CapabilityUnsupportedError("Pause")
+		}
 		e.mu.Lock()
 		defer e.mu.Unlock()
 
@@ -241,6 +244,9 @@ func (e *EVSE) setupCommandHandlers() {
 	// that drove processState via TestControl rather than the natural
 	// plug-in -> charging path (TC-STATE-009, TC-CTRL-005).
 	e.energyControl.OnResume(func(ctx context.Context) error {
+		if !e.energyControl.IsPausable() {
+			return features.CapabilityUnsupportedError("Resume")
+		}
 		e.mu.Lock()
 		defer e.mu.Unlock()
 
@@ -251,6 +257,9 @@ func (e *EVSE) setupCommandHandlers() {
 
 	// Stop handler
 	e.energyControl.OnStop(func(ctx context.Context) error {
+		if !e.energyControl.IsStoppable() {
+			return features.CapabilityUnsupportedError("Stop")
+		}
 		e.mu.Lock()
 		defer e.mu.Unlock()
 

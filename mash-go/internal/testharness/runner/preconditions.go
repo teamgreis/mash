@@ -85,6 +85,7 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondProcessState:          true,
 	PrecondProcessCapable:        true,
 	PrecondDeviceIsPausable:      true,
+	PrecondDeviceNotPausable:     true,
 	PrecondDeviceIsStoppable:     true,
 	PrecondFailsafeDurationShort: true,
 	// Zone limit/removal simulation.
@@ -177,6 +178,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondProcessState:          precondLevelCommissioned,
 	PrecondProcessCapable:        precondLevelCommissioned,
 	PrecondDeviceIsPausable:      precondLevelCommissioned,
+	PrecondDeviceNotPausable:     precondLevelCommissioned,
 	PrecondDeviceIsStoppable:     precondLevelCommissioned,
 	PrecondFailsafeDurationShort: precondLevelCommissioned,
 

@@ -295,6 +295,11 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 					uint8(features.ControlStateAutonomous))
 				_ = f.SetAttributeInternal(features.EnergyControlAttrProcessState,
 					uint8(features.ProcessStateNone))
+				// Restore capability flags overridden by test triggers.
+				// Hardcoded to the EVSE/HeatPump factory defaults
+				// (both have isPausable=true). If a future device-under-test
+				// has different defaults, this needs a per-device hook.
+				_ = f.SetAttributeInternal(features.EnergyControlAttrIsPausable, true)
 			}
 		}
 		// Remove leaked/partial non-TEST zones.
@@ -581,6 +586,18 @@ func (s *DeviceService) handleEnergyControlTrigger(_ context.Context, trigger ui
 			s.debugLog("trigger: setting process state ABORTED", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
 				uint8(features.ProcessStateAborted))
+
+		// Capability override triggers (test-only). These flip readOnly
+		// capability flags so conformance tests can exercise the
+		// StatusUnsupported reject path on commands gated by the flag.
+		// docs/features/energy-control.md: when isPausable=false, Pause
+		// and Resume MUST surface as wire.StatusUnsupported.
+		case features.TriggerSetIsPausableFalse:
+			s.debugLog("trigger: setting isPausable=false", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrIsPausable, false)
+		case features.TriggerSetIsPausableTrue:
+			s.debugLog("trigger: setting isPausable=true", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrIsPausable, true)
 		default:
 			return &wire.CommandError{
 				Status:  wire.StatusConstraintError,

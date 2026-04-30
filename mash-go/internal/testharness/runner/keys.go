@@ -46,6 +46,7 @@ const (
 	PrecondProcessState        = "process_state"
 	PrecondProcessCapable      = "process_capable"
 	PrecondDeviceIsPausable    = "device_is_pausable"
+	PrecondDeviceNotPausable   = "device_not_pausable"
 	PrecondDeviceIsStoppable   = "device_is_stoppable"
 	PrecondFailsafeDurationShort = "failsafe_duration_short"
 )

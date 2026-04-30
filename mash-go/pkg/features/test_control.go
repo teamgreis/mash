@@ -63,6 +63,16 @@ const (
 	TriggerProcessStatePaused    uint64 = 0x0005_0000_0000_0014
 	TriggerProcessStateCompleted uint64 = 0x0005_0000_0000_0015
 	TriggerProcessStateAborted   uint64 = 0x0005_0000_0000_0016
+
+	// Capability override triggers (test-only). The capability flags
+	// (isPausable, isShiftable, isStoppable) are readOnly attributes
+	// representing static device capabilities; these triggers let the
+	// conformance harness force a specific capability posture so tests
+	// like TC-CTRL-010 can exercise the StatusUnsupported reject path
+	// without spawning a separately configured device. TriggerResetTestState
+	// restores the device's startup default.
+	TriggerSetIsPausableFalse uint64 = 0x0005_0000_0000_0020
+	TriggerSetIsPausableTrue  uint64 = 0x0005_0000_0000_0021
 )
 
 // TriggerDomain extracts the feature domain from a trigger opcode.

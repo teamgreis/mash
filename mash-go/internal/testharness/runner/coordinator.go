@@ -666,6 +666,21 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		setCancel()
 	}
 
+	// Flip isPausable=false on the device when test requires
+	// device_not_pausable. The trigger sets the readOnly capability flag
+	// directly so commands gated on it (Pause/Resume) surface as
+	// wire.StatusUnsupported. TriggerResetTestState restores the EVSE/HP
+	// default of true between tests.
+	if c.config.Target != "" && c.config.EnableKey != "" &&
+		needed >= precondLevelCommissioned &&
+		hasPrecondition(tc.Preconditions, PrecondDeviceNotPausable) {
+		trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
+		if err := c.ops.SendTriggerViaZone(trigCtx, features.TriggerSetIsPausableFalse, state); err != nil {
+			c.debugf("device_not_pausable: SetIsPausableFalse trigger failed: %v (continuing)", err)
+		}
+		trigCancel()
+	}
+
 	// Post-setup: session_previously_connected.
 	if hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected) {
 		c.debugf("session_previously_connected: disconnecting but preserving zone state")

@@ -138,6 +138,9 @@ func (h *HeatPump) setupCommandHandlers() {
 
 	// Pause handler
 	h.energyControl.OnPause(func(ctx context.Context, req features.PauseRequest) error {
+		if !h.energyControl.IsPausable() {
+			return features.CapabilityUnsupportedError("Pause")
+		}
 		h.mu.Lock()
 		defer h.mu.Unlock()
 
@@ -151,6 +154,9 @@ func (h *HeatPump) setupCommandHandlers() {
 
 	// Resume handler
 	h.energyControl.OnResume(func(ctx context.Context) error {
+		if !h.energyControl.IsPausable() {
+			return features.CapabilityUnsupportedError("Resume")
+		}
 		h.mu.Lock()
 		defer h.mu.Unlock()
 

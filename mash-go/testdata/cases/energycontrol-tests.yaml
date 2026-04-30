@@ -550,7 +550,7 @@ steps:
       command: Pause
     expect:
       invoke_success: false
-      error_code: UNSUPPORTED_COMMAND
+      error_code: UNSUPPORTED
 
 postconditions:
   - unsupported_rejected: true
