@@ -272,11 +272,13 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 	case features.TriggerResetTestState:
 		s.debugLog("trigger: resetting test state to defaults")
 		for _, ep := range s.device.Endpoints() {
-			// Reset Status to STANDBY.
+			// Reset Status to STANDBY. faultCode/faultMessage are nullable
+			// ("no fault" maps to null, not zero) so clear them to nil
+			// rather than 0/"".
 			if f, err := ep.GetFeatureByID(uint8(model.FeatureStatus)); err == nil {
 				_ = f.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateStandby))
-				_ = f.SetAttributeInternal(features.StatusAttrFaultCode, uint32(0))
-				_ = f.SetAttributeInternal(features.StatusAttrFaultMessage, "")
+				_ = f.SetAttributeInternal(features.StatusAttrFaultCode, nil)
+				_ = f.SetAttributeInternal(features.StatusAttrFaultMessage, nil)
 			}
 			// Reset Measurement to zero.
 			if f, err := ep.GetFeatureByID(uint8(model.FeatureMeasurement)); err == nil {
@@ -417,8 +419,8 @@ func (s *DeviceService) handleStatusTrigger(_ context.Context, trigger uint64) e
 		case features.TriggerClearFault:
 			s.debugLog("trigger: clearing fault", "endpoint", ep.ID())
 			_ = feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateRunning))
-			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, uint32(0))
-			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, "")
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, nil)
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, nil)
 			return nil
 		case features.TriggerSetStandby:
 			s.debugLog("trigger: setting standby", "endpoint", ep.ID())
