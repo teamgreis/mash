@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 1)
+# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 2)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — eight sessions shipped 18 named fixes; Q1 78.8% → 88.7% (89.0% F-19 baseline; F-20 lands TC-STATUS-011 inside run-to-run noise band)
+## TL;DR — eight sessions shipped 19 named fixes; Q1 78.8% → 89.8% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,51 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 8 batch 2 (2026-04-30):** F-21 (`TriggerEVPlugIn` populates
+  rich EV state + new `each_item_has` checker). Q1 measured **318/36/107
+  = 89.8%** -- +4 PASS / -4 FAIL vs F-20 baseline (314/40/107 = 88.7%).
+  Best measured Q1 to date, exceeds F-19's 89.0%. Headline matches the
+  structural lift (no flake noise this run).
+  - **F-21** -- TC-CHRG-009 ("EV Identification Storage") and
+    TC-EVC-S01-001/002/003 all read EV-side ChargingSession attributes
+    (evIdentifications, evStateOfCharge, evBatteryCapacity,
+    evTargetStateOfCharge) under preconditions `ev_connected: true` /
+    `ev_plugged_in: true`. The precondition silently no-op'd (no handler
+    registered) and `TriggerEVPlugIn` only set chargingState +
+    sessionStartTime, so all four reads returned <nil>. Two-bug shape
+    identical to F-19 / F-20 -- corpus action mutates harness state but
+    the device never hears about it.
+    - **Device side.** `TriggerEVPlugIn` now populates evStateOfCharge=50,
+      evBatteryCapacity=75 kWh (in mWh), evMinStateOfCharge=20,
+      evTargetStateOfCharge=80, evDemandMode=SingleDemand, max/target
+      energy requests derived from SoC, and a single VIN identification
+      (`MASH-TEST-VIN-...`). Mirrors `EVSE.SimulateEVConnect`'s shape so
+      tests using both pathways see consistent state. `TriggerResetTestState`
+      clears all of these to nil to prevent cross-test leakage.
+    - **Runner side.** Added `PrecondEVConnected` + `PrecondEVPluggedIn`
+      (corpus uses both as synonyms; ev-tests.yaml uses `ev_plugged_in`,
+      chargingsession-tests.yaml uses `ev_connected`). Registered at
+      `precondLevelCommissioned` with simulation-key entries. Coordinator
+      dispatches `TriggerEVPlugIn` via `SendTriggerViaZone` after
+      commissioning when either precondition is present.
+    - **Engine side.** Added `CheckerEachItemHas` backing the corpus's
+      `each_item_has: [type, value]` shape used by TC-CHRG-009 step 2.
+      Handles both Go-native (`map[string]any`) and CBOR-decoded
+      (`map[interface{}]interface{}`) item types -- the latter is what
+      comes back over the wire after CBOR decoding.
+    - **Net structural lift = 4 tests** (TC-CHRG-009 + TC-EVC-S01-001/002/003).
+      Two run-to-run flakes flipped (TC-TESTCTRL-ZONE-001 lifted,
+      TC-ZONE-010 newly failing) -- both PASS in isolation, so they're
+      pre-existing zone-state-cross-contamination defects surfacing
+      only in the full ordered corpus, not F-21 regressions.
+    - **Out of scope.** TC-CHRG-004 step 2 still fails on a separate
+      `conditional_read` corpus/handler defect: the handler returns
+      `read_success: false` when the condition is not met, but the
+      corpus expects success unconditionally. Fixing this requires
+      either a corpus shape change (`expect_when_condition_true: ...`)
+      or richer engine semantics where the condition controls expect
+      evaluation, not just the read. Filed for a future surgical fix.
 
 - **Session 8 batch 1 (2026-04-30):** F-20 (`set_state_detail`
   device_local_action wires through to the device via a new
@@ -360,11 +405,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 8 batch 1 — 2026-04-30)
+## Headline numbers (post-fix, session 8 batch 2 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 107 | 354 | **314** | 40  | **88.7 %** *(measured)* | After F-20 (set_state_detail wires to device via new TriggerSetStateDetailBase opcode). TC-STATUS-011 flipped FAIL -> PASS as the local lift; two unrelated timing-margin tests flipped PASS -> FAIL (run-to-run noise, identical band F-18 documents). Net headline -1 PASS / +1 FAIL vs F-19 baseline (315/39/107 = 89.0%); same headline as F-18 baseline (314/40/107). Structural conformance gains a test relative to either prior baseline. |
+| `mash-test` → Go device     | 461 | 107 | 354 | **318** | 36  | **89.8 %** *(measured)* | After F-21 (TriggerEVPlugIn populates rich EV state + new each_item_has checker). Net structural lift = 4 tests: TC-CHRG-009 (the target) + TC-EVC-S01-001/002/003 (free wins from extending precondition wiring to corpus's `ev_plugged_in` synonym + adding evMin/TargetStateOfCharge to plug-in setup). +4 PASS / -4 FAIL vs F-20 baseline (314/40/107 = 88.7%). Best measured Q1 to date; exceeds F-19's 89.0%. Two run-to-run flakes flipped (TC-TESTCTRL-ZONE-001 lifted, TC-ZONE-010 newly failing) -- both PASS in isolation, so they're pre-existing zone-state-cross-contamination defects surfacing only in the full ordered corpus. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
