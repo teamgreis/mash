@@ -179,8 +179,30 @@ steps:
         consumptionLimit: -1000000  # Invalid: consumption should be positive
         cause: 3
     expect:
-      invoke_success: false
-      error_code: INVALID_PARAMETER
+      # Per spec, the device returns wire-level SUCCESS with the
+      # SetLimit response carrying applied=false + rejectReason
+      # (LimitRejectReasonInvalidValue = 0x02). The harness used to
+      # collapse applied=false into invoke_success=false but that
+      # conflated wire-level and app-level outcomes; F-25 made
+      # invoke_success match wire.IsSuccess() only.
+      invoke_success: true
+      response_contains:
+        - applied
+        - rejectReason
+
+  - name: Verify applied is false
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: false
+
+  - name: Verify rejectReason is InvalidValue
+    action: check_response
+    params:
+      field: rejectReason
+    expect:
+      value: 2                       # LimitRejectReasonInvalidValue
 
 postconditions:
   - invalid_parameter_rejected: true

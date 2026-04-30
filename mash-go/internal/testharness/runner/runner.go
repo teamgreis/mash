@@ -1976,37 +1976,28 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 	return outputs, nil
 }
 
-// flattenInvokeResponse extracts well-known keys from an invoke response
-// payload and merges them into the output map. This enables:
-//   - response_contains checker to find keys by name
-//   - Detection of "applied: false" as invoke failure
-//   - Extraction of rejectReason as error_code
-func flattenInvokeResponse(payload any, outputs map[string]any) {
-	var m map[string]any
-	switch p := payload.(type) {
-	case map[string]any:
-		m = p
-	case map[any]any:
-		m = make(map[string]any, len(p))
-		for k, v := range p {
-			m[fmt.Sprintf("%v", k)] = v
-		}
-	default:
-		return
-	}
-
-	// Check "applied" field: if explicitly false, override invoke_success.
-	if applied, ok := m["applied"]; ok {
-		if applied == false {
-			outputs[KeyInvokeSuccess] = false
-			// Extract rejectReason as error_code if present.
-			if reason, hasReason := m["rejectReason"]; hasReason {
-				outputs[KeyErrorCode] = rejectReasonToErrorCode(reason)
-				outputs[KeyErrorStatus] = outputs[KeyErrorCode]
-			}
-		}
-	}
-}
+// flattenInvokeResponse is a no-op kept for callers' convenience.
+//
+// Historically this function overrode `invoke_success` to false when the
+// response payload had `applied: false`, so corpus tests expecting an
+// invoke command's app-level rejection could match `invoke_success:
+// false` like a wire-level rejection. That conflated two distinct
+// concepts:
+//
+//   - wire-level success: the device parsed the command and returned a
+//     SUCCESS status code (resp.IsSuccess()). Reflected by
+//     `invoke_success`.
+//   - app-level success: the command was processed AND took effect
+//     (`response.applied == true`). Tests should check this via the
+//     F-24 `check_response field: applied` pattern.
+//
+// Conflating them broke TC-GPL-011, which sends a negative limit and
+// expects wire-level success + applied=false (the LimitResolver rejects
+// with rejectReason=InvalidValue). Removing the override now matches
+// `wire.IsSuccess()` semantics. TC-ERR-005, the only corpus test that
+// depended on the override, was updated in the same change to use the
+// `check_response field: applied / rejectReason` pattern.
+func flattenInvokeResponse(payload any, outputs map[string]any) {}
 
 // Utility handlers
 func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
@@ -2444,43 +2435,6 @@ func isInvalidTestCert(certType string) bool {
 		return true
 	}
 	return false
-}
-
-// rejectReasonToErrorCode maps an invoke response rejectReason value to
-// a wire-level error code string. The reject reason is typically a uint8
-// or uint64 from CBOR decoding.
-func rejectReasonToErrorCode(reason any) string {
-	var code uint8
-	switch v := reason.(type) {
-	case uint64:
-		code = uint8(v)
-	case uint8:
-		code = v
-	case int:
-		code = uint8(v)
-	case int64:
-		code = uint8(v)
-	case float64:
-		code = uint8(v)
-	default:
-		return fmt.Sprintf("%v", reason)
-	}
-
-	// Map LimitRejectReason values to test-expected error codes.
-	switch code {
-	case 0x00: // BelowMinimum
-		return "BELOW_MINIMUM"
-	case 0x01: // AboveContractual
-		return "ABOVE_CONTRACTUAL"
-	case 0x02: // InvalidValue
-		return "INVALID_PARAMETER"
-	case 0x03: // DeviceOverride
-		return "DEVICE_OVERRIDE"
-	case 0x04: // NotSupported
-		return "UNSUPPORTED_COMMAND"
-	default:
-		return fmt.Sprintf("REJECT_%d", code)
-	}
 }
 
 func classifyConnectError(err error) string {
