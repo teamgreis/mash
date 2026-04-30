@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 6 batch 3)
+# MASH Conformance Status (2026-04-30, post-fix, session 7)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — six sessions shipped 15 named fixes; Q1 78.8% → 87.9%
+## TL;DR — seven sessions shipped 16 named fixes; Q1 78.8% → 88.7%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,68 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 7 (2026-04-30):** F-18 (`device_not_pausable: true`
+  precondition handler + EVSE/HeatPump capability gate on Pause / Resume /
+  Stop). Q1 measured 314/40/107 = **88.7%** -- +4 PASS / -4 FAIL vs the
+  F-17 measured baseline (310/44/107 = 87.6%). TC-CTRL-010 lifted by F-18;
+  the other three PASSes are TC-COMM-004 (TLS-race flake didn't recur this
+  run) and the same kind of run-to-run noise on tests near the timing
+  margin. Headline reading: F-18 lifts TC-CTRL-010 and the corpus is
+  otherwise stable.
+  - **F-18** -- TC-CTRL-010 ("Command to Unsupported Capability Fails")
+    asserts that on a device with `isPausable=false`, the `Pause` command
+    is rejected with `error_code: UNSUPPORTED_COMMAND`. Two-layer fix:
+    - **Production layer.** Per
+      `docs/features/energy-control.md`: "A device that ... leaves
+      isPausable = false ... [its] process lifecycle commands are
+      ignored ... the controller-facing response surfaces as
+      `wire.StatusUnsupported`." Before this fix, `EnergyControl.handlePause`
+      delegated unconditionally to the EVSE's `OnPause` callback, which
+      did the work and returned nil error -- so the device replied
+      `Status: SUCCESS, applied: false` regardless of the capability flag,
+      which is wrong per the spec. Added `features.CapabilityUnsupportedError`
+      hand-written helper in `pkg/features/energy_control.go` that returns
+      `&wire.CommandError{Status: wire.StatusUnsupported}`. EVSE and
+      HeatPump `OnPause`/`OnResume`/`OnStop` callbacks now check the
+      relevant capability flag (`IsPausable`/`IsStoppable`) and return
+      this error when the flag is false. The dispatcher
+      (`pkg/service/dispatch/protocol_handler.go`) was already extracting
+      `CommandError.Status` correctly via `errors.As`, so no dispatcher
+      change was needed.
+    - **Test infrastructure layer.** Added two new TestControl triggers
+      (`TriggerSetIsPausableFalse` / `True` at opcode `0x0005_0000_0000_0020/21`)
+      that flip the readOnly `isPausable` capability at runtime via
+      `SetAttributeInternal`. `TriggerResetTestState` was extended to
+      restore the EVSE/HP factory default of `isPausable=true` so the
+      override doesn't leak into subsequent tests. Added
+      `PrecondDeviceNotPausable = "device_not_pausable"` constant +
+      simulation/level entries. Coordinator dispatches the trigger via
+      the existing `SendTriggerViaZone` plumbing (no new WireOps method
+      needed -- the trigger is just another opcode that
+      `handleEnergyControlTrigger` recognizes).
+    - **Corpus alignment.** TC-CTRL-010 expected
+      `error_code: UNSUPPORTED_COMMAND`, but `wire.Status(10).String()`
+      returns `"UNSUPPORTED"` (no Matter-style `_COMMAND` suffix). Other
+      corpus tests (e.g. `bidirectional-no-features.yaml`) already use
+      `UNSUPPORTED`. Aligned the test to the canonical wire string.
+    - **Architectural caveat.** This session uses Option B (per-callback
+      gate via the helper). Long-term Option C is the
+      generator-emitted gate keyed off a `requires_attribute` YAML field
+      in `RawCommandDef`, which would centralize the pattern at the
+      `handlePause`/`handleResume`/`handleStop` level for all current
+      and future devices. Filed mentally for the eventual cleanup; not
+      blocking on it because the only consumers today are EVSE and
+      HeatPump and both are now consistent.
+    - **Reset assumption.** `TriggerResetTestState` hardcodes the
+      isPausable restore value to `true`, which is correct for EVSE and
+      HeatPump but assumes those are the only devices-under-test. If a
+      genuinely non-pausable example device is added later, this needs
+      a per-device "factory defaults" hook. TC-CTRL-010 PASS in
+      isolation (9ms), warmup (CTRL-002, GPL-012, FRAME-002, CTRL-010)
+      4/4 PASS, full Q1 314/40/107 = 88.7%. Pre-existing TC-CTRL-* PASS
+      (-001/-002/-004/-005/-006) and SKIP (-007/-008/-011/-012)
+      outcomes unchanged.
 
 - **Session 6 batch 3 (2026-04-30):** F-17 (`limit_is_set: true`
   precondition handler). Q1 measured 310/44/107 = 87.6% — same headline
@@ -220,11 +282,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 6 batch 2 — 2026-04-30)
+## Headline numbers (post-fix, session 7 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 107 | 354 | **311** | 43  | **~87.9 %** *(projected)* | After F-16 (value_type logical-match, commit `25c37b0`). The full Q1 wasn't re-run after F-16; the post-F-15 measured baseline was 310/44/107 = 87.6%, F-16 lifts TC-GPL-012 from FAIL -> PASS for a projected 311/43/107. Net session 6 vs session 5: +4 PASS / -9 FAIL / +5 SKIP / +2.4 pp pass rate. |
+| `mash-test` → Go device     | 461 | 107 | 354 | **314** | 40  | **88.7 %** *(measured)* | After F-18 (capability gate + device_not_pausable handler, session 7). +4 PASS / -4 FAIL vs F-17 measured baseline (310/44/107). TC-CTRL-010 lifted by F-18; the other three flips are TC-COMM-004 (TLS-race flake didn't recur) and run-to-run noise on timing-margin tests. Net session 7 vs session 6 batch 3: +4 PASS / -4 FAIL / +1.1 pp pass rate. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
