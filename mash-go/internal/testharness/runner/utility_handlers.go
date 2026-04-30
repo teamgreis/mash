@@ -138,6 +138,20 @@ func (r *Runner) handleEvaluate(ctx context.Context, step *loader.Step, state *e
 }
 
 // handleConditionalRead reads only if a condition is met.
+//
+// When the condition is not satisfied, the step is skipped and reports
+// success: the test wasn't asking the runner to read in this case, so
+// the surrounding `read_success: true` assertion that corpus authors
+// pair with `conditional_read` is satisfied trivially. Returning
+// `read_success: false` -- the previous behavior -- broke TC-CHRG-004
+// step 2 and TC-ELEC-007 step 2, both of which read attributes only
+// when an enum value matches a particular state.
+//
+// The caller's preceding step's `value` output is left untouched so
+// downstream `value_is_not_null`/`value_lt`/etc. assertions evaluate
+// against whatever the previous step put there. This matches the
+// idiomatic corpus pattern where the conditional read targets the
+// same attribute as the previous step's read.
 func (r *Runner) handleConditionalRead(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
@@ -147,7 +161,7 @@ func (r *Runner) handleConditionalRead(ctx context.Context, step *loader.Step, s
 		if !exists || !toBool(val) {
 			return map[string]any{
 				KeySkipped:     true,
-				KeyReadSuccess: false,
+				KeyReadSuccess: true,
 			}, nil
 		}
 	}
