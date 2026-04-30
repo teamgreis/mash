@@ -473,7 +473,7 @@ description: |
 
 pics_requirements:
   - MASH.S.UC.GPL
-  - MASH.S.UC.GPL.S00
+  - MASH.S.UC.GPL.S02            # PRODUCTION scenario per docs/usecases/1.0/gpl.yaml
 
 preconditions:
   - session_established: true
@@ -531,7 +531,7 @@ description: |
 
 pics_requirements:
   - MASH.S.UC.GPL
-  - MASH.S.UC.GPL.S00
+  - MASH.S.UC.GPL.S02            # PRODUCTION scenario per docs/usecases/1.0/gpl.yaml
 
 preconditions:
   - session_established: true
@@ -576,7 +576,7 @@ description: |
 
 pics_requirements:
   - MASH.S.UC.GPL
-  - MASH.S.UC.GPL.S00
+  - MASH.S.UC.GPL.S02            # PRODUCTION scenario per docs/usecases/1.0/gpl.yaml
 
 preconditions:
   - session_established: true
