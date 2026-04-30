@@ -702,6 +702,10 @@ func normalizeChangesMap(v any) map[uint16]any {
 // handleWaitReport waits for a subscription priming report.
 // If the subscribe response already included priming data (current values),
 // that counts as a received report without waiting for a notification frame.
+//
+// When `attribute` is provided, the named attribute's value is extracted
+// from the priming/report data and exposed as the standard `value` output
+// so downstream value_is_not_null/value_gt/etc. checkers can fire.
 func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
@@ -717,10 +721,12 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 	// (current values in SubscribeResponsePayload key 2). If so, treat
 	// that as a received report without waiting for a wire notification.
 	if primingData, ok := state.Get("_priming_data"); ok && primingData != nil {
-		return map[string]any{
+		out := map[string]any{
 			KeyReportReceived: true,
 			KeyReportData:     primingData,
-		}, nil
+		}
+		populateReportAttributeValue(r, params, primingData, out)
+		return out, nil
 	}
 
 	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
@@ -869,6 +875,25 @@ func toFloat(v any) float64 {
 		return float64(val)
 	default:
 		return 0
+	}
+}
+
+// populateReportAttributeValue extracts the named attribute's value from a
+// subscribe priming/notification payload and writes it to out["value"] so
+// downstream value_is_not_null/value_gt/etc. checkers can evaluate it.
+// Silently no-ops if `attribute` isn't provided or can't be resolved --
+// the bare `report_received` assertion is the legacy contract and must
+// still work for tests that don't name a specific attribute.
+func populateReportAttributeValue(r *Runner, params map[string]any, reportData any, out map[string]any) {
+	if _, hasAttr := params[ParamAttribute]; !hasAttr {
+		return
+	}
+	attrID, err := r.resolver.ResolveAttribute(params[KeyFeature], params[ParamAttribute])
+	if err != nil {
+		return
+	}
+	if v, ok := extractAttributeValue(reportData, attrID); ok {
+		out[KeyValue] = v
 	}
 }
 
