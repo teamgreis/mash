@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 6 batch 2)
+# MASH Conformance Status (2026-04-30, post-fix, session 6 batch 3)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — six sessions shipped 14 named fixes; Q1 78.8% → 87.9%
+## TL;DR — six sessions shipped 15 named fixes; Q1 78.8% → 87.9%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,31 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 6 batch 3 (2026-04-30):** F-17 (`limit_is_set: true`
+  precondition handler). Q1 measured 310/44/107 = 87.6% — same headline
+  as the pre-F-17 measured baseline, because TC-CTRL-002 went FAIL→PASS
+  (real lift) at the same time TC-COMM-004 hit its known full-corpus
+  TLS-race flake (`commissioning dial failed: remote error: tls:
+  internal error`, documented session 5). Without that flake the run
+  would land at 311/43/107 = 87.9%, matching the F-16 projection plus
+  this fix.
+  - **F-17** -- TC-CTRL-002 (ClearLimit Removes Limit) reads
+    `myConsumptionLimit` in step 1 and asserts `value_is_not_null:
+    true`, but `limit_is_set: true` had no precondition handler — the
+    LOCAL session was freshly commissioned with no calling-zone limit
+    set, so step 1 read null. Added `PrecondLimitIsSet` constant +
+    simulation/level entries, plus a `sendSetLimitInvoke` helper that
+    fires SetLimit (consumption=7 kW, cause=LocalOptimization) on
+    `pool.Main()`. Coordinator dispatches it after the
+    `testCaseNeedsControllerAuthority` LOCAL-zone swap (F-10) so the
+    limit lands on the calling zone. Also extended
+    `testCaseNeedsControllerAuthority` to detect the
+    precondition itself, so a future test using only `limit_is_set`
+    (without an authority command) still gets routed to LOCAL.
+    TC-CTRL-002 PASS in isolation (51ms) and full corpus (180ms);
+    TC-CTRL-001 / -004 / -005 / -006 still PASS, no new regressions in
+    the TC-CTRL-* group.
 
 - **Session 6 batch 1 (2026-04-30):** F-12 (EVSE Measurement
   attributeList pruned to spec-correct subset per DEC-051, commit
