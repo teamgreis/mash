@@ -70,3 +70,18 @@ const (
 func TriggerDomain(trigger uint64) uint16 {
 	return uint16(trigger >> 48)
 }
+
+// Manual TestControl command IDs and parameter IDs that aren't generated
+// from the YAML spec (diagnostic/test-only commands). These live alongside
+// the trigger constants so both pkg/service (handler registration) and
+// internal/inspect (name<->ID translation) can reference them without
+// import cycles.
+const (
+	// TestControlCmdGetTestState is the diagnostic command that returns a
+	// device state snapshot for cross-test leak detection.
+	TestControlCmdGetTestState uint8 = 3
+
+	// GetTestStateParamEnableKey is the only parameter on getTestState
+	// (CBOR integer key per docs/interaction-model.md §7.1).
+	GetTestStateParamEnableKey uint8 = 1
+)

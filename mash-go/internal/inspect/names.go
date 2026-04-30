@@ -40,7 +40,22 @@ func init() {
 	attributeNames[uint8(model.FeatureDeviceInfo)]["endpointList"] = features.DeviceInfoAttrEndpoints
 	attributeNames[uint8(model.FeatureSignals)]["schedule"] = features.SignalsAttrPriceSlots
 	// getTestState is added manually in DeviceService (not generated).
-	commandNames[uint8(model.FeatureTestControl)]["getTestState"] = 3
+	commandNames[uint8(model.FeatureTestControl)]["getTestState"] = features.TestControlCmdGetTestState
+
+	// getTestState's enableKey parameter mapping. Without this, the runner's
+	// invoke_as_zone -> ConvertCommandParams sees no schema for cmd=3 and
+	// passes the YAML's string-keyed args through unchanged; the device's
+	// validateParameters then rejects with InvalidParameter before the
+	// requireTestZone check can return NotAuthorized. Bug surfaced by
+	// TC-TESTCTRL-ZONE-001 (expected NOT_AUTHORIZED, got INVALID_PARAMETER).
+	tcGetTestState, ok := commandParamNames[uint8(model.FeatureTestControl)]
+	if !ok {
+		tcGetTestState = map[uint8]map[string]uint8{}
+		commandParamNames[uint8(model.FeatureTestControl)] = tcGetTestState
+	}
+	tcGetTestState[features.TestControlCmdGetTestState] = map[string]uint8{
+		"enableKey": features.GetTestStateParamEnableKey,
+	}
 }
 
 // ResolveEndpointName resolves an endpoint name to its ID (case-insensitive).
