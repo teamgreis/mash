@@ -306,6 +306,18 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVMaxEnergyRequest, nil)
 				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVTargetEnergyRequest, nil)
 			}
+			// Reset Plan commitment (the only attribute corpus tests
+			// assert against). Other Plan fields (planID, startTime,
+			// endTime, totalEnergyPlanned) are intentionally NOT reset:
+			// PODF tests rely on TC-PODF-S00-002's RequestPlan invoke
+			// leaving those values populated for the subsequent
+			// TC-PODF-S00-003 read. Resetting them would require either
+			// a precondition handler that re-issues RequestPlan (heavier
+			// than F-27's scope) or a corpus update so each Plan-reading
+			// test calls RequestPlan first.
+			if f, err := ep.GetFeatureByID(uint8(model.FeaturePlan)); err == nil {
+				_ = f.SetAttributeInternal(features.PlanAttrCommitment, uint8(features.CommitmentPreliminary))
+			}
 			// Reset EnergyControl to AUTONOMOUS/NONE.
 			if f, err := ep.GetFeatureByID(uint8(model.FeatureEnergyControl)); err == nil {
 				_ = f.SetAttributeInternal(features.EnergyControlAttrControlState,

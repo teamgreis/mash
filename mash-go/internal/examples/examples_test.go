@@ -741,17 +741,18 @@ func TestCEM_RequestAndAcceptPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RequestPlan failed: %v", err)
 	}
-	// The EVSE handler returns current planID (defaults to 0)
-	if planID != 0 {
-		t.Errorf("expected planID 0, got %d", planID)
+	// The EVSE handler synthesizes a plan with id=1 on every RequestPlan
+	// (per F-27, so PODF/EVC-S04 conformance tests see populated plan
+	// attributes after invoke).
+	if planID != 1 {
+		t.Errorf("expected planID 1, got %d", planID)
 	}
 
-	// Accept plan
+	// Accept plan -- the EVSE handler advances commitment unconditionally.
 	commitment, err := cem.AcceptPlan(ctx, "PEN12345.EVSE-001", 1, planID)
 	if err != nil {
 		t.Fatalf("AcceptPlan failed: %v", err)
 	}
-	// The EVSE handler commits the plan when IDs match
 	if commitment != features.CommitmentCommitted {
 		t.Errorf("expected COMMITTED, got %s", commitment)
 	}
