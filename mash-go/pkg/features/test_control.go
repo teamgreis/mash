@@ -25,6 +25,12 @@ const (
 	TriggerClearFault uint64 = 0x0002_0000_0000_0002
 	TriggerSetStandby uint64 = 0x0002_0000_0000_0003
 	TriggerSetRunning uint64 = 0x0002_0000_0000_0004
+
+	// TriggerFaultWithCodeBase encodes a vendor-supplied faultCode in the
+	// lower 32 bits, distinct from the bare TriggerFault which always
+	// uses faultCode=1.
+	// Usage: TriggerFaultWithCodeBase | uint64(faultCode)
+	TriggerFaultWithCodeBase uint64 = 0x0002_0001_0000_0000
 )
 
 // Measurement triggers (domain 0x0004 = Measurement).

@@ -414,23 +414,30 @@ func (s *DeviceService) handleStatusTrigger(_ context.Context, trigger uint64) e
 			continue
 		}
 
-		switch trigger {
-		case features.TriggerFault:
+		switch {
+		case trigger == features.TriggerFault:
 			s.debugLog("trigger: setting fault state", "endpoint", ep.ID())
 			_ = feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateFault))
 			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, uint32(1))
 			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, "Test trigger fault")
 			return nil
-		case features.TriggerClearFault:
+		case trigger&0xFFFF_FFFF_0000_0000 == features.TriggerFaultWithCodeBase:
+			faultCode := uint32(trigger & 0xFFFF_FFFF)
+			s.debugLog("trigger: setting fault state with code", "faultCode", faultCode, "endpoint", ep.ID())
+			_ = feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateFault))
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, faultCode)
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, "Test trigger fault")
+			return nil
+		case trigger == features.TriggerClearFault:
 			s.debugLog("trigger: clearing fault", "endpoint", ep.ID())
 			_ = feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateRunning))
 			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, nil)
 			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, nil)
 			return nil
-		case features.TriggerSetStandby:
+		case trigger == features.TriggerSetStandby:
 			s.debugLog("trigger: setting standby", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateStandby))
-		case features.TriggerSetRunning:
+		case trigger == features.TriggerSetRunning:
 			s.debugLog("trigger: setting running", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateRunning))
 		default:

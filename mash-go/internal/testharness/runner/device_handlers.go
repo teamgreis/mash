@@ -338,16 +338,54 @@ func (r *Runner) handleDeviceSetValuesRapid(ctx context.Context, step *loader.St
 }
 
 // handleDeviceTrigger triggers a device event.
+//
+// The corpus uses a small set of named events under
+// `params.trigger`. When running against a real device, known events
+// are mapped to a TestControl trigger opcode and dispatched via
+// SendTriggerViaZone so the device actually transitions state. Unknown
+// events fall through to the no-op behavior (record the event name
+// and report triggered=true) so corpus entries that haven't been
+// wired here don't error out — they just fail at the next assertion
+// step the way they would have before.
 func (r *Runner) handleDeviceTrigger(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	event, _ := params[KeyEvent].(string)
+	// The corpus inconsistently uses "trigger" or "event" for the event
+	// name. Accept both.
+	event, _ := params["trigger"].(string)
+	if event == "" {
+		event, _ = params[KeyEvent].(string)
+	}
 	state.Set(StateLastTrigger, event)
+
+	if r.config.Target != "" {
+		if opcode, ok := deviceTriggerOpcode(event, params); ok {
+			if err := r.sendTriggerViaZone(ctx, opcode, state); err != nil {
+				return nil, fmt.Errorf("device_trigger %q: %w", event, err)
+			}
+		}
+	}
 
 	return map[string]any{
 		KeyTriggered: true,
 		KeyEventType: event,
 	}, nil
+}
+
+// deviceTriggerOpcode maps a named device_trigger event to a TestControl
+// trigger opcode. The bool return indicates whether the event is known;
+// callers fall back to the no-op behavior for unknown events.
+func deviceTriggerOpcode(event string, params map[string]any) (uint64, bool) {
+	switch event {
+	case "enter_fault":
+		// Parameterized: encode faultCode (default 1) into the opcode so
+		// the device populates the attribute with the test-supplied value.
+		code := uint32(paramInt(params, "faultCode", 1))
+		return features.TriggerFaultWithCodeBase | uint64(code), true
+	case "clear_fault":
+		return features.TriggerClearFault, true
+	}
+	return 0, false
 }
 
 // handleConfigureDevice configures the device model.
