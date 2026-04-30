@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 7)
+# MASH Conformance Status (2026-04-30, post-fix, session 7 batch 2)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — seven sessions shipped 16 named fixes; Q1 78.8% → 88.7%
+## TL;DR — seven sessions shipped 17 named fixes; Q1 78.8% → 89.0%
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,42 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 7 batch 2 (2026-04-30):** F-19 (`device_trigger` action wires
+  `enter_fault` to a parameterized `TriggerFaultWithCodeBase` opcode).
+  Q1 measured 315/39/107 = **89.0%** -- +1 PASS / -1 FAIL vs F-18
+  baseline (314/40/107 = 88.7%). Single clean lift, no collateral
+  changes.
+  - **F-19** -- TC-MPD-S02-002 ("Fault State Includes faultCode")
+    failed at step 2 with `operatingState expected 7, got 2` because
+    step 1's `device_trigger { trigger: enter_fault, faultCode: 42 }`
+    was a complete no-op against real devices. Two-bug surface:
+    - **Runner side.** `handleDeviceTrigger` only recorded the event
+      name in execution state and returned `triggered: true` without
+      ever sending a wire trigger -- distinct from `handleTriggerFault`
+      (the `trigger_fault` action handler) which already dispatched
+      `features.TriggerFault`. The corpus mixes both action shapes;
+      `device_trigger` is the parameterized form. Added an
+      event->opcode lookup (`deviceTriggerOpcode`) and dispatched via
+      `sendTriggerViaZone` when running against a real device.
+      Unknown events (`enter_override` / `exit_override` /
+      `simulate_failsafe_timeout` -- four other corpus usages) keep
+      the no-op fallback so this fix doesn't silently change other
+      tests' outcomes.
+    - **Device side.** `TriggerFault` hardcoded `faultCode = uint32(1)`,
+      so even if the trigger had fired, step 3's `expect: value: 42`
+      would have failed too. Added `TriggerFaultWithCodeBase =
+      0x0002_0001_0000_0000` (mirrors the `TriggerSetPowerCustomBase`
+      pattern in the Measurement domain), encoded the faultCode in
+      the lower 32 bits. `handleStatusTrigger` decodes via the same
+      `trigger&0xFFFF_FFFF_0000_0000 == base` mask used in the
+      Measurement helper. The bare `TriggerFault` opcode is preserved
+      for backward compatibility.
+    - **Corpus.** No corpus changes needed. The test asserted on the
+      symptoms; the fix is entirely on the implementation side.
+    - TC-MPD-S02-002 PASS in isolation (9ms). Full Q1 315/39/107 =
+      89.0%. Slice retest (TC-MPD-* + TC-STATUS-*) clean: 9 PASS
+      / 1 FAIL (TC-STATUS-011, separate bucket) / 9 SKIP.
 
 - **Session 7 (2026-04-30):** F-18 (`device_not_pausable: true`
   precondition handler + EVSE/HeatPump capability gate on Pause / Resume /
@@ -282,11 +318,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 7 — 2026-04-30)
+## Headline numbers (post-fix, session 7 batch 2 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 107 | 354 | **314** | 40  | **88.7 %** *(measured)* | After F-18 (capability gate + device_not_pausable handler, session 7). +4 PASS / -4 FAIL vs F-17 measured baseline (310/44/107). TC-CTRL-010 lifted by F-18; the other three flips are TC-COMM-004 (TLS-race flake didn't recur) and run-to-run noise on timing-margin tests. Net session 7 vs session 6 batch 3: +4 PASS / -4 FAIL / +1.1 pp pass rate. |
+| `mash-test` → Go device     | 461 | 107 | 354 | **315** | 39  | **89.0 %** *(measured)* | After F-19 (device_trigger enter_fault dispatch + parameterized faultCode, session 7 batch 2). +1 PASS / -1 FAIL vs F-18 measured baseline (314/40/107 = 88.7%). Clean single-test lift: TC-MPD-S02-002 flipped FAIL -> PASS. Net session 7 (both batches) vs session 6 batch 3: +5 PASS / -5 FAIL / +1.4 pp pass rate. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
