@@ -151,10 +151,12 @@ items:
   # Mandatory
   MASH.S.E01.MEAS.A01: true        # acActivePower
 
-  # Recommended
-  MASH.S.E01.MEAS.A14: true        # acCurrentPerPhase
-  MASH.S.E01.MEAS.A15: true        # acVoltagePerPhase
-  MASH.S.E01.MEAS.A1E: true        # acEnergyConsumed
+  # Recommended attributes (per endpoint-conformance.yaml EV_CHARGER profile)
+  # are intentionally omitted: the reference EVSE simulation populates only
+  # acActivePower today, so per DEC-051 (attributeList reflects hardware
+  # capabilities) it does not advertise per-phase or cumulative-energy attrs.
+  # Add them here -- and back into the runtime feature in
+  # internal/examples/evse.go -- when the simulation populates them.
 
   # ==========================================================================
   # ChargingSession (CHRG) Attributes

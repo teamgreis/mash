@@ -97,6 +97,7 @@ description: |
 pics_requirements:
   - MASH.S.UC.MPD
   - MASH.S.UC.MPD.S00
+  - MASH.S.MEAS.A1E              # acEnergyConsumed (asserted in read steps)
 
 preconditions:
   - session_established: true

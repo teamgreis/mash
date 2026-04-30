@@ -22,7 +22,7 @@ type ClientConfig struct {
 	// verification is skipped (security comes from SPAKE2+).
 	CommissioningMode bool
 
-	// MaxMessageSize is the maximum message size (default: 64KB).
+	// MaxMessageSize is the maximum message size (default: 8 KB per DEC-069).
 	MaxMessageSize uint32
 
 	// ConnectTimeout is the connection timeout (default: 30s).

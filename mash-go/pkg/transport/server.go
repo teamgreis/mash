@@ -25,7 +25,7 @@ type ServerConfig struct {
 	// RequireClientCert requires clients to present a valid certificate.
 	RequireClientCert bool
 
-	// MaxMessageSize is the maximum message size (default: 64KB).
+	// MaxMessageSize is the maximum message size (default: 8 KB per DEC-069).
 	MaxMessageSize uint32
 
 	// Logger for protocol logging (optional).

@@ -4,7 +4,7 @@
 # Spec: docs/testing/behavior/message-framing.md
 #
 # Key concepts:
-# - 4-byte big-endian length prefix, max 65536 bytes
+# - 4-byte big-endian length prefix, max 8192 bytes (DEC-069)
 # - CBOR encoding with integer keys
 # - Unknown keys ignored (forward compatibility)
 # - Duplicate keys invalid; NaN/Infinity invalid
@@ -276,7 +276,7 @@ description: |
   is parsed successfully.
 
 pics_requirements:
-  - MASH.S.FRAME.MAX_SIZE=65536
+  - MASH.S.FRAME.MAX_SIZE=8192
   - MASH.S.FRAME.LENGTH_BYTES=4
 
 preconditions:
@@ -303,15 +303,15 @@ tags:
   - basic
 
 ---
-# TC-FRAME-002: Valid Large Message (64KB) Parses
+# TC-FRAME-002: Valid Maximum Size Message Frame Parses
 id: TC-FRAME-002
 name: Valid Maximum Size Message Frame Parses
 description: |
-  Verifies that a message at the maximum size (65536 bytes) is
-  parsed successfully.
+  Verifies that a message at the maximum size (8192 bytes per DEC-069)
+  is parsed successfully.
 
 pics_requirements:
-  - MASH.S.FRAME.MAX_SIZE=65536
+  - MASH.S.FRAME.MAX_SIZE=8192
 
 preconditions:
   - session_established: true
@@ -320,7 +320,7 @@ steps:
   - name: Send maximum-size framed message
     action: send_raw_frame
     params:
-      payload_size: 65536
+      payload_size: 8192
       valid_cbor: true
     expect:
       parse_success: true
@@ -340,11 +340,11 @@ tags:
 id: TC-FRAME-003
 name: Oversized Frame Length Causes Connection Close
 description: |
-  Verifies that a length field > 65536 causes an immediate FATAL
+  Verifies that a length field > 8192 causes an immediate FATAL
   connection close. The payload is NOT read.
 
 pics_requirements:
-  - MASH.S.FRAME.MAX_SIZE=65536
+  - MASH.S.FRAME.MAX_SIZE=8192
 
 preconditions:
   - session_established: true
@@ -353,7 +353,7 @@ steps:
   - name: Send frame with oversized length
     action: send_raw_frame
     params:
-      length_override: 65537      # 1 byte over maximum
+      length_override: 8193       # 1 byte over maximum (DEC-069)
       payload_size: 0             # Don't actually send payload
     expect:
       connection_closed: true
@@ -379,7 +379,7 @@ description: |
   connection close.
 
 pics_requirements:
-  - MASH.S.FRAME.MAX_SIZE=65536
+  - MASH.S.FRAME.MAX_SIZE=8192
 
 preconditions:
   - session_established: true

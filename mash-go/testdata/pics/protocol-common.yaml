@@ -94,7 +94,7 @@ items:
   # ==========================================================================
 
   MASH.S.FRAME.LENGTH_BYTES: 4             # Frame length field size
-  MASH.S.FRAME.MAX_SIZE: 65536             # Max frame size (bytes)
+  MASH.S.FRAME.MAX_SIZE: 8192              # Max frame size (bytes, DEC-069)
 
   # ==========================================================================
   # CBOR Serialization
