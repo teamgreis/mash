@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 7)
+# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 8)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — eight sessions shipped 24 named fixes; Q1 78.8% → 92.5% (best measured Q1 to date)
+## TL;DR — eight sessions shipped 25 named fixes; Q1 78.8% → 93.4% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,43 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 8 batch 8 (2026-04-30):** F-27 (EVSE Plan handlers
+  populate attributes). Q1 measured **324/23/114 = 93.4%** -- 4-test
+  structural lift (the largest of the post-F-19 session).
+  - **F-27** -- The EVSE OnRequestPlan and OnAcceptPlan callbacks
+    existed but didn't populate any plan attributes. PODF and EVC-S04
+    tests reading Plan state after invoke (startTime, endTime,
+    totalEnergyPlanned, commitment) all failed on null reads or stuck
+    Preliminary commitment.
+    - **EVSE handler updates** (`internal/examples/evse.go`):
+      - `OnRequestPlan` synthesizes a 1-hour plan with planID=1,
+        planVersion=1, startTime=now, endTime=now+1h,
+        totalEnergyPlanned=7.4 kWh (mirroring nominal max
+        consumption), commitment=TENTATIVE.
+      - `OnAcceptPlan` advances commitment to COMMITTED
+        unconditionally. Was: only if req.PlanID matched the plan's
+        id, defaulting to 0 -- the corpus calls AcceptPlan with
+        planId=1 directly without first calling RequestPlan, so
+        strict id-matching prevented the test from exercising the
+        commitment transition.
+    - **Reset path** (`pkg/service/test_event_handler.go`,
+      `TriggerResetTestState`): clears commitment back to Preliminary
+      so AcceptPlan tests start from a known state, but intentionally
+      leaves planID/startTime/endTime/totalEnergyPlanned populated so
+      TC-PODF-S00-003 inherits them from TC-PODF-S00-002 in YAML
+      order. A precondition-handler approach (re-issuing RequestPlan
+      when `forecast_available: true` is declared) would be cleaner
+      but is heavier than F-27's surgical scope.
+    - **Unit test update**: `TestCEM_RequestAndAcceptPlan` now expects
+      planID=1 (was 0) per the new RequestPlan handler shape.
+    - **Net Q1 impact**: 4 tests flip FAIL -> PASS
+      (TC-PODF-S00-002 RequestPlan Returns Forecast,
+      TC-PODF-S00-003 totalEnergyPlanned Reflects Forecast,
+      TC-EVC-S04-003 AcceptPlan Advances Commitment,
+      TC-ITPCM-S00-003 AcceptPlan Transitions Commitment). One
+      timing-band flake flipped (TC-SEC-CONN-005 PASS -> FAIL); the
+      structural lift is exactly 4. +3 PASS / -3 FAIL net headline.
 
 - **Session 8 batch 7 (2026-04-30):** F-26 (`conditional_read`
   returns `read_success: true` when skipped). Q1 measured
@@ -556,11 +593,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 8 batch 7 — 2026-04-30)
+## Headline numbers (post-fix, session 8 batch 8 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 114 | 347 | **321** | 26  | **92.5 %** *(measured)* | After F-26 (`conditional_read` returns `read_success: true` when skipped). Single clean lift: TC-CHRG-004 FAIL -> PASS. +1 PASS, -1 FAIL vs F-25 baseline (320/27/114 = 92.2%). Best measured Q1 to date. |
+| `mash-test` → Go device     | 461 | 114 | 347 | **324** | 23  | **93.4 %** *(measured)* | After F-27 (EVSE Plan handlers populate planID/planVersion/startTime/endTime/totalEnergyPlanned/commitment on RequestPlan; AcceptPlan advances commitment unconditionally). 4-test structural lift: TC-PODF-S00-002, TC-PODF-S00-003, TC-EVC-S04-003, TC-ITPCM-S00-003 all flip FAIL -> PASS. One timing-band flake (TC-SEC-CONN-005) flipped PASS -> FAIL on this run; net headline +3 PASS / -3 FAIL vs F-26 baseline (321/26/114 = 92.5%). Best measured Q1 to date. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
