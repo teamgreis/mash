@@ -95,6 +95,7 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondTwoZonesWithLimits:       true,
 	PrecondSecondZoneConnected:      true,
 	PrecondNoExistingLimits:         true,
+	PrecondLimitIsSet:               true,
 	PrecondZoneHasSetValues:         true,
 	PrecondDeviceSupportsProduction: true,
 	PrecondDeviceIsBidirectional:    true,
@@ -187,6 +188,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondTwoZonesWithLimits:       precondLevelCommissioned,
 	PrecondSecondZoneConnected:      precondLevelCommissioned,
 	PrecondNoExistingLimits:         precondLevelCommissioned,
+	PrecondLimitIsSet:               precondLevelCommissioned,
 	PrecondZoneHasSetValues:         precondLevelCommissioned,
 	PrecondDeviceSupportsProduction: precondLevelCommissioned,
 	PrecondDeviceIsBidirectional:    precondLevelCommissioned,
@@ -470,6 +472,38 @@ func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
 	}
 
 	_, err = r.sendRequest(data, "clearLimit", req.MessageID)
+	return err
+}
+
+// sendSetLimitInvoke sends a SetLimit invoke to endpoint 1 / EnergyControl
+// with a 7 kW consumption limit and cause=LocalOptimization. Used by the
+// limit_is_set precondition to seed a non-null myConsumptionLimit on the
+// calling zone before the test runs (e.g. TC-CTRL-002 step 1).
+func (r *Runner) sendSetLimitInvoke(_ context.Context) error {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
+		return fmt.Errorf("no connection for SetLimit")
+	}
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: 1,
+		FeatureID:  uint8(model.FeatureEnergyControl),
+		Payload: &wire.InvokePayload{
+			CommandID: features.EnergyControlCmdSetLimit,
+			Parameters: map[uint8]any{
+				features.SetLimitParamConsumptionLimit: int64(7_000_000),
+				features.SetLimitParamCause:            uint8(features.LimitCauseLocalOptimization),
+			},
+		},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return fmt.Errorf("encode SetLimit: %w", err)
+	}
+
+	_, err = r.sendRequest(data, "setLimit", req.MessageID)
 	return err
 }
 
@@ -982,6 +1016,11 @@ func (r *Runner) SendTriggerViaZone(ctx context.Context, trigger uint64, state *
 // SendClearLimitInvoke wraps sendClearLimitInvoke.
 func (r *Runner) SendClearLimitInvoke(ctx context.Context) error {
 	return r.sendClearLimitInvoke(ctx)
+}
+
+// SendSetLimitInvoke wraps sendSetLimitInvoke.
+func (r *Runner) SendSetLimitInvoke(ctx context.Context) error {
+	return r.sendSetLimitInvoke(ctx)
 }
 
 // PASEState returns the current PASE state (delegates to connMgr).

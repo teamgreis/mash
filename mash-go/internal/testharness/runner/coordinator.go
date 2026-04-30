@@ -74,6 +74,7 @@ type WireOps interface {
 	SendRemoveZoneOnConn(conn *Connection, zoneID string)
 	SendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error
 	SendClearLimitInvoke(ctx context.Context) error
+	SendSetLimitInvoke(ctx context.Context) error
 }
 
 // DiagnosticsOps provides health inspection and state capture.
@@ -652,6 +653,19 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		clearCancel()
 	}
 
+	// Seed a calling-zone consumption limit when test requires limit_is_set.
+	// Runs after the LOCAL-zone fresh commission triggered by
+	// testCaseNeedsControllerAuthority, so pool.Main() is the calling zone
+	// whose myConsumptionLimit the test will read.
+	if c.config.Target != "" && needed >= precondLevelCommissioned &&
+		hasPrecondition(tc.Preconditions, PrecondLimitIsSet) {
+		setCtx, setCancel := context.WithTimeout(ctx, 3*time.Second)
+		if err := c.ops.SendSetLimitInvoke(setCtx); err != nil {
+			c.debugf("limit_is_set: SetLimit failed: %v (continuing)", err)
+		}
+		setCancel()
+	}
+
 	// Post-setup: session_previously_connected.
 	if hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected) {
 		c.debugf("session_previously_connected: disconnecting but preserving zone state")
@@ -741,6 +755,13 @@ func testCaseNeedsControllerAuthority(tc *loader.TestCase) bool {
 			return true
 		}
 		if b, _ := cond[PrecondNoOtherZonesConnected].(bool); b {
+			return true
+		}
+		// Seeding a calling-zone consumption limit requires a non-TEST zone:
+		// SetLimit on a TEST zone is silently dropped during multi-zone
+		// resolution (DEC-060), so the limit_is_set precondition only takes
+		// effect when pool.Main() is LOCAL/GRID.
+		if b, _ := cond[PrecondLimitIsSet].(bool); b {
 			return true
 		}
 	}
