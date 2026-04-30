@@ -101,6 +101,8 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceSupportsProduction: true,
 	PrecondDeviceIsBidirectional:    true,
 	PrecondDeviceSupportsAsymmetric: true,
+	PrecondEVConnected:              true,
+	PrecondEVPluggedIn:              true,
 	// IPv6 / multi-interface simulation.
 	PrecondDeviceHasGlobalAndLinkLocal: true,
 	PrecondDeviceHasLinkLocal:          true,
@@ -192,6 +194,8 @@ var preconditionKeyLevels = map[string]int{
 	PrecondNoExistingLimits:         precondLevelCommissioned,
 	PrecondLimitIsSet:               precondLevelCommissioned,
 	PrecondZoneHasSetValues:         precondLevelCommissioned,
+	PrecondEVConnected:              precondLevelCommissioned,
+	PrecondEVPluggedIn:              precondLevelCommissioned,
 	PrecondDeviceSupportsProduction: precondLevelCommissioned,
 	PrecondDeviceIsBidirectional:    precondLevelCommissioned,
 	PrecondDeviceSupportsAsymmetric: precondLevelCommissioned,

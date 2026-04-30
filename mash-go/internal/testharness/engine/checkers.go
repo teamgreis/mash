@@ -1263,6 +1263,110 @@ func CheckerArrayNotEmpty(key string, expected interface{}, state *ExecutionStat
 	}
 }
 
+// CheckerEachItemHas verifies that every element of the "value" output (an
+// array of map-typed structs) contains all of the keys named in `expected`.
+// Used in YAML as:
+//
+//	each_item_has:
+//	  - type
+//	  - value
+//
+// Used by TC-CHRG-009 to assert that every evIdentifications entry carries
+// both an EVIDType and a string identifier.
+func CheckerEachItemHas(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get("value")
+	if !exists {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: nil, Passed: false,
+			Message: fmt.Sprintf("output key %q not found", "value"),
+		}
+	}
+
+	requiredKeys, err := toStringSlice(expected)
+	if err != nil {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("each_item_has expects a list of strings, got %T", expected),
+		}
+	}
+
+	arr, ok := actual.([]interface{})
+	if !ok {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("value is not an array: %T", actual),
+		}
+	}
+
+	for i, item := range arr {
+		keys, ok := mapKeys(item)
+		if !ok {
+			return &ExpectResult{
+				Key: key, Expected: expected, Actual: actual, Passed: false,
+				Message: fmt.Sprintf("array item %d is not a map: %T", i, item),
+			}
+		}
+		for _, rk := range requiredKeys {
+			if _, present := keys[rk]; !present {
+				return &ExpectResult{
+					Key: key, Expected: expected, Actual: actual, Passed: false,
+					Message: fmt.Sprintf("array item %d missing required key %q", i, rk),
+				}
+			}
+		}
+	}
+
+	return &ExpectResult{
+		Key: key, Expected: expected, Actual: actual, Passed: true,
+		Message: fmt.Sprintf("each of %d items has keys %v", len(arr), requiredKeys),
+	}
+}
+
+// mapKeys extracts the string-typed keys from a map regardless of whether
+// the value was decoded with `string`-typed keys (Go-native maps) or
+// `interface{}`-typed keys (CBOR decoder default). Non-string keys are
+// silently ignored, which is what the expectation surface wants -- the
+// caller asks "does this map have key X?" and only string keys count.
+func mapKeys(v interface{}) (map[string]struct{}, bool) {
+	switch m := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]struct{}, len(m))
+		for k := range m {
+			out[k] = struct{}{}
+		}
+		return out, true
+	case map[interface{}]interface{}:
+		out := make(map[string]struct{}, len(m))
+		for k := range m {
+			if s, ok := k.(string); ok {
+				out[s] = struct{}{}
+			}
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func toStringSlice(v interface{}) ([]string, error) {
+	switch s := v.(type) {
+	case []string:
+		return s, nil
+	case []interface{}:
+		out := make([]string, len(s))
+		for i, item := range s {
+			str, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("element %d is not a string: %T", i, item)
+			}
+			out[i] = str
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("not a string slice: %T", v)
+	}
+}
+
 // CheckerSavePrimingValue saves the priming data from a subscribe response
 // under a given name so later steps can compare against it.
 // Used in YAML as: save_priming_value: initial_limit
@@ -1484,6 +1588,7 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameKeysValidPhases, CheckerKeysArePhases) // alias
 	e.RegisterChecker(CheckerNameValuesValidGridPhases, CheckerValuesValidGridPhases)
 	e.RegisterChecker(CheckerNameArrayNotEmpty, CheckerArrayNotEmpty)
+	e.RegisterChecker(CheckerNameEachItemHas, CheckerEachItemHas)
 	e.RegisterChecker(CheckerNameSavePrimingValue, CheckerSavePrimingValue)
 	e.RegisterChecker(CheckerNamePrimingValueDiffFrom, CheckerPrimingValueDifferentFrom)
 	e.RegisterChecker(CheckerNameErrorMessageContains, CheckerErrorMessageContains)

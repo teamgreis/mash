@@ -52,6 +52,7 @@ const (
 	CheckerNameKeysValidPhases        = "keys_valid_phases"
 	CheckerNameValuesValidGridPhases  = "values_valid_grid_phases"
 	CheckerNameArrayNotEmpty          = "array_not_empty"
+	CheckerNameEachItemHas            = "each_item_has"
 	CheckerNameSavePrimingValue       = "save_priming_value"
 	CheckerNamePrimingValueDiffFrom   = "priming_value_different_from"
 	CheckerNameErrorMessageContains   = "error_message_contains"

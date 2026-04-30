@@ -76,6 +76,8 @@ const (
 	PrecondDeviceSupportsProduction = "device_supports_production"
 	PrecondDeviceIsBidirectional  = "device_is_bidirectional"
 	PrecondDeviceSupportsAsymmetric = "device_supports_asymmetric"
+	PrecondEVConnected            = "ev_connected"
+	PrecondEVPluggedIn            = "ev_plugged_in"
 )
 
 // Environment/negative-test preconditions.

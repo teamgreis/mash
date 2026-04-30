@@ -285,10 +285,26 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 			if f, err := ep.GetFeatureByID(uint8(model.FeatureMeasurement)); err == nil {
 				_ = f.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(0))
 			}
-			// Reset ChargingSession to NOT_PLUGGED_IN.
+			// Reset ChargingSession to NOT_PLUGGED_IN. Rich EV state
+			// populated by TriggerEVPlugIn (evStateOfCharge,
+			// evBatteryCapacity, evDemandMode, evIdentifications, energy
+			// requests, sessionStartTime/End) reverts to nullable defaults
+			// so it doesn't leak into tests that read these attributes
+			// without first plugging in.
 			if f, err := ep.GetFeatureByID(uint8(model.FeatureChargingSession)); err == nil {
 				_ = f.SetAttributeInternal(features.ChargingSessionAttrState,
 					uint8(features.ChargingStateNotPluggedIn))
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrSessionStartTime, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrSessionEndTime, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVStateOfCharge, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVBatteryCapacity, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVMinStateOfCharge, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVTargetStateOfCharge, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVDemandMode, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVIdentifications, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVMinEnergyRequest, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVMaxEnergyRequest, nil)
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrEVTargetEnergyRequest, nil)
 			}
 			// Reset EnergyControl to AUTONOMOUS/NONE.
 			if f, err := ep.GetFeatureByID(uint8(model.FeatureEnergyControl)); err == nil {
@@ -514,6 +530,35 @@ func (s *DeviceService) handleChargingSessionTrigger(_ context.Context, trigger 
 			s.debugLog("trigger: EV plug in", "endpoint", ep.ID())
 			_ = feat.SetAttributeInternal(features.ChargingSessionAttrSessionStartTime,
 				uint64(time.Now().Unix()))
+			// Populate rich EV state so attribute reads under
+			// `ev_connected: true` precondition return plausible values.
+			// 50% SoC on a 75 kWh pack with single-demand mode is the
+			// canonical mid-charge corpus default; matches
+			// `EVSE.SimulateEVConnect`'s shape.
+			const (
+				defaultEvSoC      uint8  = 50
+				defaultEvCapacity uint64 = 75_000_000 // 75 kWh in mWh
+			)
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVStateOfCharge, defaultEvSoC)
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVBatteryCapacity, defaultEvCapacity)
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVMinStateOfCharge, uint8(20))
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVTargetStateOfCharge, uint8(80))
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVDemandMode,
+				uint8(features.EVDemandModeSingleDemand))
+			currentEnergy := int64(defaultEvCapacity) * int64(defaultEvSoC) / 100
+			maxEnergy := int64(defaultEvCapacity) - currentEnergy
+			targetEnergy := int64(defaultEvCapacity)*80/100 - currentEnergy
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVMaxEnergyRequest, maxEnergy)
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVTargetEnergyRequest, targetEnergy)
+			// evIdentifications: a single VIN. Test-grade placeholder
+			// satisfying TC-CHRG-009 ("array_not_empty + each_item_has type+value").
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrEVIdentifications,
+				[]any{
+					map[string]any{
+						"type":  uint8(features.EVIDTypeVIN),
+						"value": "MASH-TEST-VIN-0000000000001",
+					},
+				})
 			return feat.SetAttributeInternal(features.ChargingSessionAttrState,
 				uint8(features.ChargingStatePluggedInNoDemand))
 		case features.TriggerEVUnplug:

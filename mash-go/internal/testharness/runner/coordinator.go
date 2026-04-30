@@ -681,6 +681,23 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		trigCancel()
 	}
 
+	// Plug in an EV when test requires ev_connected or ev_plugged_in
+	// (synonyms in the corpus). TriggerEVPlugIn populates rich state
+	// (evStateOfCharge, evBatteryCapacity, evDemandMode, evIdentifications,
+	// energy requests, sessionStartTime) so attribute reads under these
+	// preconditions return plausible values. TriggerResetTestState reverts
+	// to NOT_PLUGGED_IN + null EV state.
+	if c.config.Target != "" && c.config.EnableKey != "" &&
+		needed >= precondLevelCommissioned &&
+		(hasPrecondition(tc.Preconditions, PrecondEVConnected) ||
+			hasPrecondition(tc.Preconditions, PrecondEVPluggedIn)) {
+		trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
+		if err := c.ops.SendTriggerViaZone(trigCtx, features.TriggerEVPlugIn, state); err != nil {
+			c.debugf("ev_connected/plugged_in: TriggerEVPlugIn failed: %v (continuing)", err)
+		}
+		trigCancel()
+	}
+
 	// Post-setup: session_previously_connected.
 	if hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected) {
 		c.debugf("session_previously_connected: disconnecting but preserving zone state")
