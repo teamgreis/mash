@@ -290,6 +290,13 @@ func (e *EVSE) setupCommandHandlers() {
 		if req.ValidUntil != nil {
 			_ = e.signals.SetValidUntil(*req.ValidUntil)
 		}
+		// Persist the raw price slots so subsequent reads of priceSlots
+		// return the controller-supplied schedule. The Slots field is a
+		// CBOR-decoded []any of map[any]any with integer keys, which is
+		// the on-wire shape the device should round-trip through Read.
+		if req.Slots != nil {
+			_ = e.signals.Feature.SetAttributeInternal(features.SignalsAttrPriceSlots, req.Slots)
+		}
 		return nil
 	})
 	e.signals.OnSendConstraintSignal(func(ctx context.Context, req features.SendConstraintSignalRequest) error {
@@ -297,6 +304,9 @@ func (e *EVSE) setupCommandHandlers() {
 		_ = e.signals.SetStartTime(req.StartTime)
 		if req.ValidUntil != nil {
 			_ = e.signals.SetValidUntil(*req.ValidUntil)
+		}
+		if req.Slots != nil {
+			_ = e.signals.Feature.SetAttributeInternal(features.SignalsAttrConstraintSlots, req.Slots)
 		}
 		return nil
 	})
