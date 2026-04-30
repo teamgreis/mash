@@ -19,11 +19,19 @@ func ToFloat64(v interface{}) (float64, bool) {
 		return float64(n), true
 	case int32:
 		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int8:
+		return float64(n), true
 	case uint:
 		return float64(n), true
 	case uint64:
 		return float64(n), true
 	case uint32:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint8:
 		return float64(n), true
 	default:
 		return 0, false
@@ -1010,8 +1018,16 @@ func CheckerValueTreatedAsUnknown(key string, expected interface{}, state *Execu
 	}
 }
 
-// CheckerValueType checks the Go type name of the "value" output.
-// Used in YAML as: value_type: string
+// CheckerValueType checks that the "value" output matches the expected
+// logical spec type. CBOR canonically decodes unsigned integers as uint64
+// and signed integers as int64 in Go regardless of the spec's narrower
+// declared type, so a strict Go-typename comparison would reject every
+// uint8/uint16/uint32 (and int8/int16/int32) attribute on the wire. This
+// matcher accepts any compatible Go numeric type whose value fits in the
+// declared type's range. Non-numeric types (string, bool, etc.) still use
+// strict Go-typename equality.
+//
+// Used in YAML as: value_type: uint32
 func CheckerValueType(key string, expected interface{}, state *ExecutionState) *ExpectResult {
 	actual, exists := state.Get("value")
 	if !exists {
@@ -1020,12 +1036,64 @@ func CheckerValueType(key string, expected interface{}, state *ExecutionState) *
 			Message: fmt.Sprintf("output key %q not found", "value"),
 		}
 	}
-	actualType := fmt.Sprintf("%T", actual)
 	expectedStr := fmt.Sprintf("%v", expected)
-	passed := actualType == expectedStr
+	actualType := fmt.Sprintf("%T", actual)
+	passed := matchesLogicalType(actual, expectedStr)
 	return &ExpectResult{
 		Key: key, Expected: expected, Actual: actual, Passed: passed,
 		Message: fmt.Sprintf("type = %s (expected %s)", actualType, expectedStr),
+	}
+}
+
+// matchesLogicalType returns true when actual fits the declared spec type.
+// For numeric types it allows any Go integer/float type that can represent
+// the value within the declared type's range. For other types it falls back
+// to strict Go-typename equality.
+func matchesLogicalType(actual any, expected string) bool {
+	switch expected {
+	case "uint8":
+		v, ok := ToFloat64(actual)
+		return ok && v >= 0 && v <= 255 && isWholeNumber(actual)
+	case "uint16":
+		v, ok := ToFloat64(actual)
+		return ok && v >= 0 && v <= 65535 && isWholeNumber(actual)
+	case "uint32":
+		v, ok := ToFloat64(actual)
+		return ok && v >= 0 && v <= 4294967295 && isWholeNumber(actual)
+	case "uint64", "uint":
+		v, ok := ToFloat64(actual)
+		return ok && v >= 0 && isWholeNumber(actual)
+	case "int8":
+		v, ok := ToFloat64(actual)
+		return ok && v >= -128 && v <= 127 && isWholeNumber(actual)
+	case "int16":
+		v, ok := ToFloat64(actual)
+		return ok && v >= -32768 && v <= 32767 && isWholeNumber(actual)
+	case "int32":
+		v, ok := ToFloat64(actual)
+		return ok && v >= -2147483648 && v <= 2147483647 && isWholeNumber(actual)
+	case "int64", "int":
+		_, ok := ToFloat64(actual)
+		return ok && isWholeNumber(actual)
+	case "float32", "float64":
+		_, ok := ToFloat64(actual)
+		return ok
+	default:
+		return fmt.Sprintf("%T", actual) == expected
+	}
+}
+
+// isWholeNumber reports whether actual carries an integer value (rejects
+// float64 mantissas with a fractional part). Returns true for any integer Go
+// type and for float types whose value happens to be an integer.
+func isWholeNumber(actual any) bool {
+	switch v := actual.(type) {
+	case float64:
+		return v == float64(int64(v))
+	case float32:
+		return float32(int64(v)) == v
+	default:
+		return true
 	}
 }
 

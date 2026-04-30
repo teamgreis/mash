@@ -273,3 +273,45 @@ func TestChecker_TypeConversion(t *testing.T) {
 		t.Error("Should handle float64 value")
 	}
 }
+
+// TestChecker_ValueType_LogicalMatch tests that value_type accepts any
+// compatible Go numeric type as long as the value fits in the declared
+// spec type's range. CBOR canonically decodes uint values as uint64, so a
+// strict Go-typename comparison would reject every uint8/uint16/uint32
+// attribute; the checker uses logical-type matching instead.
+func TestChecker_ValueType_LogicalMatch(t *testing.T) {
+	state := NewExecutionState(context.Background())
+
+	tests := []struct {
+		name     string
+		value    interface{}
+		expected string
+		passed   bool
+	}{
+		{"uint64 in uint32 range matches uint32", uint64(7200), "uint32", true},
+		{"uint64 max matches uint64", uint64(1 << 63), "uint64", true},
+		{"uint64 overflows uint32", uint64(1 << 33), "uint32", false},
+		{"int64 negative matches int32", int64(-100), "int32", true},
+		{"int64 overflows int8", int64(200), "int8", false},
+		{"uint8 value matches uint32", uint8(42), "uint32", true},
+		{"int matches int64 alias", int(-5), "int64", true},
+		{"float with no fractional part matches uint32", float64(7200), "uint32", true},
+		{"float with fractional part rejects uint32", float64(7200.5), "uint32", false},
+		{"string matches string strictly", "hello", "string", true},
+		{"string vs uint32 fails", "hello", "uint32", false},
+		{"bool matches bool strictly", true, "bool", true},
+		{"bool vs string fails", true, "string", false},
+		{"float64 matches float64", float64(3.14), "float64", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state.Set("value", tt.value)
+			result := CheckerValueType("value_type", tt.expected, state)
+			if result.Passed != tt.passed {
+				t.Errorf("CheckerValueType(%T(%v), %q) passed=%v, want %v (%s)",
+					tt.value, tt.value, tt.expected, result.Passed, tt.passed, result.Message)
+			}
+		})
+	}
+}
