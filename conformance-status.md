@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 8)
+# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 9)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — eight sessions shipped 25 named fixes; Q1 78.8% → 93.4% (best measured Q1 to date)
+## TL;DR — eight sessions shipped 26 named fixes; Q1 78.8% → 93.7% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,35 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 8 batch 9 (2026-04-30):** F-28 (`wait_report` extracts
+  attribute value into `state["value"]`). Q1 measured **325/22/114 =
+  93.7%** -- single structural lift (TC-GPL-S01-001 consumption-side
+  Measurement Subscription Active).
+  - **F-28** -- The `wait_report` action returned `report_received`
+    and `report_data` but never extracted the named attribute's value.
+    TC-GPL-S01-001 (consumption-side) sets:
+    ```
+    - action: wait_report
+      params: {feature: Measurement, attribute: acActivePower}
+      expect: {report_received: true, value_is_not_null: true}
+    ```
+    Priming data carried `{1: 0, ...}` (acActivePower=0 at integer
+    key 1 after CBOR decoding); `value_is_not_null` checked
+    `state.Get("value")` which was unset, so the assertion failed.
+    Added `populateReportAttributeValue` helper that resolves the
+    named attribute via `r.resolver.ResolveAttribute`, then extracts
+    the value from the priming/report payload using the existing
+    `extractAttributeValue` helper (which handles all CBOR map
+    shapes). Silently no-ops when no attribute is named so the
+    legacy "just check report_received" usage continues to work.
+    - **Net Q1 impact**: TC-GPL-S01-001 (consumption-side) flips
+      FAIL -> PASS as the single structural lift. Two timing-band
+      flakes flipped (TC-SEC-CONN-005 FAIL -> PASS, TC-TESTCTRL-ZONE-001
+      PASS -> FAIL) -- net headline +1 PASS / -1 FAIL. TC-GPL-S01-002
+      (Power Values Reflect Load Changes) still fails because the
+      EVSE simulation doesn't generate a measurement notification
+      when a limit is applied -- separate work.
 
 - **Session 8 batch 8 (2026-04-30):** F-27 (EVSE Plan handlers
   populate attributes). Q1 measured **324/23/114 = 93.4%** -- 4-test
@@ -593,11 +622,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 8 batch 8 — 2026-04-30)
+## Headline numbers (post-fix, session 8 batch 9 — 2026-04-30)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 114 | 347 | **324** | 23  | **93.4 %** *(measured)* | After F-27 (EVSE Plan handlers populate planID/planVersion/startTime/endTime/totalEnergyPlanned/commitment on RequestPlan; AcceptPlan advances commitment unconditionally). 4-test structural lift: TC-PODF-S00-002, TC-PODF-S00-003, TC-EVC-S04-003, TC-ITPCM-S00-003 all flip FAIL -> PASS. One timing-band flake (TC-SEC-CONN-005) flipped PASS -> FAIL on this run; net headline +3 PASS / -3 FAIL vs F-26 baseline (321/26/114 = 92.5%). Best measured Q1 to date. |
+| `mash-test` → Go device     | 461 | 114 | 347 | **325** | 22  | **93.7 %** *(measured)* | After F-28 (`wait_report` extracts attribute value into state["value"] so value-check assertions can fire on subscription priming reports). Single structural lift: TC-GPL-S01-001 (consumption-side Measurement Subscription Active) FAIL -> PASS. Two timing-band flakes flipped (TC-SEC-CONN-005 FAIL -> PASS, TC-TESTCTRL-ZONE-001 PASS -> FAIL) net to zero. +1 PASS / -1 FAIL vs F-27 baseline (324/23/114 = 93.4%). Best measured Q1 to date. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
