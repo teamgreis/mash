@@ -301,7 +301,13 @@ func (lr *LimitResolver) ResetAll() {
 	lr.consumptionLimits = zone.NewMultiZoneValue()
 	lr.productionLimits = zone.NewMultiZoneValue()
 
-	// Re-resolve: sets effective limits to nil, state to AUTONOMOUS.
+	// Force back to AUTONOMOUS before re-resolving. The default
+	// resolveAndApply rule preserves CONTROLLED across a transient
+	// ClearAll, but ResetAll's contract is "fresh device" -- callers
+	// (TriggerResetTestState, factory reset) want AUTONOMOUS.
+	_ = lr.ec.SetControlState(ControlStateAutonomous)
+
+	// Re-resolve: sets effective limits to nil, leaves state AUTONOMOUS.
 	lr.resolveAndApply()
 
 	lr.mu.Unlock()
@@ -379,12 +385,20 @@ func (lr *LimitResolver) handleTimerExpiry(zoneIdx uint8, cmdType duration.Comma
 // resolveAndApply computes effective limits and updates the EnergyControl feature.
 // Must be called with mu held.
 //
-// State transitions:
-//   - CONTROLLED: A zone has sent a SetLimit/SetSetpoint command (controller has authority).
-//   - AUTONOMOUS: No zone has any active limits (no external control).
+// State transitions follow the ControlStateEnum diagram in
+// docs/features/energy-control.md:
 //
-// The device application layer is responsible for promoting CONTROLLED -> LIMITED
-// when it detects that its operation is actually being curtailed by the limit.
+//	AUTONOMOUS --controller connects--> CONTROLLED --SetLimit()--> LIMITED
+//	                                       ^---ClearLimit/expires----┘
+//
+//   - LIMITED: an effective limit is currently being applied.
+//   - CONTROLLED: controller authority is established (the resolver was
+//     just in LIMITED) but no active limit remains.
+//   - AUTONOMOUS: no controller authority has been exercised yet.
+//
+// FAILSAFE and OVERRIDE are entered/exited by paths outside the limit
+// resolver (failsafe timer, device-side safety override) and are not
+// modified here.
 func (lr *LimitResolver) resolveAndApply() {
 	effConsumption, _ := lr.consumptionLimits.ResolveLimits()
 	effProduction, _ := lr.productionLimits.ResolveLimits()
@@ -392,11 +406,20 @@ func (lr *LimitResolver) resolveAndApply() {
 	_ = lr.ec.SetEffectiveConsumptionLimitPtr(effConsumption)
 	_ = lr.ec.SetEffectiveProductionLimitPtr(effProduction)
 
-	// Update control state: CONTROLLED when any limits are active,
-	// AUTONOMOUS when all limits have been cleared.
-	if effConsumption != nil || effProduction != nil {
+	prev := lr.ec.ControlState()
+	if prev == ControlStateFailsafe || prev == ControlStateOverride {
+		return
+	}
+
+	hasLimits := effConsumption != nil || effProduction != nil
+	switch {
+	case hasLimits:
+		_ = lr.ec.SetControlState(ControlStateLimited)
+	case prev == ControlStateLimited:
 		_ = lr.ec.SetControlState(ControlStateControlled)
-	} else {
+	case prev == ControlStateControlled:
+		// stay CONTROLLED -- controller still attached, no active limit.
+	default:
 		_ = lr.ec.SetControlState(ControlStateAutonomous)
 	}
 }

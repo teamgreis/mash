@@ -72,6 +72,7 @@ const (
 	PrecondSecondZoneConnected    = "second_zone_connected"
 	PrecondNoExistingLimits       = "no_existing_limits"
 	PrecondLimitIsSet             = "limit_is_set"
+	PrecondEVLimitApplied         = "ev_limit_applied"
 	PrecondZoneHasSetValues       = "zone_has_set_values"
 	PrecondDeviceSupportsProduction = "device_supports_production"
 	PrecondDeviceIsBidirectional  = "device_is_bidirectional"

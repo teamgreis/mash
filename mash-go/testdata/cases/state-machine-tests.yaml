@@ -6,12 +6,16 @@
 # These state machines are ORTHOGONAL - process continues during FAILSAFE
 
 ---
-# TC-STATE-001: ControlState AUTONOMOUS to CONTROLLED
+# TC-STATE-001: ControlState AUTONOMOUS to LIMITED on first SetLimit
 id: TC-STATE-001
-name: ControlState AUTONOMOUS to CONTROLLED
+name: ControlState AUTONOMOUS to LIMITED
 description: |
-  Verifies that a device transitions from AUTONOMOUS to CONTROLLED
-  when it receives the first command from a zone controller.
+  Verifies that a device transitions from AUTONOMOUS to LIMITED
+  on the first SetLimit from a zone controller. Per the
+  ControlStateEnum diagram in docs/features/energy-control.md:
+  SetLimit() takes the device from CONTROLLED to LIMITED, and
+  ClearLimit returns it to CONTROLLED -- AUTONOMOUS is the
+  pre-controller state, never re-entered after a SetLimit.
 
 pics_requirements:
   - MASH.S.CTRL
@@ -44,7 +48,7 @@ steps:
     expect:
       invoke_success: true
 
-  - name: Verify transition to CONTROLLED
+  - name: Verify transition to LIMITED
     action: read
     params:
       endpoint: 1
@@ -52,10 +56,10 @@ steps:
       attribute: controlState
     expect:
       read_success: true
-      value: 0x01              # CONTROLLED
+      value: 0x02              # LIMITED
 
 postconditions:
-  - control_state: CONTROLLED
+  - control_state: LIMITED
 
 timeout: "10s"
 tags:
@@ -882,19 +886,19 @@ steps:
       read_success: true
       value: 0x00              # AUTONOMOUS
 
-  - name: Send command to enter CONTROLLED
+  - name: Send first SetLimit (transitions AUTONOMOUS -> LIMITED)
     action: invoke
     params:
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
       args:
-        consumptionLimit: 10000000  # 10 kW (not limiting)
+        consumptionLimit: 10000000  # 10 kW
         cause: 3
     expect:
       invoke_success: true
 
-  - name: Verify CONTROLLED state
+  - name: Verify LIMITED state
     action: read
     params:
       endpoint: 1
@@ -902,16 +906,16 @@ steps:
       attribute: controlState
     expect:
       read_success: true
-      value: 0x01              # CONTROLLED
+      value: 0x02              # LIMITED (per spec: SetLimit -> LIMITED)
 
-  - name: Set restrictive limit to enter LIMITED
+  - name: Send second SetLimit (stays LIMITED)
     action: invoke
     params:
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
       args:
-        consumptionLimit: 100000   # 100 W (very restrictive)
+        consumptionLimit: 100000   # 100 W
         cause: 3
     expect:
       invoke_success: true
