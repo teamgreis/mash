@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-04-30, post-fix, session 8 batch 11)
+# MASH Conformance Status (2026-05-01, post-fix, session 9 batch 12)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — eight sessions shipped 28 named fixes; Q1 78.8% → 94.5% (best measured Q1 to date)
+## TL;DR — nine sessions shipped 29 named fixes; Q1 78.8% → 95.7% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,57 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 9 batch 12 (2026-05-01):** F-31 (ControlState ratchet
+  per spec diagram + `ev_limit_applied` precondition handler). Q1
+  measured **330/15/116 = 95.7%** -- four structural lifts in the
+  bucket #3 state-machine cluster.
+  - **F-31** -- two-part fix that aligns the resolver with the
+    `ControlStateEnum` diagram in docs/features/energy-control.md
+    and wires up a corpus precondition the runner had been silently
+    ignoring.
+    - `pkg/features/limit_resolver.go` `resolveAndApply` previously
+      mapped any active limit to CONTROLLED and absence-of-limit to
+      AUTONOMOUS, which reversed the spec diagram's labels. Per
+      spec: SetLimit takes the device CONTROLLED -> LIMITED;
+      ClearLimit takes it LIMITED -> CONTROLLED; AUTONOMOUS is the
+      pre-controller state, only re-entered via failsafe expiry.
+      New rule is a ratchet on the previous state: active limit ->
+      LIMITED; no limit + previously LIMITED -> CONTROLLED; no
+      limit + previously CONTROLLED -> stay CONTROLLED; otherwise
+      AUTONOMOUS. FAILSAFE and OVERRIDE are preserved (entered/
+      exited by paths outside the resolver). `ResetAll` continues
+      to force AUTONOMOUS explicitly to preserve its "fresh device"
+      contract; without that override the ratchet would keep the
+      state CONTROLLED across `TriggerResetTestState`.
+    - The corpus precondition `ev_limit_applied: true` (used by
+      TC-EVC-S00-002/003) had no handler in the runner -- same
+      class of architectural debt as `constraint_signal_sent` and
+      `forecast_available`. Without seeding an actual SetLimit,
+      TC-EVC-S00-003 reached its `ClearLimit -> CONTROLLED`
+      assertion with state still AUTONOMOUS (no prior LIMITED to
+      ratchet back from). Registered the constant in
+      `internal/testharness/runner/keys.go`, added it to the level-
+      table in `preconditions.go`, dispatched the same
+      `SendSetLimitInvoke` used by `limit_is_set` from
+      `coordinator.go`, and added the precondition to
+      `testCaseNeedsControllerAuthority` so the seeding lands on a
+      fresh LOCAL zone (TEST zones drop SetLimit per DEC-060).
+    - Corpus alignment for TC-STATE-001 step 3 and TC-STATE-015
+      step 3, which both encoded `SetLimit -> CONTROLLED`. Updated
+      to expect LIMITED to match the spec diagram. F-23 / F-25
+      precedent: when corpus YAML contradicts spec, the corpus is
+      updated.
+    - **Net Q1 impact**: TC-STATE-002 (CONTROLLED -> LIMITED),
+      TC-EVC-S00-003 (ClearLimit -> CONTROLLED), TC-GPL-S00-001
+      consumption-side (SetLimit Accepted and Transitions to
+      LIMITED), and TC-GPL-S00-002 consumption-side (ClearLimit
+      Returns to CONTROLLED) flip FAIL -> PASS. TC-STATE-001 keeps
+      passing under the new rule + corpus update. TC-STATE-015
+      improves from failing at step 3 to failing only at the
+      FAILSAFE step (bucket #1, out of scope). Headline: 326/19 ->
+      330/15 = +4 PASS / -4 FAIL. One run-to-run flake regressed
+      (TC-ZONE-REMOVE-003 PASS -> FAIL, passes in isolation).
 
 - **Session 8 batch 11 (2026-04-30):** F-30 (auto-PICS value-aware
   for capability boolean attributes). Q1 measured **326/19/116 =
@@ -667,11 +718,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 8 batch 11 — 2026-04-30)
+## Headline numbers (post-fix, session 9 batch 12 — 2026-05-01)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 116 | 345 | **326** | 19  | **94.5 %** *(measured)* | After F-30 (auto-PICS value-aware for capability boolean attributes). 2 tests reclassified FAIL -> SKIP: TC-CTRL-003 (target -- EVSE doesn't accept power setpoints) and TC-ZONE-006 (free win, same `MASH.S.CTRL.A0C` PICS gate). One timing-band flake (TC-ZONE-010) flipped PASS -> FAIL; net headline -1 PASS / -1 FAIL / +2 SKIP. Pass rate up because Run denominator dropped by 2. Best measured Q1 to date. |
+| `mash-test` → Go device     | 461 | 116 | 345 | **330** | 15  | **95.7 %** *(measured)* | After F-31 (ControlState ratchet + ev_limit_applied precondition). Four structural lifts: TC-STATE-002, TC-EVC-S00-003, TC-GPL-S00-001 consumption-side, TC-GPL-S00-002 consumption-side. One run-to-run flake flipped PASS -> FAIL (TC-ZONE-REMOVE-003, passes in isolation). Net headline +4 PASS / -4 FAIL / 0 SKIP. Best measured Q1 to date. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
