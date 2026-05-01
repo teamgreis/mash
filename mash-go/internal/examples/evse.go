@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/failsafe"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/usecase"
@@ -188,6 +189,13 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 		false, // isShiftable
 		true,  // isStoppable
 	)
+	// Configure failsafe defaults (F-32). Without these, the conformance
+	// tests that read failsafeConsumptionLimit have nothing to compare
+	// against and the device cannot resolve effective limits during
+	// FAILSAFE. 3.7 kW is the single-phase 16A safe fallback.
+	_ = e.energyControl.SetFailsafeConsumptionLimit(3700000)
+	_ = e.energyControl.SetFailsafeProductionLimit(0)
+	_ = e.energyControl.SetFailsafeDuration(uint32(failsafe.DefaultDuration / time.Second))
 	charger.AddFeature(e.energyControl.Feature)
 
 	// ChargingSession - EV session management

@@ -85,6 +85,21 @@ const (
 	// restores the device's startup default.
 	TriggerSetIsPausableFalse uint64 = 0x0005_0000_0000_0020
 	TriggerSetIsPausableTrue  uint64 = 0x0005_0000_0000_0021
+
+	// TriggerSimulateFailsafeTimeout drives the device into FAILSAFE without
+	// requiring an actual transport-layer connection loss. Used by the
+	// corpus (TC-GPL-S00-003) where the test runs over the suite TEST zone
+	// and cannot disconnect itself to provoke FAILSAFE entry.
+	TriggerSimulateFailsafeTimeout uint64 = 0x0005_0000_0000_0030
+
+	// TriggerSetFailsafeDurationBase encodes a failsafeDuration in seconds
+	// in the lower 32 bits. Used by TC-STATE-004's `failsafe_duration_short`
+	// precondition and `configure_device { failsafe_duration: N }` to use
+	// shorter durations than the spec's 2h floor for end-to-end timing
+	// tests. If a FAILSAFE countdown is running, it is restarted with the
+	// new duration.
+	// Usage: TriggerSetFailsafeDurationBase | uint64(uint32(seconds))
+	TriggerSetFailsafeDurationBase uint64 = 0x0005_0001_0000_0000
 )
 
 // TriggerDomain extracts the feature domain from a trigger opcode.

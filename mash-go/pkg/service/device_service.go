@@ -67,9 +67,17 @@ type DeviceService struct {
 	verifier *commissioning.Verifier
 	serverID []byte
 
-	// Timer management - one failsafe timer per zone
+	// Timer management - one failsafe timer per zone (legacy API; new
+	// failsafe state machine uses failsafeCountdown below).
 	failsafeTimers  map[string]*failsafe.Timer
 	durationManager *duration.Manager
+
+	// Device-wide failsafe state (F-32). FAILSAFE is entered when the last
+	// authoritative zone disconnects and the countdown runs from FAILSAFE to
+	// AUTONOMOUS per docs/testing/behavior/failsafe-timing.md §2.1.
+	failsafeActive            bool
+	failsafeCountdown         *time.Timer
+	failsafeCountdownStartedAt time.Time
 
 	// Subscription management
 	subscriptionManager dispatch.SubscriptionTracker

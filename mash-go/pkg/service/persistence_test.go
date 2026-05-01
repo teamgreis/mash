@@ -136,7 +136,13 @@ func TestDeviceServiceSaveStateWithFailsafeTimer(t *testing.T) {
 	zoneID := "zone-failsafe-001"
 	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
-	// Set failsafe timer using the existing method (this starts the timer)
+	// F-32: timers are no longer auto-created on connect (the failsafe
+	// state machine fires from disconnect, not as a watchdog). Install one
+	// explicitly through the legacy API so the persistence path has
+	// something to snapshot.
+	t0 := failsafe.NewTimer()
+	svc.SetFailsafeTimer(zoneID, t0)
+	t0.Start()
 	timer := svc.GetFailsafeTimer(zoneID)
 	if timer == nil {
 		t.Fatal("failsafe timer not created")

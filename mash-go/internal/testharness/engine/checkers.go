@@ -539,6 +539,27 @@ func CheckerValueEquals(key string, expected interface{}, state *ExecutionState)
 	currentMap, currentIsMap := currentOutput.(map[string]interface{})
 
 	if savedIsMap && currentIsMap {
+		// When both outputs come from `read` (e.g. saved=read of attr A,
+		// current=read of attr B), they contain a "value" field with the
+		// actual attribute value. The corpus uses value_equals to compare
+		// the VALUES across two reads, not the surrounding metadata
+		// (attribute-name-specific present/valid keys, request IDs, full
+		// wire.Response structs with different attr IDs). Prefer the
+		// value-only comparison when both maps expose a "value" key.
+		sv, savedHasValue := savedMap["value"]
+		cv, currentHasValue := currentMap["value"]
+		if savedHasValue && currentHasValue {
+			passed := fmt.Sprintf("%v", sv) == fmt.Sprintf("%v", cv)
+			msg := fmt.Sprintf("value: saved=%v current=%v", sv, cv)
+			return &ExpectResult{
+				Key:      key,
+				Expected: sv,
+				Actual:   cv,
+				Passed:   passed,
+				Message:  msg,
+			}
+		}
+
 		var mismatches []string
 		for k, sv := range savedMap {
 			cv, has := currentMap[k]

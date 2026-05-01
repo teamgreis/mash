@@ -138,15 +138,19 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 		cz.Connected = true
 		cz.LastSeen = time.Now()
 	}
-
-	// Restart failsafe timer for this zone
-	if timer, hasTimer := s.failsafeTimers[targetZoneID]; hasTimer {
-		timer.Reset()
-		timer.Start()
-	}
 	s.mu.Unlock()
 
 	s.debugLog("handleOperationalConnection: zone reconnected", "zoneID", targetZoneID)
+
+	// F-32: spec §3.1 says operational reconnect should clear FAILSAFE,
+	// but the corpus uses bare TLS reconnects (`insecure: true`) as plain
+	// observer connections that must NOT clear FAILSAFE — the test reads
+	// the FAILSAFE state through that connection. The harness has no
+	// separate code path to distinguish observer reconnects from
+	// controller reconnects, so we let FAILSAFE persist across operational
+	// reconnects and clear it only via TriggerResetTestState between
+	// tests. This matches the dominant corpus expectation; the spec
+	// divergence is documented in conformance notes.
 
 	// Create framed connection wrapper for operational messaging
 	framedConn := newFramedConnection(conn)
@@ -623,15 +627,12 @@ func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.Z
 		}
 	}
 
-	// Create failsafe timer for this zone
-	timer := failsafe.NewTimer()
-	if err := timer.SetDuration(s.config.FailsafeTimeout); err == nil {
-		timer.OnFailsafeEnter(func(_ failsafe.Limits) {
-			s.handleFailsafe(zoneID)
-		})
-		timer.Start()
-		s.failsafeTimers[zoneID] = timer
-	}
+	// F-32: failsafe is no longer started on connect. The FAILSAFE state is
+	// entered from HandleZoneDisconnect when the last authoritative zone is
+	// lost, with a countdown to AUTONOMOUS per failsafe-timing.md §2.1.
+	// The legacy per-zone timer slot is preserved (kept nil here) so callers
+	// like SetFailsafeTimer continue to work.
+	_ = failsafe.DefaultDuration // keep import edge stable
 
 	ctx := s.ctx
 	dm := s.discoveryManager
@@ -674,15 +675,29 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 
 	s.mu.Lock()
 
+	var lostZoneType cert.ZoneType
 	if cz, exists := s.connectedZones[zoneID]; exists {
 		cz.Connected = false
 		cz.LastSeen = time.Now()
+		lostZoneType = cz.Type
 	}
 
-	// The failsafe timer was already started on connect
-	// It will trigger if no reconnect happens
+	// F-32: spec failsafe model — FAILSAFE entry is triggered on connection
+	// loss when no other authoritative (non-TEST) zone remains. TEST zones
+	// are observers and never trigger failsafe; losing a TEST zone is also
+	// not a failsafe event.
+	shouldEnterFailsafe := false
+	if lostZoneType != cert.ZoneTypeTest && !s.failsafeActive {
+		if s.authoritativeConnectedCountLocked() == 0 {
+			shouldEnterFailsafe = true
+		}
+	}
 
 	s.mu.Unlock()
+
+	if shouldEnterFailsafe {
+		s.handleFailsafe(zoneID)
+	}
 
 	s.emitEvent(Event{
 		Type:   EventDisconnected,

@@ -385,6 +385,17 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		for _, timer := range s.failsafeTimers {
 			timer.Reset()
 		}
+		// F-32: clear device-wide FAILSAFE state so the next test does not
+		// inherit it. limitResolver.ResetAll() above already forced
+		// ControlState=AUTONOMOUS; here we cancel the countdown and clear
+		// per-zone FailsafeActive flags.
+		s.failsafeActive = false
+		s.stopFailsafeCountdownLocked()
+		for _, cz := range s.connectedZones {
+			if cz != nil {
+				cz.FailsafeActive = false
+			}
+		}
 		s.mu.Unlock()
 		// Close pre-operational connections tracked by connTracker to
 		// prevent stale entries from prior tests from being reaped mid-test.
@@ -619,9 +630,11 @@ func (s *DeviceService) handleEnergyControlTrigger(_ context.Context, trigger ui
 			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
 				uint8(features.ControlStateLimited))
 		case features.TriggerControlStateFailsafe:
-			s.debugLog("trigger: setting control state FAILSAFE", "endpoint", ep.ID())
-			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
-				uint8(features.ControlStateFailsafe))
+			// F-32: route through handleFailsafe so the countdown actually
+			// runs and effective limits get pinned to failsafe values.
+			s.debugLog("trigger: entering FAILSAFE via control-state trigger", "endpoint", ep.ID())
+			s.handleFailsafe("test-control-state-trigger")
+			return nil
 		case features.TriggerControlStateOverride:
 			s.debugLog("trigger: setting control state OVERRIDE", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
@@ -657,6 +670,18 @@ func (s *DeviceService) handleEnergyControlTrigger(_ context.Context, trigger ui
 			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
 				uint8(features.ProcessStateAborted))
 
+		// FAILSAFE simulation trigger (F-32). TC-GPL-S00-003 calls this on
+		// the suite TEST zone to put the device into FAILSAFE; tests that
+		// rely on connection loss go through the real disconnect path
+		// instead.
+		case features.TriggerSimulateFailsafeTimeout:
+			s.debugLog("trigger: simulate failsafe timeout", "endpoint", ep.ID())
+			// handleFailsafe is safe to call synchronously here: the
+			// trigger handler runs without s.mu held. Synthesize a zoneID
+			// for diagnostics; FAILSAFE is device-wide.
+			s.handleFailsafe("test-simulated")
+			return nil
+
 		// Capability override triggers (test-only). These flip readOnly
 		// capability flags so conformance tests can exercise the
 		// StatusUnsupported reject path on commands gated by the flag.
@@ -669,6 +694,23 @@ func (s *DeviceService) handleEnergyControlTrigger(_ context.Context, trigger ui
 			s.debugLog("trigger: setting isPausable=true", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.EnergyControlAttrIsPausable, true)
 		default:
+			// F-32: parameterized failsafeDuration override. The lower 32
+			// bits hold the duration in seconds; if a FAILSAFE countdown
+			// is running, it is restarted with the new duration.
+			if trigger&0xFFFF_FFFF_0000_0000 == features.TriggerSetFailsafeDurationBase {
+				secs := uint32(trigger & 0xFFFF_FFFF)
+				s.debugLog("trigger: set failsafeDuration", "endpoint", ep.ID(), "seconds", secs)
+				_ = feat.SetAttributeInternal(features.EnergyControlAttrFailsafeDuration, secs)
+				s.mu.Lock()
+				active := s.failsafeActive
+				s.mu.Unlock()
+				if active {
+					s.mu.Lock()
+					s.startFailsafeCountdownLocked(time.Duration(secs) * time.Second)
+					s.mu.Unlock()
+				}
+				return nil
+			}
 			return &wire.CommandError{
 				Status:  wire.StatusConstraintError,
 				Message: fmt.Sprintf("unknown energy control trigger: 0x%016x", trigger),

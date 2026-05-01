@@ -597,6 +597,21 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		c.debugf("restored crypto state after session reuse for %s", tc.ID)
 	}
 
+	// F-32: failsafe_duration_short must run BEFORE control_state so that
+	// when control_state: FAILSAFE fires, the countdown picks up the
+	// short duration (TC-STATE-004 waits 6s for AUTONOMOUS).
+	if c.config.Target != "" && c.config.EnableKey != "" && needed >= precondLevelCommissioned {
+		if hasPrecondition(tc.Preconditions, PrecondFailsafeDurationShort) {
+			trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
+			short := uint32(5) // 5 seconds
+			trigger := features.TriggerSetFailsafeDurationBase | uint64(short)
+			if err := c.ops.SendTriggerViaZone(trigCtx, trigger, state); err != nil {
+				c.debugf("failsafe_duration_short: trigger failed: %v (continuing)", err)
+			}
+			trigCancel()
+		}
+	}
+
 	// Send control/process state triggers on real devices.
 	if c.config.Target != "" && c.config.EnableKey != "" && needed >= precondLevelCommissioned {
 		if csVal := preconditionValue(tc.Preconditions, PrecondControlState); csVal != "" {

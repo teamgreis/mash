@@ -472,7 +472,7 @@ steps:
       attribute: controlState
     expect:
       read_success: true
-      value_in: [0x04, 0x05]      # FAILSAFE or similar
+      value: 0x03                  # FAILSAFE (per ControlStateEnum)
 
 postconditions:
   - process_continues_during_failsafe: true

@@ -384,6 +384,8 @@ func deviceTriggerOpcode(event string, params map[string]any) (uint64, bool) {
 		return features.TriggerFaultWithCodeBase | uint64(code), true
 	case "clear_fault":
 		return features.TriggerClearFault, true
+	case "simulate_failsafe_timeout":
+		return features.TriggerSimulateFailsafeTimeout, true
 	}
 	return 0, false
 }
@@ -399,8 +401,23 @@ func (r *Runner) handleConfigureDevice(ctx context.Context, step *loader.Step, s
 	if endpoints, ok := params[ParamEndpoints]; ok {
 		ds.attributes[ParamEndpoints] = endpoints
 	}
-	if features, ok := params[ParamFeatures]; ok {
-		ds.attributes[ParamFeatures] = features
+	if feats, ok := params[ParamFeatures]; ok {
+		ds.attributes[ParamFeatures] = feats
+	}
+
+	// F-32: failsafe_duration param overrides the device's failsafeDuration
+	// attribute. TC-STATE-004 uses this to drive a 5s test countdown.
+	if r.config.Target != "" {
+		if v, ok := params["failsafe_duration"]; ok {
+			secs := uint32(paramInt(params, "failsafe_duration", 0))
+			_ = v
+			if secs > 0 {
+				trigger := features.TriggerSetFailsafeDurationBase | uint64(secs)
+				if err := r.sendTriggerViaZone(ctx, trigger, state); err != nil {
+					return nil, fmt.Errorf("configure_device failsafe_duration: %w", err)
+				}
+			}
+		}
 	}
 
 	return map[string]any{

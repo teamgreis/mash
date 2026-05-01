@@ -323,6 +323,16 @@ func (lr *LimitResolver) ResetAll() {
 	}
 }
 
+// Reapply forces a fresh resolveAndApply pass against the current per-zone
+// state. Used by the service layer when ControlState was reset out of
+// FAILSAFE on reconnect: any persisted commanded limits should now flow
+// back through into the effective limits.
+func (lr *LimitResolver) Reapply() {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+	lr.resolveAndApply()
+}
+
 // ClearZone removes all limits for a zone (e.g., on disconnect/failsafe).
 func (lr *LimitResolver) ClearZone(zoneID string) {
 	lr.mu.Lock()
