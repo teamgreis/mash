@@ -75,6 +75,11 @@ type WireOps interface {
 	SendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error
 	SendClearLimitInvoke(ctx context.Context) error
 	SendSetLimitInvoke(ctx context.Context) error
+	// SeedTwoZonesLimits seeds a SetLimit on each commissioned non-TEST
+	// zone connection so the resolver has authoritative values to
+	// aggregate. Called as a post-setup hook for tests with the
+	// two_zones_with_limits precondition (F-33).
+	SeedTwoZonesLimits(ctx context.Context, state *engine.ExecutionState) error
 }
 
 // DiagnosticsOps provides health inspection and state capture.
@@ -680,6 +685,19 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		setCtx, setCancel := context.WithTimeout(ctx, 3*time.Second)
 		if err := c.ops.SendSetLimitInvoke(setCtx); err != nil {
 			c.debugf("limit_is_set/ev_limit_applied: SetLimit failed: %v (continuing)", err)
+		}
+		setCancel()
+	}
+
+	// F-33: seed limits on both LOCAL and GRID for two_zones_with_limits.
+	// Runs after the precondition loop has commissioned both zones (via
+	// the auto-injected two_zones_connected case), so each zone has a live
+	// framer for the SetLimit invoke.
+	if c.config.Target != "" && needed >= precondLevelCommissioned &&
+		hasPrecondition(tc.Preconditions, PrecondTwoZonesWithLimits) {
+		setCtx, setCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := c.ops.SeedTwoZonesLimits(setCtx, state); err != nil {
+			c.debugf("two_zones_with_limits: seeding failed: %v (continuing)", err)
 		}
 		setCancel()
 	}

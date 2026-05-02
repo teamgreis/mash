@@ -333,6 +333,22 @@ func (lr *LimitResolver) Reapply() {
 	lr.resolveAndApply()
 }
 
+// SetZoneActive marks a zone's commanded limits as participating in
+// aggregation (active=true) or excluded from it (active=false / dormant).
+// The stored values are preserved either way so that a zone's commanded
+// value survives a disconnect and contributes again on reconnect
+// (per multi-zone-resolution.md §6.2). No-op for zones that never set a
+// limit. Forces a re-resolution so effective limits update immediately.
+func (lr *LimitResolver) SetZoneActive(zoneID string, active bool) {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+
+	dormant := !active
+	lr.consumptionLimits.SetDormant(zoneID, dormant)
+	lr.productionLimits.SetDormant(zoneID, dormant)
+	lr.resolveAndApply()
+}
+
 // ClearZone removes all limits for a zone (e.g., on disconnect/failsafe).
 func (lr *LimitResolver) ClearZone(zoneID string) {
 	lr.mu.Lock()
@@ -410,16 +426,24 @@ func (lr *LimitResolver) handleTimerExpiry(zoneIdx uint8, cmdType duration.Comma
 // resolver (failsafe timer, device-side safety override) and are not
 // modified here.
 func (lr *LimitResolver) resolveAndApply() {
+	// F-33: when ControlState is FAILSAFE/OVERRIDE, neither effective
+	// limits nor state should be modified by the regular resolver path.
+	// Failsafe limits are written by applyFailsafeEffects (pkg/service)
+	// and stay in effect until exitFailsafe -> Reapply explicitly
+	// resumes regular resolution. Without this guard, any SetZoneActive
+	// call during FAILSAFE (e.g. operational reconnect bringing a zone
+	// out of dormancy) would overwrite the failsafe-applied effective
+	// values with the resolved commanded values.
+	prev := lr.ec.ControlState()
+	if prev == ControlStateFailsafe || prev == ControlStateOverride {
+		return
+	}
+
 	effConsumption, _ := lr.consumptionLimits.ResolveLimits()
 	effProduction, _ := lr.productionLimits.ResolveLimits()
 
 	_ = lr.ec.SetEffectiveConsumptionLimitPtr(effConsumption)
 	_ = lr.ec.SetEffectiveProductionLimitPtr(effProduction)
-
-	prev := lr.ec.ControlState()
-	if prev == ControlStateFailsafe || prev == ControlStateOverride {
-		return
-	}
 
 	hasLimits := effConsumption != nil || effProduction != nil
 	switch {

@@ -87,9 +87,14 @@ preconditions:
   - second_zone_connected: GRID
 
 steps:
+  # F-33: explicit zone routing. With both LOCAL and GRID commissioned,
+  # the harness sets pool.Main() to the first zone (GRID), so a default
+  # `invoke` would land on GRID. The test description treats LOCAL as
+  # "Zone 1", so use invoke_as_zone explicitly.
   - name: Zone 1 (LOCAL) sets 8 kW limit
-    action: invoke
+    action: invoke_as_zone
     params:
+      zone: LOCAL
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
@@ -122,9 +127,13 @@ steps:
       read_success: true
       value: 5000000           # Grid's limit wins
 
+  # F-33: read myConsumptionLimit from LOCAL's perspective. The read hook
+  # in pkg/features/limit_resolver.go uses the caller-zone context to
+  # return the per-zone commanded value, so the answer differs by zone.
   - name: Verify LOCAL's own limit is still 8 kW
-    action: read
+    action: read_as_zone
     params:
+      zone: LOCAL
       endpoint: 1
       feature: EnergyControl
       attribute: myConsumptionLimit
@@ -425,9 +434,13 @@ preconditions:
   - two_zones_connected: true
 
 steps:
+  # F-33: explicit zone routing. After two_zones_connected, pool.Main()
+  # is GRID (commission order [GRID, LOCAL]); a default `invoke` would
+  # land on GRID. Use invoke_as_zone to match the test description.
   - name: Zone 1 (LOCAL) sets 8 kW limit
-    action: invoke
+    action: invoke_as_zone
     params:
+      zone: LOCAL
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
@@ -469,9 +482,14 @@ steps:
     params:
       duration: "2s"
 
+  # F-33: read via LOCAL since GRID (which was main) was just closed.
+  # Also verifies the dormancy filter: GRID's commanded 3M is preserved
+  # in the resolver but excluded from aggregation while disconnected,
+  # so effective should fall back to LOCAL's 8M.
   - name: Verify effective limit is now 8 kW (LOCAL's)
-    action: read
+    action: read_as_zone
     params:
+      zone: LOCAL
       endpoint: 1
       feature: EnergyControl
       attribute: effectiveConsumptionLimit
@@ -750,9 +768,13 @@ steps:
       read_success: true
       value_is_not_null: true
 
-  - name: Zone 1 clears its limit
-    action: invoke
+  # F-33: explicit per-zone clear. Default `invoke` lands on pool.Main()
+  # which is GRID; the test wants to clear LOCAL's limit here, then
+  # GRID's via invoke_as_zone in the next step.
+  - name: Zone 1 (LOCAL) clears its limit
+    action: invoke_as_zone
     params:
+      zone: LOCAL
       endpoint: 1
       feature: EnergyControl
       command: ClearLimit
@@ -761,7 +783,7 @@ steps:
     expect:
       invoke_success: true
 
-  - name: Zone 2 clears its limit
+  - name: Zone 2 (GRID) clears its limit
     action: invoke_as_zone
     params:
       zone: GRID

@@ -63,6 +63,12 @@ type ZoneValue struct {
 
 	// ExpiresAt is when the value expires (zero if indefinite).
 	ExpiresAt time.Time
+
+	// Dormant indicates the originating zone is currently disconnected.
+	// The commanded value is preserved (per multi-zone-resolution.md §6.2)
+	// but does NOT contribute to ResolveLimits/ResolveSetpoints aggregation
+	// while the slot is dormant. Cleared when the zone reconnects.
+	Dormant bool
 }
 
 // IsExpired returns true if the value has expired.
@@ -118,6 +124,16 @@ func (m *MultiZoneValue) Clear(zoneID string) {
 	delete(m.Values, zoneID)
 }
 
+// SetDormant marks an existing entry as dormant (or active).
+// No-op if the zone has no entry. The entry itself is preserved so that
+// the commanded value survives a disconnect and contributes again on
+// reconnect (per multi-zone-resolution.md §6.2).
+func (m *MultiZoneValue) SetDormant(zoneID string, dormant bool) {
+	if v, ok := m.Values[zoneID]; ok {
+		v.Dormant = dormant
+	}
+}
+
 // Get returns the value for a specific zone, or nil if not set.
 func (m *MultiZoneValue) Get(zoneID string) *ZoneValue {
 	return m.Values[zoneID]
@@ -159,6 +175,11 @@ func (m *MultiZoneValue) ResolveLimits() (*int64, string) {
 		if v.ZoneType == cert.ZoneTypeTest {
 			continue
 		}
+		// Disconnected zones' commanded limits are preserved but do not
+		// contribute to aggregation (multi-zone-resolution.md §6.2).
+		if v.Dormant {
+			continue
+		}
 		if effectiveValue == nil || v.Value < *effectiveValue {
 			val := v.Value
 			effectiveValue = &val
@@ -190,6 +211,11 @@ func (m *MultiZoneValue) ResolveSetpoints() (*int64, string) {
 	for zoneID, v := range m.Values {
 		// TEST zones are pure observers -- exclude from setpoint resolution (DEC-060).
 		if v.ZoneType == cert.ZoneTypeTest {
+			continue
+		}
+		// Disconnected zones' commanded setpoints are preserved but do not
+		// contribute to aggregation (multi-zone-resolution.md §6.2).
+		if v.Dormant {
 			continue
 		}
 		if v.Priority() < winningPriority {

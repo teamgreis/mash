@@ -515,6 +515,50 @@ func (r *Runner) sendSetLimitInvoke(_ context.Context) error {
 	return err
 }
 
+// sendSetLimitInvokeOnConn sends a SetLimit invoke through a specific zone
+// connection (not the runner's main pool). Used by the two_zones_with_limits
+// precondition to seed limits on each commissioned zone independently, since
+// each zone's connection has its own TLS session and zone-id context.
+func (r *Runner) sendSetLimitInvokeOnConn(conn *Connection, value int64) error {
+	if conn == nil || !conn.isConnected() || conn.framer == nil {
+		return fmt.Errorf("no live framer for SetLimit")
+	}
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: 1,
+		FeatureID:  uint8(model.FeatureEnergyControl),
+		Payload: &wire.InvokePayload{
+			CommandID: features.EnergyControlCmdSetLimit,
+			Parameters: map[uint8]any{
+				features.SetLimitParamConsumptionLimit: value,
+				features.SetLimitParamCause:            uint8(features.LimitCauseLocalOptimization),
+			},
+		},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return fmt.Errorf("encode SetLimit: %w", err)
+	}
+	if err := conn.framer.WriteFrame(data); err != nil {
+		return fmt.Errorf("send SetLimit: %w", err)
+	}
+	respData, err := conn.framer.ReadFrame()
+	if err != nil {
+		return fmt.Errorf("read SetLimit resp: %w", err)
+	}
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return fmt.Errorf("decode SetLimit resp: %w", err)
+	}
+	if !resp.IsSuccess() {
+		return fmt.Errorf("SetLimit failed: %s", resp.Status)
+	}
+	return nil
+}
+
 // ensureConnected checks if already on a commissioning TLS connection; if
 // not, establishes one.
 //
@@ -1029,6 +1073,35 @@ func (r *Runner) SendClearLimitInvoke(ctx context.Context) error {
 // SendSetLimitInvoke wraps sendSetLimitInvoke.
 func (r *Runner) SendSetLimitInvoke(ctx context.Context) error {
 	return r.sendSetLimitInvoke(ctx)
+}
+
+// SeedTwoZonesLimits sends SetLimit through each commissioned non-TEST zone
+// connection so a test using `two_zones_with_limits` enters its first step
+// with the resolver already aggregating two distinct authoritative values.
+func (r *Runner) SeedTwoZonesLimits(_ context.Context, state *engine.ExecutionState) error {
+	if r.config.Target == "" {
+		return nil
+	}
+	ct := getConnectionTracker(state)
+	// Different values so the resolver has something non-trivial to aggregate.
+	// LOCAL=8 kW, GRID=5 kW (more restrictive). Sign convention: positive = consumption.
+	seedValues := map[string]int64{
+		"LOCAL": 8_000_000,
+		"GRID":  5_000_000,
+	}
+	for _, name := range []string{"LOCAL", "GRID"} {
+		conn, ok := ct.zoneConnections[name]
+		if !ok || !conn.isConnected() || conn.framer == nil {
+			r.debugf("two_zones_with_limits: zone %s not available, skipping", name)
+			continue
+		}
+		if err := r.sendSetLimitInvokeOnConn(conn, seedValues[name]); err != nil {
+			r.debugf("two_zones_with_limits: zone %s SetLimit failed: %v (continuing)", name, err)
+		} else {
+			r.debugf("two_zones_with_limits: seeded zone %s with %d", name, seedValues[name])
+		}
+	}
+	return nil
 }
 
 // PASEState returns the current PASE state (delegates to connMgr).

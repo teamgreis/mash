@@ -84,6 +84,98 @@ func TestMultiZoneValueLimits(t *testing.T) {
 	})
 }
 
+func TestDormantZonesExcludedFromLimits(t *testing.T) {
+	t.Run("DormantZoneSkipped", func(t *testing.T) {
+		// GRID disconnects but its commanded 3000 stays in storage
+		// (per multi-zone-resolution.md §6.2). LOCAL's 8000 should win.
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-grid", cert.ZoneTypeGrid, 3000, 0)
+		mzv.Set("zone-local", cert.ZoneTypeLocal, 8000, 0)
+
+		mzv.SetDormant("zone-grid", true)
+
+		val, zoneID := mzv.ResolveLimits()
+		if val == nil || *val != 8000 {
+			t.Fatalf("ResolveLimits() = %v, want 8000 (GRID dormant)", val)
+		}
+		if zoneID != "zone-local" {
+			t.Errorf("zoneID = %q, want zone-local", zoneID)
+		}
+
+		// The stored entry must still be present (preserved across disconnect).
+		if zv := mzv.Get("zone-grid"); zv == nil || zv.Value != 3000 {
+			t.Errorf("Get(zone-grid) = %+v, want preserved value 3000", zv)
+		}
+	})
+
+	t.Run("ReactivationRestoresContribution", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-grid", cert.ZoneTypeGrid, 3000, 0)
+		mzv.Set("zone-local", cert.ZoneTypeLocal, 8000, 0)
+
+		mzv.SetDormant("zone-grid", true)
+		if val, _ := mzv.ResolveLimits(); val == nil || *val != 8000 {
+			t.Fatalf("after dormant: got %v, want 8000", val)
+		}
+
+		mzv.SetDormant("zone-grid", false)
+		val, zoneID := mzv.ResolveLimits()
+		if val == nil || *val != 3000 {
+			t.Fatalf("after reactivation: got %v, want 3000 (GRID wins again)", val)
+		}
+		if zoneID != "zone-grid" {
+			t.Errorf("zoneID = %q, want zone-grid", zoneID)
+		}
+	})
+
+	t.Run("AllDormantReturnsNil", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-grid", cert.ZoneTypeGrid, 3000, 0)
+		mzv.Set("zone-local", cert.ZoneTypeLocal, 8000, 0)
+		mzv.SetDormant("zone-grid", true)
+		mzv.SetDormant("zone-local", true)
+
+		val, zoneID := mzv.ResolveLimits()
+		if val != nil {
+			t.Errorf("ResolveLimits() = %v, want nil (all dormant)", *val)
+		}
+		if zoneID != "" {
+			t.Errorf("zoneID = %q, want empty", zoneID)
+		}
+	})
+
+	t.Run("SetDormantOnUnknownZoneIsNoOp", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-local", cert.ZoneTypeLocal, 8000, 0)
+
+		// SetDormant on a zone with no entry must not crash and must not
+		// affect existing entries.
+		mzv.SetDormant("zone-never-set", true)
+
+		val, _ := mzv.ResolveLimits()
+		if val == nil || *val != 8000 {
+			t.Errorf("ResolveLimits() = %v, want 8000", val)
+		}
+	})
+
+	t.Run("DormantSkippedInSetpoints", func(t *testing.T) {
+		// Setpoints use highest-priority-wins (lowest priority number).
+		// Dormant entries must be excluded from priority comparison too.
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-grid", cert.ZoneTypeGrid, 3000, 0)   // priority 1
+		mzv.Set("zone-local", cert.ZoneTypeLocal, 8000, 0) // priority 2
+		mzv.SetDormant("zone-grid", true)
+
+		val, zoneID := mzv.ResolveSetpoints()
+		if val == nil || *val != 8000 {
+			t.Fatalf("ResolveSetpoints() = %v, want 8000 (GRID dormant)", val)
+		}
+		if zoneID != "zone-local" {
+			t.Errorf("zoneID = %q, want zone-local", zoneID)
+		}
+	})
+}
+
 func TestZoneTypeTestExcludedFromLimits(t *testing.T) {
 	t.Run("TestZoneIgnored", func(t *testing.T) {
 		mzv := NewMultiZoneValue()

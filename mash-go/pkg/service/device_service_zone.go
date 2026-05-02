@@ -190,6 +190,13 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 	s.zoneSessions[targetZoneID] = zoneSession
 	s.mu.Unlock()
 
+	// F-33: clear dormancy on operational reconnect so this zone's
+	// commanded limits (preserved across the disconnect) participate in
+	// resolution again. No-op if the zone never set a limit.
+	if lr := s.limitResolver; lr != nil {
+		lr.SetZoneActive(targetZoneID, true)
+	}
+
 	// Emit connected event
 	s.emitEvent(Event{
 		Type:   EventConnected,
@@ -658,6 +665,11 @@ func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.Z
 	// For RegisterZoneAwaitingConnection (DEC-066), connected=false and we
 	// emit EventCommissioned separately after the commissioning flow completes.
 	if connected {
+		// F-33: ensure dormancy is cleared on connect (handleOperationalConnection
+		// also clears it; double-call is safe and idempotent).
+		if lr := s.limitResolver; lr != nil {
+			lr.SetZoneActive(zoneID, true)
+		}
 		s.emitEvent(Event{
 			Type:   EventConnected,
 			ZoneID: zoneID,
@@ -694,6 +706,16 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 	}
 
 	s.mu.Unlock()
+
+	// F-33: mark this zone's commanded limits dormant in the resolver.
+	// The stored values are preserved (per multi-zone-resolution.md §6.2)
+	// but stop contributing to ResolveLimits aggregation until reconnect.
+	// Done before handleFailsafe because resolveAndApply early-returns when
+	// already in FAILSAFE; the dormancy flag still needs to be set so
+	// future Reapply() calls (e.g., on exitFailsafe) see the correct state.
+	if lr := s.limitResolver; lr != nil {
+		lr.SetZoneActive(zoneID, false)
+	}
 
 	if shouldEnterFailsafe {
 		s.handleFailsafe(zoneID)

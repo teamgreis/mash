@@ -729,3 +729,49 @@ func TestLimitResolver_ConstraintValidation(t *testing.T) {
 		t.Fatal("expected Applied=true when MaxConsumption=0")
 	}
 }
+
+// F-33: a dormant zone's commanded limit is preserved but excluded from
+// aggregation. Reactivating it brings the value back without a re-Set.
+// This is the resolver-side behavior that lifts TC-ZONE-007.
+func TestLimitResolver_SetZoneActiveDormancy(t *testing.T) {
+	lr := newTestResolver()
+	ctxGrid := testCtx("zone-GRID", cert.ZoneTypeGrid)
+	ctxLocal := testCtx("zone-LOCAL", cert.ZoneTypeLocal)
+
+	// Both zones set commanded limits; GRID is more restrictive.
+	if _, err := lr.HandleSetLimit(ctxLocal, SetLimitRequest{ConsumptionLimit: intPtr(8_000_000)}); err != nil {
+		t.Fatalf("LOCAL SetLimit: %v", err)
+	}
+	if _, err := lr.HandleSetLimit(ctxGrid, SetLimitRequest{ConsumptionLimit: intPtr(3_000_000)}); err != nil {
+		t.Fatalf("GRID SetLimit: %v", err)
+	}
+	if eff, ok := lr.ec.EffectiveConsumptionLimit(); !ok || eff != 3_000_000 {
+		t.Fatalf("baseline: effective=%v ok=%v, want 3_000_000", eff, ok)
+	}
+
+	// GRID disconnects: mark dormant, effective should fall back to LOCAL.
+	lr.SetZoneActive("zone-GRID", false)
+	eff, ok := lr.ec.EffectiveConsumptionLimit()
+	if !ok || eff != 8_000_000 {
+		t.Fatalf("after GRID dormant: effective=%v ok=%v, want 8_000_000", eff, ok)
+	}
+
+	// GRID reconnects: dormancy clears, GRID dominates again. The commanded
+	// 3_000_000 was never re-set — it survived the disconnect.
+	lr.SetZoneActive("zone-GRID", true)
+	eff, ok = lr.ec.EffectiveConsumptionLimit()
+	if !ok || eff != 3_000_000 {
+		t.Fatalf("after GRID reactivated: effective=%v ok=%v, want 3_000_000", eff, ok)
+	}
+
+	// All authoritative zones dormant: effective drops to nil.
+	lr.SetZoneActive("zone-GRID", false)
+	lr.SetZoneActive("zone-LOCAL", false)
+	if _, ok := lr.ec.EffectiveConsumptionLimit(); ok {
+		t.Fatal("expected nil effective when all zones dormant")
+	}
+
+	// SetZoneActive on a zone with no entry must be a no-op.
+	lr.SetZoneActive("zone-never-touched", false)
+	lr.SetZoneActive("zone-never-touched", true)
+}

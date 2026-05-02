@@ -302,11 +302,26 @@ func (r *Runner) handleReadAsZone(ctx context.Context, step *loader.Step, state 
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
 
+	// F-33: support `attribute:` filtering + value extraction so per-zone
+	// reads can assert on `value:` directly (mirrors handleRead).
+	var attrID uint16
+	var hasAttr bool
+	if attrRaw, ok := params[ParamAttribute]; ok && attrRaw != nil {
+		attrID, err = r.resolver.ResolveAttribute(params[KeyFeature], attrRaw)
+		if err != nil {
+			return nil, fmt.Errorf("resolving attribute: %w", err)
+		}
+		hasAttr = true
+	}
+
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpRead,
 		EndpointID: endpointID,
 		FeatureID:  featureID,
+	}
+	if hasAttr {
+		req.Payload = &wire.ReadPayload{AttributeIDs: []uint16{attrID}}
 	}
 	data, err := wire.EncodeRequest(req)
 	if err != nil {
@@ -325,11 +340,17 @@ func (r *Runner) handleReadAsZone(ctx context.Context, step *loader.Step, state 
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 
-	return map[string]any{
+	outputs := map[string]any{
 		KeyReadSuccess: resp.IsSuccess(),
 		KeyValue:       resp.Payload,
 		KeyStatus:      resp.Status,
-	}, nil
+	}
+	if hasAttr && resp.Payload != nil {
+		if extracted, ok := extractAttributeValue(resp.Payload, attrID); ok {
+			outputs[KeyValue] = extracted
+		}
+	}
+	return outputs, nil
 }
 
 // handleInvokeAsZone invokes using a zone-scoped connection.
