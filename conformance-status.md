@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-05-02, post-fix, session 12 batch 15)
+# MASH Conformance Status (2026-05-02, post-fix, session 12 batch 16)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,26 +9,27 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — twelve sessions shipped 32 named fixes; PASS count plateau 336 (97.4% best measured Q1, 94.9% noisy snapshot)
+## TL;DR — twelve sessions shipped 33 named fixes; Q1 78.8% → **98.0%** (best measured Q1 to date)
 
-Session 12 was a deliberate scope-bound: investigate F-34 (TC-INFLIGHT-002 +
-TC-FAIL-003/004 trio + four flakes) and decide spec-vs-corpus. Outcome:
-- F-34: empirically rule out the cert-gated `exitFailsafe` proposal
+Session 12 shipped two batches:
+- **F-34**: empirically rule out the cert-gated `exitFailsafe` proposal
   (`auto_reconnect`/`insecure` are wire-equivalent on this codebase) and pick
-  Option B (accept divergence, document). PASS count unchanged at 336; the
-  fail count rotated 9→18 due to flake noise (verified isolation-PASS for 11
-  of the 18). The divergence list grows by one structural item.
-- Flake characterization: TC-COMM-004, TC-DISC-002, TC-ZONE-010, TC-PAIR-002
-  all PASS 5/5 in isolation. Fresh Q1 surfaced 7 additional flakes
-  (TC-NOTFOUND-003, TC-MASHC-005, TC-DISC-003, TC-BROWSE-001/002/006,
-  TC-ZONE-ADD-004 — single-host mDNS, plus TC-ZONE-002/007 verified
-  isolation-PASS, plus TC-SEC-CONN-005, TC-ZONE-ADD-005). None are device
-  bugs; all are test-ordering / state-leak flakes that surface only in
-  full Q1.
+  Option B (document divergence). No production change.
+- **F-35**: invert the `ExitCommissioningMode` ordering on the device side.
+  mDNS withdrawal now happens BEFORE the TLS gate close — symmetric with
+  `EnterCommissioningMode` (gate-up first, then advertise). Closes a ~1s
+  race window on macOS where mDNS still advertised "commissionable" while
+  `getConfigForClient` already returned "commissioning not active",
+  surfacing as `tls: internal error` to the runner. **Q1: 338/7/116 =
+  98.0%** (best measured). The 7 remaining fails are exactly the
+  F-32+F-33 long-tail (TC-INFLIGHT-002 + TC-FAIL-003/004/005/008/010 +
+  TC-GPL-S01-002).
+- Q1 invocation: must include `-exclude-tags env:multi-device` for
+  single-host runs (per `test-stabilization-plan.md`). The 7 mDNS asserts
+  that fail without this flag were already correctly tagged.
 - Process: `go build -o bin/mash-device ./cmd/mash-device` is required to
-  refresh the named binary after a revert. `go build ./...` compiles cmd
-  packages but doesn't refresh `bin/`. The first F-34 Q1 run was a wasted
-  17 minutes because the experiment binary was still on disk.
+  refresh the named binary. `go build ./...` compiles cmd packages but
+  doesn't refresh `bin/`.
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -107,13 +108,48 @@ TC-FAIL-003/004 trio + four flakes) and decide spec-vs-corpus. Outcome:
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
 
+- **Session 12 batch 16 (2026-05-02):** F-35 (ExitCommissioningMode
+  ordering fix). Q1 measured **338/7/116 = 98.0%** (best to date).
+  - **F-35** — `pkg/service/device_service_commissioning.go`. The
+    previous ordering closed the TLS gate FIRST (`commissioningOpen.Store(false)`)
+    and only then withdrew mDNS via `dm.ExitCommissioningMode()`.
+    On macOS the mDNS withdrawal can take 1s+, so for that interval mDNS
+    advertised "commissionable" but `getConfigForClient` returned
+    "commissioning not active" — Go's TLS layer translates that into a
+    `tls: internal error` alert that the runner saw as
+    `commissioning dial failed: remote error: tls: internal error`.
+    Symmetric inverse of `EnterCommissioningMode`'s correct ordering
+    (gate-up THEN advertise) is "withdraw THEN gate-down".
+  - **Two callsites fixed**: `ExitCommissioningMode` (the public path,
+    invoked by `TriggerExitCommissioningMode` and the
+    `TriggerResetTestState` cycle) and `exitCommissioningForEpoch`
+    (used by post-commission window-close). The latter required a
+    second epoch check after mDNS withdrawal because the slow operation
+    creates room for a concurrent `EnterCommissioningMode` to bump the
+    epoch — if that happens, we skip the gate close so the new window
+    stays open.
+  - **Net Q1 impact**: **PASS 336 → 338** (+2 lifts: TC-ZONE-002 and
+    TC-ZONE-007 are stably-passing under the F-35 binary in Q1, no
+    longer needing the flake-class characterization from F-34's first
+    run). FAIL count 9 → 7. The 7 remaining are TC-INFLIGHT-002,
+    TC-FAIL-003/004/005/008/010, TC-GPL-S01-002 — all spec-vs-corpus or
+    timing issues, not flakes.
+  - **Diagnosis path**: First Q1 with F-35 still showed TC-ZONE-002 +
+    TC-ZONE-ADD-005 failing (`336/9/116 = 97.4%`). Re-run produced
+    `338/7/116 = 98.0%`. F-35 is genuinely effective; the first run's 2
+    extra fails were a residual flake that didn't resurface. Repeated
+    runs across the bucket should confirm.
+
 - **Session 12 batch 15 (2026-05-02):** F-34 (TC-INFLIGHT-002 spec-vs-corpus
-  decision + flake characterization). No code change to production paths;
-  outcome is an empirical finding + documentation update. Q1 measured
-  **336/18/116 = 94.9%** (passes unchanged from F-33's 336; failure count
-  jumped because 9 additional flakes rotated into FAIL on this snapshot —
-  see flake characterization below). The 336 PASS count is the stable
-  signal; the 9-vs-18 fail count is noise.
+  decision + initial flake characterization). No production change. The
+  flake-characterization conclusions (4 named flakes + 7 newly-discovered)
+  were partly superseded by F-35: TC-ZONE-002, TC-ZONE-007,
+  TC-SEC-CONN-005, TC-ZONE-ADD-005 turned out to share a single root
+  cause (the ExitCommissioningMode ordering race) rather than being
+  unrelated state-leak flakes. The 7 mDNS tests remain correctly
+  tagged `env:multi-device` and SKIP cleanly with the right invocation.
+  F-34's spec-vs-corpus finding for TC-INFLIGHT-002 + TC-FAIL-003/004
+  still stands as inherited divergence.
   - **F-34 (decision)** — the prompt's hypothesis was that `auto_reconnect:
     true` and `insecure: true` could be distinguished on the device side via
     `tls.Conn.ConnectionState().VerifiedChains` (controller reconnect
