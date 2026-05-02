@@ -27,6 +27,7 @@ func (r *Runner) registerConnectionHandlers() {
 	r.engine.RegisterHandler(ActionConnectAsController, r.handleConnectAsController)
 	r.engine.RegisterHandler(ActionConnectAsZone, r.handleConnectAsZone)
 	r.engine.RegisterHandler(ActionReadAsZone, r.handleReadAsZone)
+	r.engine.RegisterHandler(ActionReadViaSuite, r.handleReadViaSuite)
 	r.engine.RegisterHandler(ActionInvokeAsZone, r.handleInvokeAsZone)
 	r.engine.RegisterHandler(ActionSubscribeAsZone, r.handleSubscribeAsZone)
 	r.engine.RegisterHandler(ActionWaitForNotificationAsZone, r.handleWaitForNotificationAsZone)
@@ -332,6 +333,84 @@ func (r *Runner) handleReadAsZone(ctx context.Context, step *loader.Step, state 
 	}
 
 	respData, err := conn.framer.ReadFrame()
+	if err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+
+	outputs := map[string]any{
+		KeyReadSuccess: resp.IsSuccess(),
+		KeyValue:       resp.Payload,
+		KeyStatus:      resp.Status,
+	}
+	if hasAttr && resp.Payload != nil {
+		if extracted, ok := extractAttributeValue(resp.Payload, attrID); ok {
+			outputs[KeyValue] = extracted
+		}
+	}
+	return outputs, nil
+}
+
+// handleReadViaSuite reads an attribute through the persistent suite TEST
+// zone control channel. The suite zone is excluded from authority resolution
+// (DEC-060) and from FAILSAFE entry/exit accounting (F-32), so it can
+// observe device-wide state during a disconnect window without altering
+// the device's per-zone slot bookkeeping. This is the spec-aligned way
+// (F-37) for tests to assert FAILSAFE state after disconnect without
+// relying on a post-disconnect auth-zone reconnect (which clears FAILSAFE
+// per failsafe-timing.md §3.1).
+func (r *Runner) handleReadViaSuite(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	sc := r.suite.Conn()
+	if sc == nil || !sc.isConnected() || sc.framer == nil {
+		return nil, fmt.Errorf("suite zone control channel is not available")
+	}
+
+	params := engine.InterpolateParams(step.Params, state)
+
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
+	if err != nil {
+		return nil, fmt.Errorf("resolving endpoint: %w", err)
+	}
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
+	if err != nil {
+		return nil, fmt.Errorf("resolving feature: %w", err)
+	}
+
+	var attrID uint16
+	var hasAttr bool
+	if attrRaw, ok := params[ParamAttribute]; ok && attrRaw != nil {
+		attrID, err = r.resolver.ResolveAttribute(params[KeyFeature], attrRaw)
+		if err != nil {
+			return nil, fmt.Errorf("resolving attribute: %w", err)
+		}
+		hasAttr = true
+	}
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpRead,
+		EndpointID: endpointID,
+		FeatureID:  featureID,
+	}
+	if hasAttr {
+		req.Payload = &wire.ReadPayload{AttributeIDs: []uint16{attrID}}
+	}
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("encode: %w", err)
+	}
+	if err := sc.framer.WriteFrame(data); err != nil {
+		return nil, fmt.Errorf("send: %w", err)
+	}
+
+	if sc.tlsConn != nil {
+		_ = sc.tlsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		defer func() { _ = sc.tlsConn.SetReadDeadline(time.Time{}) }()
+	}
+	respData, err := sc.framer.ReadFrame()
 	if err != nil {
 		return nil, fmt.Errorf("read: %w", err)
 	}

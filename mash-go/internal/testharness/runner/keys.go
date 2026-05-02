@@ -1023,6 +1023,7 @@ const (
 	ActionConnectAsController         = "connect_as_controller"
 	ActionConnectAsZone               = "connect_as_zone"
 	ActionReadAsZone                  = "read_as_zone"
+	ActionReadViaSuite                = "read_via_suite"
 	ActionInvokeAsZone                = "invoke_as_zone"
 	ActionSubscribeAsZone             = "subscribe_as_zone"
 	ActionWaitForNotificationAsZone   = "wait_for_notification_as_zone"
