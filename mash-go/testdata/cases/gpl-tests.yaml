@@ -288,6 +288,14 @@ preconditions:
   - measurement_subscription_active: true
 
 steps:
+  - name: Subscribe to Measurement (priming sets up wait_report's report stream)
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
   - name: Read initial power
     action: read
     params:
