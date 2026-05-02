@@ -142,15 +142,25 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 
 	s.debugLog("handleOperationalConnection: zone reconnected", "zoneID", targetZoneID)
 
-	// F-32: spec §3.1 says operational reconnect should clear FAILSAFE,
-	// but the corpus uses bare TLS reconnects (`insecure: true`) as plain
-	// observer connections that must NOT clear FAILSAFE — the test reads
-	// the FAILSAFE state through that connection. The harness has no
-	// separate code path to distinguish observer reconnects from
-	// controller reconnects, so we let FAILSAFE persist across operational
-	// reconnects and clear it only via TriggerResetTestState between
-	// tests. This matches the dominant corpus expectation; the spec
-	// divergence is documented in conformance notes.
+	// F-32/F-34: spec §3.1 says operational reconnect should clear FAILSAFE
+	// (return to CONTROLLED). The corpus has tests on both sides of this:
+	//   * TC-FAIL-003/004 + TC-INFLIGHT-002: assert reconnect clears FAILSAFE
+	//   * TC-CTRL-009, TC-FAIL-002, TC-FI-007, TC-STATE-003/015: assert
+	//     FAILSAFE persists after the post-disconnect reconnect (because
+	//     they only reconnect to perform a state-read, then assert the
+	//     pre-reconnect FAILSAFE state).
+	// The two YAML flags `auto_reconnect: true` and `insecure: true` are
+	// runner-level synonyms after commissioning — both go through
+	// operationalTLSConfig() and present the controller cert; the device's
+	// listener uses tls.RequireAndVerifyClientCert, so VerifiedChains is
+	// always populated. There is no wire-level signal that distinguishes
+	// the two cases. F-34 confirmed this empirically: enabling
+	// unconditional exitFailsafe lifts 3 tests but regresses 5.
+	// Net -2, so we keep F-32's choice (don't clear) and document the
+	// divergence; lifting the 3 spec-aligned tests requires either a
+	// runner-side wire-level marker (out of scope) or rewriting the 5
+	// corpus tests to verify FAILSAFE state through subscriptions /
+	// two-zone setups instead of post-reconnect reads.
 
 	// Create framed connection wrapper for operational messaging
 	framedConn := newFramedConnection(conn)
