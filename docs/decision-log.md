@@ -101,6 +101,7 @@ When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick 
 - [DEC-073: Failsafe-Limit Attributes Gated on acceptsLimits](#dec-073-failsafe-limit-attributes-gated-on-acceptslimits)
 - [DEC-075: Process Lifecycle Is Opt-In](#dec-075-process-lifecycle-is-opt-in)
 - [DEC-079: Limit-Override Notification Mechanism](#dec-079-limit-override-notification-mechanism)
+- [DEC-090: Partial Zone Loss Does Not Trigger Device-Wide FAILSAFE](#dec-090-partial-zone-loss-does-not-trigger-device-wide-failsafe)
 
 ### Conformance, use cases, PICS
 - [DEC-053: Endpoint Type Conformance Registry](#dec-053-endpoint-type-conformance-registry)
@@ -4991,6 +4992,75 @@ A spec-strict-to-§2.5 implementation (4500 s PTR/TXT) would still interop with 
 
 ---
 
+### DEC-090: Partial Zone Loss Does Not Trigger Device-Wide FAILSAFE
+
+**Date:** 2026-05-02
+**Status:** Accepted
+
+**Problem.**
+`docs/testing/behavior/failsafe-timing.md §5.2` previously stated that a single
+lost zone slot takes the device-wide `controlState` into FAILSAFE, derived
+from a naïve "most-concerning state across all slots" reading of the
+unified-controlState rule. That semantics is wrong for MASH's multi-zone
+operating model:
+
+- A LOCAL controller flap should not collapse a GRID-controlled device
+  into FAILSAFE. The GRID controller is still authoritative; its commanded
+  limit is still in effect; nothing about the device's safety posture
+  has changed.
+- The corpus encoded the safer behavior first: TC-FAIL-008 ("Per-Zone
+  Connection Loss Does Not Trigger FAILSAFE") asserts CONTROLLED on a
+  partial loss, and the F-32 (2026-05-01) device implementation only
+  enters device-wide FAILSAFE when **no other authoritative zone**
+  remains.
+- The previous spec text was therefore in conflict with both the corpus
+  (test-first) and the device (implementation). A spec amendment is
+  cheaper than retrofitting both directions.
+
+**Decision.**
+- FAILSAFE remains a per-zone-slot state; the lost slot enters FAILSAFE
+  per §2.1 immediately on detection, and its dormant commanded limit
+  is replaced by its failsafe limit for resolution purposes.
+- The device-wide `controlState` aggregates **only across still-
+  authoritative zones**. A still-connected GRID or LOCAL zone keeps
+  the aggregate in CONTROLLED/LIMITED/etc.; FAILSAFE only flows to
+  the device-wide attribute when **no authoritative zone remains**.
+- The lost slot's failsafe limit can still tighten the effective
+  limit (per §5.1's "most-restrictive wins" rule), even when the
+  device-wide `controlState` does not flip to FAILSAFE.
+
+**Why scope FAILSAFE precedence to authoritative zones.**
+- Safety-by-aggregation is a poor fit when controllers are
+  redundant. Two regulators of the same scope (e.g. two LOCAL
+  controllers) would be a different story; today MASH is constrained
+  to one per zone type (DEC-043), so a partial loss always leaves
+  at least one operationally-valid controller.
+- The "any flap → FAILSAFE" semantics is practically broken for
+  long-tail flap scenarios (mobile networks, residential
+  intermittent connectivity). It optimizes for unreachable failure
+  modes (both auth zones simultaneously gone, but only one slot
+  reports loss first) at the cost of the common case.
+- The scoped semantics is testable: TC-FAIL-008 directly asserts it.
+  The aggregating semantics requires synchronizing test expectations
+  with the loss-detection ordering between zones, which is timing-
+  flaky.
+
+**What this does not change.**
+- §1 detection latency (still ≤ 1s clean disconnect, see §1.3).
+- §2.3 per-zone failsafeDuration countdown (still per-slot, still
+  runs even when the device-wide aggregate is not FAILSAFE).
+- §5.3 device-level failsafe-limit attributes (unchanged).
+- Complete loss (all auth zones disconnected) still produces
+  device-wide FAILSAFE (§5.2 second bullet, unchanged).
+
+**Related:** DEC-043 (one-zone-per-type cap — the structural reason
+two-redundant-of-same-scope isn't a concern), DEC-074 (unified
+controlState — the rule whose precedence is now scoped to auth
+zones), DEC-073 (failsafe limit attributes — interaction with the
+"limits still tighten on partial loss" carve-out).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -5137,3 +5207,4 @@ Key learnings:
 | 2026-04-27 | Added DEC-086: Subscription defaults, validation, and priming uniqueness. Surfaced during mash-py Phase 16 — `interaction-model.md §6` was example-only on default intervals (1000 ms / 60000 ms), silent on `maxInterval=0` rejection, silent on bounce-back suppression, ambiguous on heartbeat content (Go has both Empty and Full modes), and silent on the priming wire-frame (Go's `subscription.Manager` would emit a separate priming `Notification` in addition to the values in the Subscribe Response). Spec lifted to RECOMMENDED defaults; `maxInterval=0` and `subscriptionId=0` rejected; bounce-back made mandatory; heartbeat MUST be full; priming MUST live only in the Subscribe Response (key 2 always present). mash-go drops `HeartbeatEmpty` and the duplicate priming-notification path; mash-py implements the full set as the Phase 16 acceptance gate. |
 | 2026-04-28 | Added DEC-088: Operational mDNS TXT canonicalization. Surfaced during mash-py Phase 18 — `docs/discovery.md §2.3` (no `ZI`, instance `<device-id>`), `docs/testing/behavior/discovery.md §3.3` (`ZI` required, instance `<zone-id>-<device-id>`), and DEC-074 (`FM` removed) had drifted apart. The §2.3 prose was structurally incompatible with multi-zone (DEC-082) — a single `<device-id>` instance name has no room for per-(device, zone) records. DEC-088 normatively defines: instance name `<zone-id>-<device-id>`; required TXT `ZI` + `DI`; optional `VP`/`FW`/`EP`; `FM` forbidden; commissionable instance name `MASH-NNNN` (4-digit zero-pad). mash-go already conformant (no code changes, regression-guarded by `TestOperationalTXT_OmitsFeatureMap` and `TestOperationalTXTRoundtrip`); `docs/discovery.md` §2.2/§2.3 + `docs/testing/behavior/discovery.md` §3.3/§3.5 updated in lockstep; mash-py Phase 18 advertiser implements DEC-088 verbatim. |
 | 2026-04-28 | Added DEC-089: Uniform 120 s mDNS TTL and MUST-level cache invalidation. Surfaced during mash-py Phase 22 — `connection-establishment.md §2.5` prescribed per-record TTLs (PTR 4500 s, SRV 120 s, AAAA 120 s, TXT 4500 s) inherited from generic DNS-SD, but neither reference implementation conforms (mash-go: uniform 120 s; mash-py: python-zeroconf's mixed 120 s / 4500 s defaults). The 4500 s TXT TTL was wrong for MASH because DEC-088's `EP`/`FW`/`VP` change in normal operation. Stale records after ungraceful exits also blocked Phase 22 conformance runs for tens of minutes. Decision: uniform 120 s for PTR/SRV/AAAA/TXT, plus promote "cache invalidation on TCP-refused / TLS-mismatch / goodbye" from descriptive to MUST. mash-go already conformant (regression test `TestDefaultAdvertiserConfig_TTLIs120Seconds` added); mash-py advertiser pinned `host_ttl=other_ttl=120` explicitly + parallel regression test; spec table rewritten in `connection-establishment.md §2.5`. Also fixed an mash-py advertiser bug surfaced in lockstep: `unpublish_*` returned the goodbye-broadcast future without awaiting it, so `asyncio.run` shutdown cancelled the broadcast before any goodbye reached the wire — root cause of the stale-record observation that motivated the DEC. |
+| 2026-05-02 | Added DEC-090: Partial zone loss does not trigger device-wide FAILSAFE. Surfaced during F-36 conformance work on TC-FAIL-008 — `failsafe-timing.md §5.2` prescribed a "single lost zone takes the device into device-wide FAILSAFE" semantics (naïve "most concerning state across slots" reading of unified controlState), but the corpus (TC-FAIL-008 "Per-Zone Connection Loss Does Not Trigger FAILSAFE") and the F-32 device implementation both assert the safer semantics: device-wide FAILSAFE only when no other authoritative zone remains. Decision: scope FAILSAFE precedence to authoritative zones — a still-connected GRID/LOCAL keeps the aggregate in CONTROLLED/LIMITED/etc.; the lost slot's FAILSAFE limit can still tighten effective limits per "most-restrictive wins" but does not flip the device-wide controlState. Per-slot countdown to AUTONOMOUS (§2.3) and complete-loss → device-wide FAILSAFE (§5.2 second bullet) unchanged. Spec §5.2 rewritten; mash-go already conformant. |

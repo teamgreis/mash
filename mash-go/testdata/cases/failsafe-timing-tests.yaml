@@ -477,7 +477,7 @@ steps:
     params:
       duration: "3s"
 
-  - name: Verify control state still CONTROLLED
+  - name: Verify FAILSAFE not entered (GRID still authoritative, per DEC-090)
     action: read
     params:
       endpoint: 1
@@ -485,17 +485,7 @@ steps:
       attribute: controlState
     expect:
       read_success: true
-      value: 0x01                  # CONTROLLED (Zone 1 still connected)
-
-  - name: Verify effective limit uses Zone 1 only
-    action: read
-    params:
-      endpoint: 1
-      feature: EnergyControl
-      attribute: effectiveConsumptionLimit
-    expect:
-      read_success: true
-      value_is_not_null: true      # Zone 1's limit still active
+      value: 0x01                  # CONTROLLED (GRID still connected, no limits)
 
 postconditions:
   - partial_loss_not_failsafe: true

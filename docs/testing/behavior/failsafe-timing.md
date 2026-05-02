@@ -251,18 +251,35 @@ limit takes over for resolution purposes.
 ### 5.2 Per-Zone vs. Device-Wide FAILSAFE
 
 FAILSAFE is a **per-zone-slot** state. The device's unified `controlState`
-attribute is the aggregation across all zone slots — the most-concerning
-state wins (`FAILSAFE > OVERRIDE > LIMITED > CONTROLLED > AUTONOMOUS`,
-see [energy-control.md "Unified Control State"](../../features/energy-control.md#unified-control-state)).
+attribute aggregates across all zone slots (see
+[energy-control.md "Unified Control State"](../../features/energy-control.md#unified-control-state)),
+but the FAILSAFE precedence is **scoped to authoritative zones**: a lost
+slot does NOT pull a still-controlled device into device-wide FAILSAFE
+when at least one other authoritative zone (GRID or LOCAL) remains
+connected.
 
-- **Partial loss**: each lost zone's slot enters FAILSAFE immediately on
-  detection (§2.1, applied per-slot); remaining connected zones continue
-  to set commanded limits/setpoints. Device-wide `controlState` reflects
-  the most-concerning slot — so a single lost zone takes the device into
-  FAILSAFE.
-- **Complete loss**: every slot is in FAILSAFE; device-wide `controlState`
-  is FAILSAFE. Each slot independently runs its `failsafeDuration` timer
-  to AUTONOMOUS (§2.3 / §3).
+- **Partial loss** (at least one authoritative zone still connected):
+  the lost zone's slot enters FAILSAFE per §2.1 — its commanded limit
+  becomes dormant and its failsafe limit contributes to resolution
+  (§5.1). The device-wide `controlState` reflects the **most-concerning
+  state across the still-authoritative zones**. The lost slot's
+  FAILSAFE does not propagate to the device-wide aggregate; otherwise
+  any momentary flap of any controller would shove the entire device
+  into FAILSAFE even while another authoritative controller is fully
+  in command. Per the "most restrictive wins" rule for limits, the
+  lost zone's failsafe limit can still tighten the effective limit
+  even though `controlState` does not flip to FAILSAFE.
+- **Complete loss** (no authoritative zones connected): every slot
+  is in FAILSAFE; device-wide `controlState` is FAILSAFE. Each slot
+  independently runs its `failsafeDuration` timer to AUTONOMOUS
+  (§2.3 / §3).
+
+> **Design note (DEC-090).** An earlier draft of this section stated
+> that any single lost zone takes the device into device-wide FAILSAFE.
+> That semantics is too aggressive: a flapping LOCAL controller should
+> not collapse a GRID-controlled device into FAILSAFE. The corpus
+> (TC-FAIL-008 "Per-Zone Connection Loss Does Not Trigger FAILSAFE")
+> encoded the safer behavior first; this section was amended to match.
 
 ### 5.3 Failsafe Configuration Source
 
