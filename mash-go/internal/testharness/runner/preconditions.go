@@ -267,6 +267,34 @@ func preconditionValue(conditions []loader.Condition, key string) string {
 	return ""
 }
 
+// failsafeDurationShortValue returns the requested failsafe duration in seconds.
+// `failsafe_duration_short: true` keeps the legacy 5s default; an explicit int
+// payload (`failsafe_duration_short: 60`) overrides it. Negative or zero ints
+// are ignored (treated as not present).
+func failsafeDurationShortValue(conditions []loader.Condition) (uint32, bool) {
+	for _, cond := range conditions {
+		v, ok := cond[PrecondFailsafeDurationShort]
+		if !ok {
+			continue
+		}
+		switch x := v.(type) {
+		case bool:
+			if x {
+				return 5, true
+			}
+		case int:
+			if x > 0 {
+				return uint32(x), true
+			}
+		case int64:
+			if x > 0 {
+				return uint32(x), true
+			}
+		}
+	}
+	return 0, false
+}
+
 // needsFreshCommission checks if any condition explicitly requests a fresh commissioning cycle.
 func needsFreshCommission(conditions []loader.Condition) bool {
 	return hasPrecondition(conditions, PrecondFreshCommission)

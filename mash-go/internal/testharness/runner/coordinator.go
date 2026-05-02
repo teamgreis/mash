@@ -605,10 +605,12 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	// F-32: failsafe_duration_short must run BEFORE control_state so that
 	// when control_state: FAILSAFE fires, the countdown picks up the
 	// short duration (TC-STATE-004 waits 6s for AUTONOMOUS).
+	// F-36-C1: honor int payload (`failsafe_duration_short: 5`); bool true
+	// defaults to 5s. Earlier code only matched the bool form, silently
+	// ignoring TC-FAIL-005's `5` and TC-FAIL-007's `60`.
 	if c.config.Target != "" && c.config.EnableKey != "" && needed >= precondLevelCommissioned {
-		if hasPrecondition(tc.Preconditions, PrecondFailsafeDurationShort) {
+		if short, ok := failsafeDurationShortValue(tc.Preconditions); ok {
 			trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
-			short := uint32(5) // 5 seconds
 			trigger := features.TriggerSetFailsafeDurationBase | uint64(short)
 			if err := c.ops.SendTriggerViaZone(trigCtx, trigger, state); err != nil {
 				c.debugf("failsafe_duration_short: trigger failed: %v (continuing)", err)

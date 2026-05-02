@@ -79,6 +79,13 @@ type DeviceService struct {
 	failsafeCountdown         *time.Timer
 	failsafeCountdownStartedAt time.Time
 
+	// failsafeDurationOverride is set by the TriggerSetFailsafeDuration
+	// test backdoor (F-36-C1). The countdown picks this up in preference
+	// to the failsafeDuration attribute, which is range-validated to the
+	// DEC-070 floor of 7200s and therefore cannot be set to test-friendly
+	// short values via the normal attribute path. Zero = no override.
+	failsafeDurationOverride time.Duration
+
 	// Subscription management
 	subscriptionManager dispatch.SubscriptionTracker
 

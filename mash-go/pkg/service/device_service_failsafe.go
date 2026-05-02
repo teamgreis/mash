@@ -204,6 +204,12 @@ func (s *DeviceService) handleFailsafe(zoneID string) {
 	dur, _ := s.applyFailsafeEffects()
 
 	s.mu.Lock()
+	// F-36-C1: test backdoor overrides the attribute-derived duration so
+	// conformance tests can exercise the FAILSAFE -> AUTONOMOUS transition
+	// without waiting the DEC-070 minimum of 2 hours.
+	if s.failsafeDurationOverride > 0 {
+		dur = s.failsafeDurationOverride
+	}
 	s.failsafeActive = true
 	s.startFailsafeCountdownLocked(dur)
 	s.mu.Unlock()

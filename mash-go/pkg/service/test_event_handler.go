@@ -396,6 +396,9 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 				cz.FailsafeActive = false
 			}
 		}
+		// F-36-C1: clear the test-only failsafeDuration override so the
+		// next test starts with the spec-default attribute-derived value.
+		s.failsafeDurationOverride = 0
 		s.mu.Unlock()
 		// Close pre-operational connections tracked by connTracker to
 		// prevent stale entries from prior tests from being reaped mid-test.
@@ -697,16 +700,23 @@ func (s *DeviceService) handleEnergyControlTrigger(_ context.Context, trigger ui
 			// F-32: parameterized failsafeDuration override. The lower 32
 			// bits hold the duration in seconds; if a FAILSAFE countdown
 			// is running, it is restarted with the new duration.
+			//
+			// F-36-C1: the failsafeDuration attribute has a DEC-070 min of
+			// 7200s, so writing a test value of 5/60s through
+			// SetAttributeInternal silently fails the range check. Stash
+			// the value on the service instead and have handleFailsafe
+			// prefer it over the attribute.
 			if trigger&0xFFFF_FFFF_0000_0000 == features.TriggerSetFailsafeDurationBase {
 				secs := uint32(trigger & 0xFFFF_FFFF)
-				s.debugLog("trigger: set failsafeDuration", "endpoint", ep.ID(), "seconds", secs)
-				_ = feat.SetAttributeInternal(features.EnergyControlAttrFailsafeDuration, secs)
+				dur := time.Duration(secs) * time.Second
+				s.debugLog("trigger: set failsafeDuration override", "endpoint", ep.ID(), "seconds", secs)
 				s.mu.Lock()
+				s.failsafeDurationOverride = dur
 				active := s.failsafeActive
 				s.mu.Unlock()
 				if active {
 					s.mu.Lock()
-					s.startFailsafeCountdownLocked(time.Duration(secs) * time.Second)
+					s.startFailsafeCountdownLocked(dur)
 					s.mu.Unlock()
 				}
 				return nil
