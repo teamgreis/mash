@@ -449,23 +449,17 @@ steps:
     params:
       duration: "5s"
 
-  - name: Reconnect and read process state
-    action: connect
-    params:
-      insecure: true
-
-  - name: Verify process is still RUNNING
-    action: read
-    params:
-      endpoint: 1
-      feature: EnergyControl
-      attribute: processState
-    expect:
-      read_success: true
-      value: 0x03                  # RUNNING (unchanged)
-
-  - name: Verify control state is FAILSAFE
-    action: read
+  # F-37: assert FAILSAFE state via the suite TEST zone control channel
+  # BEFORE any reconnect. Per failsafe-timing.md §3.1 the reconnect would
+  # clear FAILSAFE and the earlier post-reconnect read no longer observes
+  # the in-FAILSAFE value. The suite TEST zone is excluded from authority
+  # resolution and FAILSAFE bookkeeping (DEC-060), so it can observe
+  # device-wide attributes without altering them. ProcessState is also
+  # checked in-FAILSAFE here -- that is the actual orthogonality assertion
+  # this test exists to make (ControlState=FAILSAFE while ProcessState
+  # stays RUNNING).
+  - name: Verify control state is FAILSAFE (via suite zone)
+    action: read_via_suite
     params:
       endpoint: 1
       feature: EnergyControl
@@ -473,6 +467,24 @@ steps:
     expect:
       read_success: true
       value: 0x03                  # FAILSAFE (per ControlStateEnum)
+
+  - name: Verify process is still RUNNING during FAILSAFE (via suite zone)
+    action: read_via_suite
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03                  # RUNNING (orthogonal to FAILSAFE)
+
+  # Reconnect for clean teardown; this is also the
+  # testCaseNeedsIsolatedCommissionedSession trigger that routes the test
+  # through a fresh LOCAL auth zone instead of the suite TEST zone.
+  - name: Reconnect (clears FAILSAFE per spec §3.1)
+    action: connect
+    params:
+      insecure: true
 
 postconditions:
   - process_continues_during_failsafe: true
