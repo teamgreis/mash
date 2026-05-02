@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-05-01, post-fix, session 10 batch 13)
+# MASH Conformance Status (2026-05-02, post-fix, session 11 batch 14)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,7 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — ten sessions shipped 30 named fixes; Q1 78.8% → 97.4% (best measured Q1 to date)
+## TL;DR — eleven sessions shipped 31 named fixes; Q1 78.8% → 97.4% (best measured Q1 to date)
 
 - **Session 1 (morning):** F-1 (operational SRV-resolve canonical zone-id) and
   F-4 (Go device listener stays up). Together those moved Go-on-Go from 12.5%
@@ -87,6 +87,99 @@ the off-diagonals are the real cross-stack interop signal.
     Non-numeric types keep strict Go-typename equality. Also extended
     `ToFloat64` to cover the missing `uint8`/`uint16`/`int8`/`int16`
     cases. Future tests asserting fixed-width integer types now work.
+
+- **Session 11 batch 14 (2026-05-02):** F-33 (resolver dormancy filter
+  + spec-correct effective-during-FAILSAFE invariant + corpus per-zone
+  routing + harness `read_as_zone attribute:` filter +
+  `two_zones_with_limits` precondition seeding). Q1 measured
+  **336/9/116 = 97.4%** -- headline unchanged versus F-32 but
+  composition is more spec-aligned: TC-ZONE-002, TC-ZONE-007, TC-ZONE-011
+  lifted (bucket #3 zone-resolution); TC-INFLIGHT-002 newly fails as
+  a side-effect of the spec-correctness fix (same `auto_reconnect`/
+  `insecure` corpus-vs-runner ambiguity F-32 already flagged).
+  - **F-33** -- one logical change with three tightly-coupled pieces.
+    The user-prompt's hypothesis was that `MultiZoneValue.ResolveLimits`
+    was missing a "skip disconnected zones" filter -- correct for
+    TC-ZONE-007 but not the whole bucket. TC-ZONE-002 surfaced a
+    *separate* bug under isolation tracing.
+    - **Resolver dormancy** (pkg/zone/zone.go, pkg/features/limit_resolver.go):
+      added `ZoneValue.Dormant bool`. `ResolveLimits` and
+      `ResolveSetpoints` skip dormant entries (alongside the existing
+      TEST-zone exclusion). New `MultiZoneValue.SetDormant(zoneID, bool)`
+      flips the flag without removing the entry — commanded values
+      persist across disconnect per
+      `docs/testing/behavior/multi-zone-resolution.md §6.2`. New
+      `LimitResolver.SetZoneActive(zoneID, bool)` wraps both consumption
+      and production tracks under `lr.mu` and re-runs `resolveAndApply`.
+    - **FAILSAFE-shadow invariant** (pkg/features/limit_resolver.go):
+      moved `resolveAndApply`'s FAILSAFE/OVERRIDE early-return BEFORE
+      the effective-limit writes. Pre-F-33 the function unconditionally
+      wrote effective from aggregation, then skipped state changes if
+      already in FAILSAFE -- but the unconditional effective write
+      stomped on the failsafe-applied values. The latent bug went
+      unobserved because no production code path called
+      `resolveAndApply` *while* state was FAILSAFE: `Reapply()` is only
+      invoked from `exitFailsafe` after state has been cleared. F-33's
+      `SetZoneActive(true)` on operational reconnect introduces a new
+      caller that *can* fire during FAILSAFE (zone reconnect-while-
+      FAILSAFE-pinned), exposing the latent bug as a TC-CTRL-009 /
+      TC-FAIL-002 regression. Moving the early-return up restores the
+      F-32 lifts and now also matches the spec: during FAILSAFE,
+      `effectiveConsumptionLimit` IS the failsafe limit, regardless of
+      what commanded values exist.
+    - **Service wiring** (pkg/service/device_service_zone.go):
+      `HandleZoneDisconnect` calls `SetZoneActive(false)` after the
+      `s.mu` release (same self-deadlock pattern as F-32 — resolveAndApply
+      fans out to subscriber notifications that re-acquire `s.mu`).
+      `handleOperationalConnection` and `handleZoneConnectInternal`
+      call `SetZoneActive(true)` on connect. Composes cleanly with
+      F-32: while ControlState=FAILSAFE, resolveAndApply early-returns
+      so dormancy state is set but doesn't fight failsafe-applied
+      effective limits; on `exitFailsafe`, `Reapply()` resolves with
+      dormancy honored.
+    - **Corpus** (testdata/cases/zone-limit-tests.yaml): TC-ZONE-002
+      step 1 + 4, TC-ZONE-007 step 1 + 6, TC-ZONE-011 step 2 changed
+      from `invoke`/`read` (default = `pool.Main()` = GRID, since
+      `two_zones_connected` commissions [GRID, LOCAL] in that order)
+      to explicit `invoke_as_zone`/`read_as_zone` with the intended
+      zone (LOCAL for "Zone 1" per the test descriptions). The
+      session-5 analysis blamed a "device-side read-extractor gap"
+      for TC-ZONE-002 — that was wrong; the read hook in
+      `pkg/features/limit_resolver.go::Register` correctly routes
+      per-zone reads via the caller-zone context, but the test was
+      asking the wrong zone.
+    - **Harness plumbing** (internal/testharness/runner):
+      `handleReadAsZone` gained `attribute:` filtering and value
+      extraction (mirrors `handleRead`); without this a per-zone
+      `value: 8000000` assertion couldn't match the full payload map.
+      New `sendSetLimitInvokeOnConn` writes a SetLimit through a
+      specific zone framer; new `SeedTwoZonesLimits` loops
+      `[LOCAL=8M, GRID=5M]` for `two_zones_with_limits: true`. The
+      hook runs as a post-setup phase in `coordinator.go` (same pattern
+      as `limit_is_set`/`ev_limit_applied`) because the auto-injected
+      `two_zones_connected` runs *after* `two_zones_with_limits` in
+      the precondition order — running the seed inline in
+      `HandlePreconditionCases` would hit empty `ct.zoneConnections`.
+    - **Tests added**: `TestDormantZonesExcludedFromLimits` (5 sub-cases
+      in pkg/zone/zone_test.go) + `TestLimitResolver_SetZoneActiveDormancy`
+      (pkg/features/limit_resolver_test.go).
+    - **Net Q1 impact**: lifted TC-ZONE-002, TC-ZONE-007, TC-ZONE-011.
+      Newly fails: TC-INFLIGHT-002 (corpus expects post-FAILSAFE
+      `effectiveConsumptionLimit` to track a fresh SetLimit; spec says
+      it should stay pinned to failsafe limit until `exitFailsafe` —
+      same `auto_reconnect`/`insecure` ambiguity flagged in F-32 for
+      TC-FAIL-003). Net headline +0/-0 (same 336/9 = 97.4%) because
+      noise from TC-COMM-004 / TC-DISC-002 / TC-ZONE-010 / TC-PAIR-002
+      flake-set rotations cancel against the lifts. Real signal: +2
+      structural lifts (TC-ZONE-002, TC-ZONE-007, both reproducibly
+      isolation-passing) + 1 structural regression (TC-INFLIGHT-002,
+      reproducibly isolation-failing).
+    - **Composes with F-32 spec divergence**: F-32 noted partial-loss
+      vs device-wide FAILSAFE in failsafe-timing.md §5.2; that's
+      orthogonal to F-33. F-33 governs *aggregation* (which zones'
+      commanded values contribute), F-32 governs *ControlState*
+      transitions. Both can be revisited together when the spec
+      §5.2 alignment lands.
 
 - **Session 10 batch 13 (2026-05-01):** F-32 (spec-aligned failsafe
   state machine: entry, limit application, countdown to AUTONOMOUS).
@@ -809,11 +902,11 @@ failures are real test signal — 75 feature assertion failures the device
 implementation can address one by one, plus 5 F-2 pairing-request runner
 bugs and 1 F-6 cert-state leak.
 
-## Headline numbers (post-fix, session 10 batch 13 — 2026-05-01)
+## Headline numbers (post-fix, session 11 batch 14 — 2026-05-02)
 
 | Runner → Device | Discovered | Skipped (PICS) | Ran | Passed | Failed | Pass rate (of run) | Notes |
 |---|---|---|---|---|---|---|---|
-| `mash-test` → Go device     | 461 | 116 | 345 | **336** | 9   | **97.4 %** *(measured)* | After F-32 (spec-aligned failsafe state machine: entry, limit application, countdown to AUTONOMOUS). Seven bucket-#1 lifts: TC-CTRL-009, TC-FAIL-002, TC-FI-007, TC-STATE-003, TC-STATE-004, TC-STATE-015, TC-GPL-S00-003. Plus TC-ZONE-REMOVE-003 flake recovery. Two regressions: TC-FAIL-003 (corpus-vs-runner contradiction with TC-STATE-003 — `auto_reconnect: true` and `insecure: true` are runner-level synonyms today; lifting the seven `insecure` tests required disabling exitFailsafe-on-operational-reconnect, breaking the one `auto_reconnect` test); TC-FAIL-005 (short-duration countdown still flaky despite re-entry guard). Net headline +6 PASS / -6 FAIL / 0 SKIP. Best measured Q1 to date. |
+| `mash-test` → Go device     | 461 | 116 | 345 | **336** | 9   | **97.4 %** *(measured)* | After F-33 (resolver dormancy filter — `pkg/zone.MultiZoneValue.SetDormant` + `pkg/features.LimitResolver.SetZoneActive` — wired from `pkg/service.HandleZoneConnect/Disconnect`; FAILSAFE-shadow invariant in `resolveAndApply` early-return; corpus per-zone routing for TC-ZONE-002/-007/-011; harness `read_as_zone attribute:` filter + value extraction; new `two_zones_with_limits` precondition seeding hook in coordinator.go). Three structural bucket-#3 lifts: TC-ZONE-002, TC-ZONE-007, TC-ZONE-011. One spec-correctness regression: TC-INFLIGHT-002 (post-FAILSAFE SetLimit no longer overwrites effective; corpus-vs-spec divergence inherited from F-32's `auto_reconnect`/`insecure` ambiguity). Net headline 336/9 = 97.4% (unchanged from F-32; flake-set rotation cancels real lifts in the headline number). Real signal: +2 PASS / -1 FAIL on isolation-reproducible tests. Composition more spec-aligned than F-32 baseline. |
 | `mash-test` → Python device | 461 | 138 | 153* | **110** | 43 | **~71.9 %** *(of attempted)* | Partial run (session 5). F-1 fix verified: `-target 18446 -srv-resolve` works via SRV-resolve; auto-PICS commissions, 110 tests pass, 43 fail on real cross-stack issues. Then mash-py's commissioning window expires, the listener tears down, and the next ~140 tests fail with `connection refused`. **mash-py has a F-4-equivalent bug** (listener torn down on window expiry, see "F-11" below). Headline blocked on that fix. |
 | `mash-py-test` → Go device  | 490 | 349 | 141 | **1**   | 140 | **0.7 %**  | Full-corpus re-run (session 5) with F-3 base-PICS auto-load active. PICS pruning reduces 490 -> 141. Of the 140 failures: **184 unknown-action incidents across 30+ distinct action types** (`device_local_action` x32, `controller_action` x16, `open_commissioning_connection` x14, `enter_commissioning_mode` x14, `ping` x10, `commission_with_admin` x10, `list_zones`, `subscribe_multiple`, `send_pase_x`, etc.) — F-3 device-side discovery half is still missing, plus action-handler implementation gaps dominate. Headline blocked on mash-py harness implementation. F-7's subscribe-handler fix doesn't surface here because tests fail at action dispatch *before* subscriptions matter. |
 | `mash-py-test` → Py device  | 490 | 0   | aborted | — | — | — | Aborted at 14 tests (~2 min in). Phase 22 baseline: **21/55 = 38 %** for the curated subset that the Python harness can execute. Tracked as F-3. |
