@@ -136,13 +136,11 @@ steps:
     params:
       duration: "5s"
 
-  - name: Reconnect and verify failsafe limit active
-    action: connect
-    params:
-      insecure: true
-
-  - name: Verify effective limit equals failsafe limit
-    action: read
+  # F-37: observe effective via suite TEST zone BEFORE reconnect; per
+  # failsafe-timing.md §3.1 a reconnect clears FAILSAFE and re-resolves
+  # commanded limits. See TC-CTRL-009 for the same pattern.
+  - name: Verify effective limit equals failsafe limit (via suite zone)
+    action: read_via_suite
     params:
       endpoint: 1
       feature: EnergyControl
@@ -150,6 +148,11 @@ steps:
     expect:
       read_success: true
       value_equals: failsafe_limit
+
+  - name: Reconnect (clears FAILSAFE per spec §3.1)
+    action: connect
+    params:
+      insecure: true
 
 postconditions:
   - failsafe_limit_applied: true
@@ -240,10 +243,16 @@ steps:
     params:
       duration: "5s"
 
-  - name: Attempt reconnect with invalid cert (should fail)
+  # F-37: switched from `invalid_cert: true` (unrecognized YAML hint --
+  # the runner ignored the flag and the connect succeeded normally,
+  # making the assertion `connection_established: false` always fail)
+  # to `use_wrong_zone_cert: true`, which the runner translates to a
+  # cert signed by a different zone CA so TLS actually rejects the
+  # handshake.
+  - name: Attempt reconnect with wrong-zone cert (should fail TLS)
     action: connect
     params:
-      invalid_cert: true
+      use_wrong_zone_cert: true
     expect:
       connection_established: false
 
@@ -254,7 +263,12 @@ steps:
     expect:
       connection_established: true
 
-  - name: Verify was still in FAILSAFE until valid reconnect
+  # F-37: per failsafe-timing.md §3.1, a valid auth-zone reconnect
+  # clears FAILSAFE and returns the device to CONTROLLED. The failed
+  # wrong-zone-cert attempt did not clear FAILSAFE -- only the valid
+  # reconnect at step 4 did. This step verifies that observable
+  # transition.
+  - name: Verify FAILSAFE cleared on valid reconnect (CONTROLLED)
     action: read
     params:
       endpoint: 1
@@ -262,7 +276,7 @@ steps:
       attribute: controlState
     expect:
       read_success: true
-      value: 0x01                  # Now CONTROLLED after valid reconnect
+      value: 0x01                  # CONTROLLED after valid reconnect
 
 postconditions:
   - failsafe_persists_until_valid: true
@@ -585,21 +599,23 @@ steps:
       method: tcp_rst
 
   - name: Wait within detection budget
-    # Spec §1.3 requires detection within 1s. We wait less than that and
-    # then reconnect to read controlState.
+    # Spec §1.3 requires detection within 1s. We sit for less than that
+    # and then read controlState via the suite TEST zone -- if FAILSAFE
+    # is observed, the device detected the RST inside the 1s budget.
     action: wait
     params:
       duration: "750ms"
 
-  - name: Reconnect
-    action: connect
-    params:
-      auto_reconnect: true
-    expect:
-      connection_established: true
-
-  - name: Verify FAILSAFE entered (proves the device detected the RST)
-    action: read
+  # F-37: read controlState via the suite TEST zone control channel
+  # WITHOUT reconnecting the auth zone. Per failsafe-timing.md §3.1, an
+  # auth-zone reconnect would clear FAILSAFE, masking whether the device
+  # detected the RST. The suite TEST zone is excluded from authority
+  # resolution and FAILSAFE bookkeeping (DEC-060), so it can observe
+  # device-wide state without altering it. Pre-F-37 (F-36-C2) this used
+  # `connect auto_reconnect` + `read`, which only worked because reconnect
+  # didn't yet clear FAILSAFE.
+  - name: Verify FAILSAFE entered (via suite zone, proves device detected the RST)
+    action: read_via_suite
     params:
       endpoint: 1
       feature: EnergyControl
@@ -607,6 +623,13 @@ steps:
     expect:
       read_success: true
       value: 0x03                  # FAILSAFE
+
+  - name: Reconnect for clean teardown (clears FAILSAFE per spec §3.1)
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
 
 postconditions:
   - immediate_detection: true
