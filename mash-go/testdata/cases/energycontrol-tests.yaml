@@ -492,13 +492,15 @@ steps:
     params:
       duration: "5s"
 
-  - name: Reconnect and verify failsafe limit active
-    action: connect
-    params:
-      insecure: true
-
-  - name: Verify effective limit is failsafe limit
-    action: read
+  # F-37: read effective limit via the suite TEST zone control channel
+  # BEFORE any reconnect. Per failsafe-timing.md §3.1, an authoritative-zone
+  # reconnect clears FAILSAFE and re-resolves to the commanded limit, so the
+  # earlier "reconnect insecure then read effective" pattern no longer
+  # observes the failsafe value. The suite TEST zone is excluded from
+  # authority resolution (DEC-060) and from FAILSAFE entry/exit accounting,
+  # so it can observe device-wide state without altering it.
+  - name: Verify effective limit is failsafe limit (via suite zone)
+    action: read_via_suite
     params:
       endpoint: 1
       feature: EnergyControl
@@ -506,6 +508,14 @@ steps:
     expect:
       read_success: true
       value_equals: failsafe_limit
+
+  # Reconnect for clean test teardown and to keep
+  # testCaseNeedsIsolatedCommissionedSession routing the test through a
+  # fresh LOCAL auth zone (the predicate matches on action: connect).
+  - name: Reconnect (clears FAILSAFE per spec §3.1)
+    action: connect
+    params:
+      insecure: true
 
 postconditions:
   - failsafe_limits_active: true
