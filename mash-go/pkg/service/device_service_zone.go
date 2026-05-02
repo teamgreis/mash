@@ -142,25 +142,32 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 
 	s.debugLog("handleOperationalConnection: zone reconnected", "zoneID", targetZoneID)
 
-	// F-32/F-34: spec §3.1 says operational reconnect should clear FAILSAFE
-	// (return to CONTROLLED). The corpus has tests on both sides of this:
-	//   * TC-FAIL-003/004 + TC-INFLIGHT-002: assert reconnect clears FAILSAFE
-	//   * TC-CTRL-009, TC-FAIL-002, TC-FI-007, TC-STATE-003/015: assert
-	//     FAILSAFE persists after the post-disconnect reconnect (because
-	//     they only reconnect to perform a state-read, then assert the
-	//     pre-reconnect FAILSAFE state).
-	// The two YAML flags `auto_reconnect: true` and `insecure: true` are
-	// runner-level synonyms after commissioning — both go through
-	// operationalTLSConfig() and present the controller cert; the device's
-	// listener uses tls.RequireAndVerifyClientCert, so VerifiedChains is
-	// always populated. There is no wire-level signal that distinguishes
-	// the two cases. F-34 confirmed this empirically: enabling
-	// unconditional exitFailsafe lifts 3 tests but regresses 5.
-	// Net -2, so we keep F-32's choice (don't clear) and document the
-	// divergence; lifting the 3 spec-aligned tests requires either a
-	// runner-side wire-level marker (out of scope) or rewriting the 5
-	// corpus tests to verify FAILSAFE state through subscriptions /
-	// two-zone setups instead of post-reconnect reads.
+	// F-37: per failsafe-timing.md §3.1, an authoritative-zone reconnect
+	// before failsafeDuration expires returns the device to CONTROLLED and
+	// cancels the countdown. TEST zones are observers (DEC-060) and do not
+	// participate in FAILSAFE entry/exit accounting (F-32: only auth-zone
+	// disconnects can drive entry), so a TEST reconnect must not clear
+	// FAILSAFE either.
+	//
+	// The five corpus tests that previously asserted FAILSAFE persisted
+	// post-reconnect (TC-CTRL-009, TC-FAIL-002, TC-FI-007, TC-STATE-003,
+	// TC-STATE-015) were rewritten in F-37 to read FAILSAFE state via the
+	// suite TEST zone (`read_via_suite`) before any reconnect, so the
+	// reconnect-clears-FAILSAFE behavior is now spec-conformant end-to-end
+	// and lifts TC-FAIL-003, TC-FAIL-004, TC-INFLIGHT-002 without regressing
+	// the rewritten five. (See sessions F-32/F-34 memory for the empirical
+	// trade-off the prior comment block recorded.)
+	if s.failsafeActive {
+		s.mu.RLock()
+		isAuth := false
+		if cz, ok := s.connectedZones[targetZoneID]; ok && cz.Type != cert.ZoneTypeTest {
+			isAuth = true
+		}
+		s.mu.RUnlock()
+		if isAuth {
+			s.exitFailsafe(targetZoneID)
+		}
+	}
 
 	// Create framed connection wrapper for operational messaging
 	framedConn := newFramedConnection(conn)

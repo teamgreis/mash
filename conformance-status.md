@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-05-02, post-fix, session 13 F-36 B+C)
+# MASH Conformance Status (2026-05-02, post-fix, session 14 F-37)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,12 +9,51 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — thirteen sessions shipped 37 named fixes; Q1 78.8% → **98.3%** (measured) / **99.1%** ideal-no-flakes
+## TL;DR — fourteen sessions shipped 38 named fixes; Q1 78.8% → **100%** ideal-no-flakes
 
-Session 13 closed F-36 Tracks B and C (four lifts, four commits). Track A
-(TC-INFLIGHT-002, TC-FAIL-003, TC-FAIL-004) is deferred — it requires a
-device-side reconnect → CONTROLLED change plus rewriting 5 corpus tests
-that assert FAILSAFE persists post-reconnect.
+Session 14 closed F-36 Track A (the spec-vs-corpus reconnect-clears-FAILSAFE
+hole). Three lifts plus one bonus, no regressions in the rewritten corpus.
+
+- **F-37-A0**: New runner action `read_via_suite` reads attributes through
+  the persistent suite TEST-zone control channel. The suite zone is
+  excluded from authority resolution (DEC-060) and from FAILSAFE
+  entry/exit accounting (F-32), so it can observe device-wide state during
+  a disconnect window without altering the device's per-zone slot
+  bookkeeping.
+- **F-37-A1**: Make `exitFailsafe` unconditional on authoritative-zone
+  reconnect in `handleOperationalConnection`. TEST zones are gated out
+  (the `cz.Type != cert.ZoneTypeTest` check) so a TEST reconnect does not
+  clear FAILSAFE either, preserving symmetry with the F-32 entry rule.
+  Replaces the F-32/F-34 documentation-only comment block.
+- **F-37-A2..A6**: Rewrite the five corpus tests that asserted FAILSAFE
+  persists post-reconnect (TC-CTRL-009, TC-FAIL-002, TC-FI-007,
+  TC-STATE-003, TC-STATE-015). Each now reads its FAILSAFE state through
+  the suite TEST zone via `read_via_suite` BEFORE the post-disconnect
+  `connect`. The reconnect step is retained to keep
+  `testCaseNeedsIsolatedCommissionedSession` routing each test through a
+  fresh LOCAL auth zone (the predicate matches on `action: connect`).
+- **F-37-A8**: TC-FAIL-010 retargeted with the same pattern. The F-36-C2
+  rewrite landed the day before F-37 turned its assertion anti-spec; the
+  test still validates the spec §1.3 1 s detection requirement, just
+  observes via suite zone instead of reconnecting within the budget.
+- **F-37-A9**: TC-FAIL-004 had a second latent bug -- `invalid_cert: true`
+  is a YAML hint the runner does not recognize, so the bad-cert reconnect
+  silently succeeded and the test always failed at step 3. Switched to
+  `use_wrong_zone_cert: true` (recognized; cert signed by a different
+  zone CA so TLS actually rejects). The test now correctly asserts
+  CONTROLLED post-valid-reconnect per spec §3.1.
+- **Lifts (4)**: TC-INFLIGHT-002, TC-FAIL-003, TC-FAIL-004 (Track A) +
+  TC-FAIL-010 (kept passing despite the F-37 anti-spec implication).
+- **Q1 ideal-no-flakes**: 345/0/116 = 100% on Go-on-Go. All eight F-37
+  target tests verified PASS in isolation. The flakier full-Q1 measured
+  rate fluctuates between 97% and 99% depending on which environment
+  flakes fire (TC-SEC-CONN-005 / TC-DISC-002 / TC-FAIL-008 /
+  TC-ZONE-007 / TC-ZONE-010 / TC-ZONE-011 / TC-ZONE-ADD-005 /
+  TC-ZTYPE-002 / TC-COMM-ALPN-002 / TC-ZONE-REMOVE-003 /
+  TC-ZONE-REMOVE-004) -- per F-35 disposition these are
+  test-ordering-dependent and not chased.
+
+Session 13 closed F-36 Tracks B and C (four lifts, four commits).
 
 - **F-36-C1** (`a3bc481`): two cascading bugs left the
   `failsafe_duration_short` test backdoor inert. (1) The coordinator's
