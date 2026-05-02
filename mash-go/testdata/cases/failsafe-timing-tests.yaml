@@ -574,8 +574,11 @@ tags:
 id: TC-FAIL-010
 name: Clean Disconnect Detected Immediately
 description: |
-  Verifies that a clean disconnect (TCP RST) is detected within 1 second,
-  without waiting for the full keep-alive timeout.
+  Verifies that a clean disconnect (TCP RST) is detected within 1 second
+  per spec §1.3, without waiting for the full keep-alive timeout.
+  Detection is observed by reconnecting within the spec's 1s detection
+  budget and reading controlState: if the device detected the loss,
+  state transitioned to FAILSAFE before the reconnect.
 
 pics_requirements:
   - MASH.S.CTRL
@@ -585,21 +588,18 @@ preconditions:
   - control_state: CONTROLLED
 
 steps:
-  - name: Record time
-    action: record_time
-    params:
-      name: disconnect_time
-
   - name: Send TCP RST to device
     action: disconnect
     params:
       graceful: false
       method: tcp_rst
 
-  - name: Wait briefly for detection
+  - name: Wait within detection budget
+    # Spec §1.3 requires detection within 1s. We wait less than that and
+    # then reconnect to read controlState.
     action: wait
     params:
-      duration: "3s"
+      duration: "750ms"
 
   - name: Reconnect
     action: connect
@@ -608,13 +608,15 @@ steps:
     expect:
       connection_established: true
 
-  - name: Verify FAILSAFE entered quickly
-    action: verify_timing
+  - name: Verify FAILSAFE entered (proves the device detected the RST)
+    action: read
     params:
-      reference: disconnect_time
-      max_duration: "2s"          # Should be within 1-2 seconds
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
     expect:
-      within_limit: true
+      read_success: true
+      value: 0x03                  # FAILSAFE
 
 postconditions:
   - immediate_detection: true
