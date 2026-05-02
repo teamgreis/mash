@@ -260,23 +260,28 @@ func (s *DeviceService) ExitCommissioningMode() error {
 	s.disconnectReentryBlockedUntil = time.Now().Add(s.disconnectReentryHoldoff)
 	s.mu.Unlock()
 
-	// Close the commissioning ALPN gate. The TCP listener stays up for the
-	// lifetime of the service: the ALPN gate (commissioningOpen=false) and
-	// the per-handshake getConfigForClient already reject any traffic that
-	// would be illegal in the current state, so a kernel-level listener
-	// teardown adds no security and would create a TCP-vs-TLS observable
-	// asymmetry that breaks back-to-back tests when the harness re-dials
-	// between commissioning attempts.
-	s.commissioningOpen.Store(false)
-
-	// Stop mDNS commissioning advertising outside the lock because mDNS
-	// operations can take >1s on macOS and would block new connections.
+	// F-35: withdraw mDNS BEFORE closing the TLS gate. This is the symmetric
+	// inverse of EnterCommissioningMode (gate-up, then advertise) and makes
+	// mDNS visibility a reliable signal of TLS-acceptance for clients. The
+	// previous gate-first ordering created a ~1s window on macOS (where mDNS
+	// withdrawal is slow) during which mDNS still showed "commissionable"
+	// but getConfigForClient already returned "commissioning not active",
+	// surfacing as `remote error: tls: internal error` to the runner.
 	if dm != nil {
 		if err := dm.ExitCommissioningMode(); err != nil {
 			s.debugLog("ExitCommissioningMode: failed", "error", err)
 			return err
 		}
 	}
+
+	// Close the commissioning ALPN gate after mDNS is gone. The TCP listener
+	// stays up for the lifetime of the service: the ALPN gate
+	// (commissioningOpen=false) and the per-handshake getConfigForClient
+	// already reject any traffic that would be illegal in the current state,
+	// so a kernel-level listener teardown adds no security and would create a
+	// TCP-vs-TLS observable asymmetry that breaks back-to-back tests when
+	// the harness re-dials between commissioning attempts.
+	s.commissioningOpen.Store(false)
 
 	s.debugLog("ExitCommissioningMode: success")
 	s.emitEvent(Event{Type: EventCommissioningClosed, Reason: "commissioned"})
@@ -305,24 +310,33 @@ func (s *DeviceService) exitCommissioningForEpoch(epoch uint64) error {
 
 	s.ResetPASETracker()
 
-	// Close the gate under the same lock that verified the epoch,
-	// so no concurrent EnterCommissioningMode can slip in between.
-	s.commissioningOpen.Store(false)
 	s.disconnectReentryBlockedUntil = time.Now().Add(s.disconnectReentryHoldoff)
-
 	dm := s.discoveryManager
 	s.mu.Unlock()
 
-	// Listener stays up for the service lifetime -- see ExitCommissioningMode
-	// above for the rationale. The ALPN gate (commissioningOpen=false) plus
-	// getConfigForClient enforce policy for accepted connections.
-
+	// F-35: withdraw mDNS first, then re-check the epoch and close the gate.
+	// Same rationale as ExitCommissioningMode above: mDNS visibility must
+	// imply TLS-acceptance for clients. The epoch is checked twice — once
+	// before mDNS withdrawal (under lock above) and once after, so a
+	// concurrent EnterCommissioningMode that bumps the epoch during the
+	// slow mDNS operation will cause us to skip the gate close and leave
+	// the new window open.
 	if dm != nil {
 		if err := dm.ExitCommissioningMode(); err != nil {
 			s.debugLog("ExitCommissioningMode: failed", "error", err)
 			return err
 		}
 	}
+
+	s.mu.Lock()
+	if s.commissioningEpoch.Load() != epoch {
+		s.debugLog("exitCommissioningForEpoch: skipped close-gate (re-entered during mDNS)",
+			"capturedEpoch", epoch, "currentEpoch", s.commissioningEpoch.Load())
+		s.mu.Unlock()
+		return nil
+	}
+	s.commissioningOpen.Store(false)
+	s.mu.Unlock()
 
 	s.debugLog("ExitCommissioningMode: success")
 	s.emitEvent(Event{Type: EventCommissioningClosed, Reason: "commissioned"})
