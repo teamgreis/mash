@@ -160,15 +160,15 @@ steps:
     params:
       duration: "5s"
 
-  - name: Reconnect and verify FAILSAFE state
-    action: connect
-    params:
-      insecure: true
-    expect:
-      connection_established: true
-
-  - name: Read control state
-    action: read
+  # F-37: read controlState via the suite TEST zone control channel
+  # BEFORE any reconnect. Per failsafe-timing.md §3.1 a reconnect by the
+  # auth zone clears FAILSAFE and returns the device to CONTROLLED, so
+  # the earlier post-reconnect read no longer observes the FAILSAFE
+  # value. The suite TEST zone is excluded from authority resolution
+  # and FAILSAFE bookkeeping (DEC-060), so it can observe device-wide
+  # state without altering it.
+  - name: Read control state (via suite zone)
+    action: read_via_suite
     params:
       endpoint: 1
       feature: EnergyControl
@@ -176,6 +176,16 @@ steps:
     expect:
       read_success: true
       value: 0x03              # FAILSAFE
+
+  # Reconnect is retained so testCaseNeedsIsolatedCommissionedSession
+  # routes this test through a fresh LOCAL auth zone (the predicate
+  # matches on action: connect).
+  - name: Reconnect (clears FAILSAFE per spec §3.1)
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
 
 postconditions:
   - control_state: FAILSAFE
@@ -946,18 +956,20 @@ steps:
     params:
       graceful: false
 
-  - name: Wait and reconnect
+  - name: Wait for failsafe detection
     action: wait
     params:
       duration: "5s"
 
-  - name: Reconnect
-    action: connect
-    params:
-      insecure: true
-
-  - name: Verify FAILSAFE state
-    action: read
+  # F-37: read controlState via the suite TEST zone control channel
+  # BEFORE any reconnect. Per failsafe-timing.md §3.1 a reconnect by an
+  # auth zone clears FAILSAFE and returns the device to CONTROLLED, so
+  # the previous post-reconnect read no longer observes FAILSAFE. The
+  # suite TEST zone is excluded from authority resolution and FAILSAFE
+  # bookkeeping (DEC-060), so it can observe device-wide state without
+  # altering it.
+  - name: Verify FAILSAFE state (via suite zone)
+    action: read_via_suite
     params:
       endpoint: 1
       feature: EnergyControl
@@ -965,6 +977,11 @@ steps:
     expect:
       read_success: true
       value: 0x03              # FAILSAFE
+
+  - name: Reconnect (clears FAILSAFE per spec §3.1)
+    action: connect
+    params:
+      insecure: true
 
 postconditions:
   - control_state: FAILSAFE
