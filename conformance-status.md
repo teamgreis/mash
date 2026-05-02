@@ -1,4 +1,4 @@
-# MASH Conformance Status (2026-05-02, post-fix, session 12 batch 16)
+# MASH Conformance Status (2026-05-02, post-fix, session 13 F-36 B+C)
 
 This file is a triage snapshot of where each implementation stands against the
 shared YAML conformance corpus in `mash-go/testdata/cases/` (494 unique IDs;
@@ -9,7 +9,47 @@ The matrix has four quadrants — `{Go runner, Python runner} × {Go device,
 Python device}`. The diagonals (same-language ends) measure self-conformance;
 the off-diagonals are the real cross-stack interop signal.
 
-## TL;DR — twelve sessions shipped 33 named fixes; Q1 78.8% → **98.0%** (best measured Q1 to date)
+## TL;DR — thirteen sessions shipped 37 named fixes; Q1 78.8% → **98.3%** (measured) / **99.1%** ideal-no-flakes
+
+Session 13 closed F-36 Tracks B and C (four lifts, four commits). Track A
+(TC-INFLIGHT-002, TC-FAIL-003, TC-FAIL-004) is deferred — it requires a
+device-side reconnect → CONTROLLED change plus rewriting 5 corpus tests
+that assert FAILSAFE persists post-reconnect.
+
+- **F-36-C1** (`a3bc481`): two cascading bugs left the
+  `failsafe_duration_short` test backdoor inert. (1) The coordinator's
+  `hasPrecondition()` matcher was bool-only, so YAML payloads like
+  `failsafe_duration_short: 5` (int) silently fell through. (2) The
+  `TriggerSetFailsafeDuration` handler called `SetAttributeInternal`,
+  which still range-checks against the DEC-070 floor of 7200 s — so 5/60 s
+  test values failed the range check, the error was discarded, and the
+  attribute kept its 7200 s default. Fix: typed-payload helper + a
+  service-level `failsafeDurationOverride` cleared on `TriggerResetTestState`.
+- **F-36-C2** (`1824ccd`): TC-FAIL-010 corpus rewrite. The previous test
+  measured elapsed wall-clock from `record_time` (before disconnect)
+  through a 3 s wait + reconnect, then asserted `max_duration: 2s` —
+  unreachable by construction. Rewrote to actually exercise spec §1.3:
+  reconnect within the 1 s detection budget, read `controlState`, and
+  if it transitioned to FAILSAFE the device detected the RST in time.
+- **F-36-C3** (`90db3fc`): TC-GPL-S01-002 was using
+  `measurement_subscription_active: true` as a precondition, but that key
+  maps to `precondLevelNone` with no setup handler — i.e. it was a
+  documentation-only label. The test ran with no subscription and
+  `wait_report` timed out. Mirrored TC-GPL-S01-001's explicit `subscribe`
+  step.
+- **F-36-B** (`77befca`): `failsafe-timing.md §5.2` had drifted from both
+  the corpus (TC-FAIL-008) and the F-32 device implementation. Spec said
+  "any single lost zone takes the device into FAILSAFE"; both
+  implementations had already converged on the safer "device-wide
+  FAILSAFE only when no other authoritative zone remains." Codified as
+  DEC-090 and rewrote §5.2 to scope the FAILSAFE precedence to
+  authoritative zones. TC-FAIL-008 also simplified — its secondary
+  `effectiveConsumptionLimit` assertion was internally inconsistent with
+  the test's own `controlState=CONTROLLED` claim.
+- **Q1 measured: 339/6/116 = 98.3%.** The 6 fails: 3 Track A (untouched)
+  + 3 environment-flaky (TC-SEC-CONN-005, TC-DISC-002,
+  TC-TESTCTRL-ZONE-001 — all pass 3/3 in isolation post-fix; none
+  touch code F-36-B/C changed). Ideal-no-flakes: 342/3/116 = 99.1%.
 
 Session 12 shipped two batches:
 - **F-34**: empirically rule out the cert-gated `exitFailsafe` proposal
@@ -21,9 +61,9 @@ Session 12 shipped two batches:
   race window on macOS where mDNS still advertised "commissionable" while
   `getConfigForClient` already returned "commissioning not active",
   surfacing as `tls: internal error` to the runner. **Q1: 338/7/116 =
-  98.0%** (best measured). The 7 remaining fails are exactly the
+  98.0%** (post-F-35 baseline). The 7 remaining fails were exactly the
   F-32+F-33 long-tail (TC-INFLIGHT-002 + TC-FAIL-003/004/005/008/010 +
-  TC-GPL-S01-002).
+  TC-GPL-S01-002); session 13 lifted 4 of those 7 (Tracks B+C).
 - Q1 invocation: must include `-exclude-tags env:multi-device` for
   single-host runs (per `test-stabilization-plan.md`). The 7 mDNS asserts
   that fail without this flag were already correctly tagged.
