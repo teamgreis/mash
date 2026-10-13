@@ -30,6 +30,7 @@ from typing import Any
 
 import cbor2
 
+from mash_py.wire._mutable import to_mutable
 from mash_py.wire._strict import strict_validate
 from mash_py.wire.operations import (
     NOTIFICATION_MESSAGE_ID,
@@ -65,9 +66,14 @@ def marshal(value: Any) -> bytes:
 
 
 def unmarshal(data: bytes) -> Any:
-    """Decode ``data`` after running the strict validation pass."""
+    """Decode ``data`` after running the strict validation pass.
+
+    The result is normalised through :func:`to_mutable` so callers always see
+    plain ``dict`` / ``list`` / ``set`` values regardless of the installed
+    cbor2 version (6.x returns immutable containers for tag-wrapped values).
+    """
     strict_validate(data)
-    return cbor2.loads(data)
+    return to_mutable(cbor2.loads(data))
 
 
 # ---------------------------------------------------------------------------

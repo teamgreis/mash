@@ -43,6 +43,7 @@ from mash_py.commissioning.spake2plus import (
     CONTROLLER_IDENTITY,
     POINT_SIZE,
 )
+from mash_py.wire._mutable import to_mutable
 from mash_py.wire._strict import strict_validate
 
 # ---------------------------------------------------------------------------
@@ -443,7 +444,7 @@ def decode(data: bytes) -> PASEMessage:
     """
     strict_validate(data)
     try:
-        obj = cbor2.loads(data)
+        obj = to_mutable(cbor2.loads(data))
     except cbor2.CBORDecodeError as exc:
         raise InvalidMessageError(f"CBOR decode failed: {exc}") from exc
 
@@ -602,7 +603,7 @@ def peek_msg_type(data: bytes) -> int:
     with an integer key 1.
     """
     try:
-        obj = cbor2.loads(data)
+        obj = to_mutable(cbor2.loads(data))
     except cbor2.CBORDecodeError as exc:
         raise InvalidMessageError(f"CBOR decode failed: {exc}") from exc
     if not isinstance(obj, dict):

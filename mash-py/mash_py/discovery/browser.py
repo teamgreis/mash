@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -164,11 +164,16 @@ class Browser:
     # Streaming browse APIs
     # ------------------------------------------------------------------
 
-    def browse_commissionable(self) -> AsyncIterator[CommissionableEvent]:
+    def browse_commissionable(self) -> AsyncGenerator[CommissionableEvent]:
         """Yield commissionable-device events as they arrive.
 
         The iterator stops when the consumer breaks out, when the underlying
         :class:`Browser` is closed, or when the surrounding task is cancelled.
+
+        Each call binds a fresh ``AsyncServiceBrowser`` to its own queue, so a
+        new stream starts with an empty cache: a consumer that wants to observe
+        both the ADDED and the REMOVED of one instance MUST keep consuming the
+        same stream rather than opening a second one.
         """
         return self._browse_stream(
             SERVICE_TYPE_COMMISSIONABLE,
@@ -176,7 +181,7 @@ class Browser:
             CommissionableEvent,
         )
 
-    def browse_operational(self) -> AsyncIterator[OperationalEvent]:
+    def browse_operational(self) -> AsyncGenerator[OperationalEvent]:
         """Yield operational-device events as they arrive."""
         return self._browse_stream(
             SERVICE_TYPE_OPERATIONAL,
@@ -246,7 +251,7 @@ class Browser:
         service_type: str,
         resolver: Any,
         event_cls: Any,
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncGenerator[Any]:
         """Adapt the push-based zeroconf browser to a pull-based async iterator.
 
         The handler closure pushes raw ``(state_change, name)`` tuples onto a

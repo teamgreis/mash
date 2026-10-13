@@ -794,7 +794,14 @@ To prevent information leakage, authentication errors are consolidated:
 
 **Removed codes:** InvalidPublicKey (merged into AUTH_FAILED), ConfirmFailed (merged into AUTH_FAILED)
 
-**Timing requirement:** Device MUST add random delay (100-500ms) to all error responses to prevent timing-based oracle attacks.
+**Timing requirement.** Device MUST ensure that all error responses on this device take wall-clock time indistinguishable to a network observer, regardless of which internal check failed. Conformant implementations include:
+
+- **Constant-time minimum-duration floor (recommended).** Pad every error path to a fixed duration ≥ the SPAKE2+ compute upper bound for this device class (see §5.3). Variance is itself a side channel; a deterministic floor is the simplest way to eliminate it.
+- **Bounded random delay.** Add a uniform random delay in `[100, 500]` ms to every error response. Adequate only when the device's SPAKE2+ compute time is below the maximum delay; on constrained devices (§5.3 ESP32 class, 2-10 s) bounded random delay does not eliminate the timing oracle.
+
+Implementations MUST also use constant-time comparison primitives for all secret-equality checks (e.g. `hmac.compare_digest` in Python, `subtle.ConstantTimeCompare` in Go); see §2.5 *Constant-time MAC comparison*.
+
+> **Rationale.** A random delay only helps when it dominates the *slowest* error path. On an ESP32-class device (§5.3 lists 2-5 s, max 10 s) the SPAKE2+ compute path exceeds the 100-500 ms window by two orders of magnitude, so the attacker can still distinguish an early-bail check from a MAC mismatch. A fixed floor at or above the device-class upper bound makes every error response take the same observable time. See DEC-047 for the consolidated error codes this requirement applies to.
 
 ---
 

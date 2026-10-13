@@ -43,6 +43,7 @@ from typing import Final, Union
 
 import cbor2
 
+from mash_py.wire._mutable import to_mutable
 from mash_py.wire._strict import strict_validate
 
 
@@ -295,7 +296,7 @@ def decode(data: bytes) -> RenewalMessage:
     """
     strict_validate(data)
     try:
-        obj = cbor2.loads(data)
+        obj = to_mutable(cbor2.loads(data))
     except cbor2.CBORDecodeError as exc:
         raise InvalidRenewalMessageError(f"CBOR decode failed: {exc}") from exc
 
@@ -392,7 +393,7 @@ def peek_msg_type(data: bytes) -> int:
     CBOR map with an integer key 1.
     """
     try:
-        obj = cbor2.loads(data)
+        obj = to_mutable(cbor2.loads(data))
     except cbor2.CBORDecodeError as exc:
         raise InvalidRenewalMessageError(f"CBOR decode failed: {exc}") from exc
     if not isinstance(obj, dict):
@@ -418,7 +419,7 @@ def peek_is_renewal_frame(data: bytes) -> bool:
     this as a routing predicate, not a validator.
     """
     try:
-        obj = cbor2.loads(data)
+        obj = to_mutable(cbor2.loads(data))
     except (cbor2.CBORDecodeError, EOFError, ValueError):
         return False
     if not isinstance(obj, dict):

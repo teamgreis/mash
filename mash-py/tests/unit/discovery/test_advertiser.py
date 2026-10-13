@@ -171,26 +171,37 @@ async def test_loopback_browser_finds_operational_record():
     assert svc.port == 18444
 
 
-async def test_unpublish_commissionable_emits_goodbye():
-    """A REMOVED event must arrive after ``unpublish_commissionable``."""
+async def test_unpublish_commissionable_emits_goodbye() -> None:
+    """A REMOVED event must arrive after ``unpublish_commissionable``.
+
+    The whole test consumes **one** browse stream. Each call to
+    ``browse_commissionable()`` binds a fresh ``AsyncServiceBrowser`` to its own
+    queue (see the module docstring), so a stream opened *after* the unpublish
+    starts with an empty cache and can never observe a goodbye that was already
+    delivered — it would time out even though the implementation is correct.
+    """
     target = "MASH-1357"  # corresponds to discriminator 1357
     async with Browser() as browser:
-
-        async def wait_for_state(want: BrowseEventType) -> None:
-            async for ev in browser.browse_commissionable():
-                if ev.event == want and ev.instance_name == target:
-                    return
-
         async with Advertiser() as adv:
             await adv.publish_commissionable(_commissionable(1357))
-            # Wait until the browser has seen the ADDED event before we
-            # unpublish, otherwise REMOVED races the cache state.
-            await asyncio.wait_for(wait_for_state(BrowseEventType.ADDED), timeout=5.0)
 
-            await adv.unpublish_commissionable()
-            await asyncio.wait_for(
-                wait_for_state(BrowseEventType.REMOVED), timeout=5.0
-            )
+            stream = browser.browse_commissionable()
+            try:
+                # Wait until the browser has seen the ADDED event before we
+                # unpublish, otherwise REMOVED races the cache state.
+                while True:
+                    ev = await asyncio.wait_for(stream.__anext__(), timeout=5.0)
+                    if ev.event == BrowseEventType.ADDED and ev.instance_name == target:
+                        break
+
+                await adv.unpublish_commissionable()
+
+                while True:
+                    ev = await asyncio.wait_for(stream.__anext__(), timeout=5.0)
+                    if ev.event == BrowseEventType.REMOVED and ev.instance_name == target:
+                        return
+            finally:
+                await stream.aclose()
 
 
 # ---------------------------------------------------------------------------

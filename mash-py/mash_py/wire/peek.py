@@ -31,6 +31,7 @@ from typing import Any
 
 import cbor2
 
+from mash_py.wire._mutable import to_mutable
 from mash_py.wire._strict import strict_validate
 from mash_py.wire.codec import CONTROL_MESSAGE_TAG
 from mash_py.wire.operations import NOTIFICATION_MESSAGE_ID, MessageType
@@ -52,7 +53,7 @@ def peek_message_type(data: bytes) -> MessageType:
         return MessageType.CONTROL
 
     strict_validate(data)
-    raw = cbor2.loads(data)
+    raw = to_mutable(cbor2.loads(data))
 
     if not isinstance(raw, dict):
         raise ValueError("CBOR message must be a map at the top level")

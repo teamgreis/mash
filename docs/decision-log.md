@@ -65,7 +65,7 @@ When the docs cite a decision inline (e.g., "per DEC-077") and you want a quick 
 - [DEC-061: Message-Gated Commissioning Locking](#dec-061-message-gated-commissioning-locking)
 - [DEC-067: Single-Port ALPN-Based Commissioning Routing and Stable Certificate](#dec-067-single-port-alpn-based-commissioning-routing-and-stable-certificate)
 - [DEC-068: Invalid Passcode Validation](#dec-068-invalid-passcode-validation)
-- [DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2)](#dec-084-spake2-algorithm-specification-rfc-9383--pbkdf2)
+- [DEC-084: SPAKE2+ Algorithm Specification (RFC 9383 + PBKDF2)](#dec-084-spake2-algorithm-specification-rfc-9383-pbkdf2)
 - [DEC-076: Retain In-Session Certificate Renewal](#dec-076-retain-in-session-certificate-renewal)
 - [DEC-077: Shorten Renewal Window to 7 Days](#dec-077-shorten-renewal-window-to-7-days)
 - [DEC-078: Commissionable mDNS TXT Schema (canonical)](#dec-078-commissionable-mdns-txt-schema-canonical)

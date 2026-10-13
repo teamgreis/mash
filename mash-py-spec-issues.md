@@ -787,7 +787,7 @@ The example payload in device-info.md is therefore wrong on **two** axes simulta
 
 ### Issue #14 — PASE error-response timing protection: §6.5 prescribes random delay; constant-time floor is what implementations actually want
 
-**Status:** Open
+**Status:** ✅ Resolved (2026-05-02) — option B applied; spec §6.5 now states the wire-observable property and lists both conformant mitigations.
 **Surfaced in:** Phase 14 — drafting `mash_py.commissioning.PASEServer` (2026-04-27)
 **Blocks:** Nothing on the wire; code-side mitigation that mash-py and mash-go can each implement without coordinating, but the spec text needs latitude so any future port (C/Zig/Rust) doesn't have to relitigate the choice.
 
@@ -854,13 +854,15 @@ C. **Replace §6.5 with "fixed floor only."** Mandates the constant-time floor a
 - File this issue *now* so the spec catches up to what both implementations actually do; don't gate Phase 14 on the spec PR landing.
 
 **Affected files.**
-- `docs/testing/behavior/commissioning-pase.md §6.5` — spec edit pending.
+- `docs/testing/behavior/commissioning-pase.md §6.5` — rewritten per option B (2026-05-02).
 - `mash-py/mash_py/commissioning/pase_server.py` — implements floor; cites this issue.
-- `mash-go/pkg/commissioning/session.go` — already correct under proposed §6.5.
+- `mash-go/pkg/commissioning/session.go` — already correct under §6.5.
 
 **Related.** DEC-047 (consolidated error codes, source of §6.5); §2.5 (constant-time MAC comparison — same family of mitigation); §5.3 (device-class compute bounds).
 
-**Phase 22 update (2026-04-28).** No conformance test exercises the timing-oracle scenario (no negative-timing case in the YAML corpus), so Phase 22 did not surface this issue. Both reference impls continue to ship the constant-time floor; spec text remains the only loose end.
+**Phase 22 update (2026-04-28).** No conformance test exercises the timing-oracle scenario (no negative-timing case in the YAML corpus), so Phase 22 did not surface this issue. Both reference impls continue to ship the constant-time floor.
+
+**Resolution (2026-05-02).** Option B applied to `commissioning-pase.md §6.5`: the normative MUST is now the observable property ("all error responses MUST take wall-clock time indistinguishable to a network observer"), with the constant-time minimum-duration floor listed as the recommended conformant implementation and bounded random delay retained as a second option, scoped to device classes whose SPAKE2+ compute stays below the delay window. The constant-time-comparison requirement from §2.5 is restated so the mitigation is self-contained. No code change in either implementation: mash-go's 200 ms floor and mash-py's `error_delay_floor_s` (default 0.2 s) are both conformant as written.
 
 ---
 

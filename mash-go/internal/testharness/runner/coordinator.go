@@ -857,7 +857,12 @@ func testCaseNeedsControllerAuthority(tc *loader.TestCase) bool {
 func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
 	start := time.Now()
 	c.debugf("teardown:start %s", tc.ID)
-	defer c.debugf("teardown:end %s duration=%s", tc.ID, time.Since(start).Round(time.Millisecond))
+	// Capture the duration inside a closure: arguments to a deferred call are
+	// evaluated at defer time, so `defer c.debugf(..., time.Since(start))`
+	// would always log ~0s.
+	defer func() {
+		c.debugf("teardown:end %s duration=%s", tc.ID, time.Since(start).Round(time.Millisecond))
+	}()
 
 	suiteRemovedDuringTest := false
 	if sz := c.suite.ZoneID(); sz != "" && wasZoneRemovedInTest(state, sz) {
