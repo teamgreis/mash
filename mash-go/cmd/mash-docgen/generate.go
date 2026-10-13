@@ -611,7 +611,10 @@ func writeEndpointConformance(b *strings.Builder, epName string, m *DocModel) {
 
 	b.WriteString("## Feature Conformance\n\n")
 
-	for featureName, conf := range features {
+	// Sorted for deterministic output — Go map iteration order is random, and
+	// this lands verbatim in a generated page.
+	for _, featureName := range sortedKeys(features) {
+		conf := features[featureName]
 		fmt.Fprintf(b, "### %s\n\n", featureName)
 
 		if len(conf.Mandatory) > 0 {

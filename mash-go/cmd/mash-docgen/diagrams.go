@@ -59,7 +59,10 @@ func DeviceCompositionDiagram(epName string, m *DocModel) string {
 
 	if m.Conformance != nil {
 		if features, ok := m.Conformance.EndpointTypes[epName]; ok {
-			for featureName, conf := range features {
+			// Sorted for deterministic output — Go map iteration order is
+			// random, and this string lands verbatim in a generated page.
+			for _, featureName := range sortedKeys(features) {
+				conf := features[featureName]
 				fID := sanitizeMermaidID(featureName)
 				fmt.Fprintf(&b, "    %s[\"%s\"]\n", fID, featureName)
 				fmt.Fprintf(&b, "    %s --> %s\n", epID, fID)
@@ -84,8 +87,11 @@ func FeatureCrossRefDiagram(m *DocModel) string {
 
 	fmt.Fprintf(&b, "%smermaid\ngraph LR\n", mermaidFence)
 
-	// Collect all referenced features and their use cases
-	for featureName, ucNames := range m.FeatureUseCaseRefs {
+	// Collect all referenced features and their use cases. Sorted for
+	// deterministic output — Go map iteration order is random, and this
+	// string lands verbatim in a generated page.
+	for _, featureName := range sortedKeys(m.FeatureUseCaseRefs) {
+		ucNames := m.FeatureUseCaseRefs[featureName]
 		fID := sanitizeMermaidID("f_" + featureName)
 		fmt.Fprintf(&b, "    %s[\"%s\"]\n", fID, featureName)
 

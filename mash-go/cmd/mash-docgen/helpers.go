@@ -2,10 +2,23 @@ package main
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/mash-protocol/mash-go/internal/specparse"
 )
+
+// sortedKeys returns the keys of m in ascending lexicographic order.
+//
+// Generated documentation is a build artifact compared byte-for-byte by
+// `make docs-check`, so every map iteration that feeds a generated string
+// must go through this. Go randomises map iteration order, which otherwise
+// makes the generator non-deterministic: the same YAML input produces
+// different output across runs, and docs-check fails intermittently.
+func sortedKeys[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
+}
 
 // featureSlug converts "DeviceInfo" to "device-info".
 func featureSlug(name string) string {
